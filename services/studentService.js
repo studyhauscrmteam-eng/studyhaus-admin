@@ -144,10 +144,10 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
  * @returns {Promise<{uid, authEmail, loginCredentials}>}
  */
 /**
- * Remove a student's portal login: delete the stored credential values
- * ONLY (loginId / loginPassword / loginCredentials). The uid/authEmail
- * link, profile, payments, seat and documents stay untouched, so re-entering
- * the ID + password and Saving re-links the same Auth account.
+ * Remove a student's portal login completely: delete every login-related
+ * field (credentials, uid/authEmail link, retired flag). Profile, payments,
+ * seat and documents stay untouched. What the card shows afterwards is
+ * exactly what the doc holds: nothing.
  * Sign-in is refused for credential-less student docs by resolveUserRole.
  */
 export const clearPortalCredentials = async (studentId) => {
@@ -155,6 +155,8 @@ export const clearPortalCredentials = async (studentId) => {
     loginId: deleteField(),
     loginPassword: deleteField(),
     loginCredentials: deleteField(),
+    uid: deleteField(),
+    authEmail: deleteField(),
     loginRevoked: deleteField()
   });
 };

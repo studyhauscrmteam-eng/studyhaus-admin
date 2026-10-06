@@ -5,7 +5,7 @@ import { handleLogout } from "./auth/logout.js";
 import { initDashboardListeners } from "./services/dashboardService.js";
 import { initMembershipPlans } from "./services/membershipService.js";
 import { initAdmissionsUI } from "./services/admissionService.js?v=ui1";
-import { initStudentManagementUI } from "./services/studentProfile.js?v=ui3";
+import { initStudentManagementUI } from "./services/studentProfile.js?v=ui4";
 import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js?v=seat1";
 import { initPaymentAdminUI } from "./services/paymentAdminUI.js";
 import { initComplaintAdminUI } from "./services/complaintAdminUI.js?v=ui2";
