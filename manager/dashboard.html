@@ -1,0 +1,2335 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg" />
+  <title>Studyhaus — Reading Space CRM</title>
+  <meta name="description"
+    content="Premium management console for a single reading space: students, seats, memberships, payments, attendance and more." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="../style.css" />
+</head>
+
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-icon"
+          style="background: var(--primary); color: white; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <div style="font-weight: 700; font-size: 1.1rem; color: var(--text-primary); line-height: 1.2;">Studyhaus
+          </div>
+          <div style="font-size: 0.75rem; color:var(--text-muted); font-weight: 500;">Reading Space CRM</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <!-- Overview -->
+        <div class="nav-group">
+          <div class="nav-group-label">Overview</div>
+          <a class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+            </svg>
+            <span data-i18n="menu.dashboard" data-i18n="menu.dashboard">Dashboard</span>
+          </a>
+          <a class="nav-item" data-page="analytics" onclick="navigate('analytics')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            <span>Analytics</span>
+          </a>
+          <a class="nav-item" data-page="reports" onclick="navigate('reports')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            <span data-i18n="menu.reports" data-i18n="menu.reports">Reports</span>
+          </a>
+        </div>
+
+        <!-- Operations -->
+        <div class="nav-group">
+          <div class="nav-group-label">Operations</div>
+          <a class="nav-item" data-page="students" onclick="navigate('students')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span data-i18n="menu.students" data-i18n="menu.students">Students</span>
+          </a>
+          <a class="nav-item" data-page="seats" onclick="navigate('seats')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2" />
+              <path d="M6 20h12" />
+              <rect x="2" y="9" width="20" height="11" rx="2" />
+            </svg>
+            <span data-i18n="menu.seatMap" data-i18n="menu.seatMap">Seat Map</span>
+          </a>
+          <a class="nav-item" data-page="live-seat-map" onclick="navigate('live-seat-map')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="3" fill="currentColor" />
+              <line x1="12" y1="2" x2="12" y2="6" />
+              <line x1="12" y1="18" x2="12" y2="22" />
+              <line x1="2" y1="12" x2="6" y2="12" />
+              <line x1="18" y1="12" x2="22" y2="12" />
+            </svg>
+            <span data-i18n="menu.liveSeatMap">Live Seat Map</span>
+          </a>
+
+          <a class="nav-item" data-page="visitors" onclick="navigate('visitors')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="8.5" cy="7" r="4" />
+              <polyline points="17 11 19 13 23 9" />
+            </svg>
+            <span data-i18n="menu.visitors" data-i18n="menu.visitors">Visitors</span>
+          </a>
+          <a class="nav-item" data-page="old-students" onclick="navigate('old-students')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+            </svg>
+            <span data-i18n="menu.oldStudents">Old Students</span>
+          </a>
+          <a class="nav-item" data-page="message-logs" onclick="navigate('message-logs')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+            </svg>
+            <span data-i18n="menu.messageLogs">Message Logs</span>
+          </a>
+          <a class="nav-item" data-page="memberships" onclick="navigate('memberships')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg>
+            <span data-i18n="menu.memberships" data-i18n="menu.memberships">Memberships</span>
+          </a>
+          <a class="nav-item" data-page="attendance" onclick="navigate('attendance')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 11 12 14 22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            <span data-i18n="menu.attendance" data-i18n="menu.attendance">Attendance</span>
+          </a>
+          <a class="nav-item" data-page="admissions" onclick="navigate('admissions')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <line x1="19" y1="8" x2="19" y2="14" />
+              <line x1="22" y1="11" x2="16" y2="11" />
+            </svg>
+            <span data-i18n="menu.admissions" data-i18n="menu.admissions">Admissions</span>
+          </a>
+        </div>
+
+        <!-- Finance -->
+        <div class="nav-group">
+          <div class="nav-group-label">Finance</div>
+          <a class="nav-item" data-page="payments" onclick="navigate('payments')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="1" x2="12" y2="23" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span data-i18n="menu.payments" data-i18n="menu.payments">Payments</span>
+          </a>
+          <a class="nav-item" data-page="expenses" onclick="navigate('expenses')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            <span data-i18n="menu.expenses" data-i18n="menu.expenses">Expenses</span>
+          </a>
+        </div>
+
+        <!-- Management -->
+        <div class="nav-group">
+          <div class="nav-group-label">Management</div>
+          <a class="nav-item" data-page="staff" onclick="navigate('staff')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span data-i18n="menu.staff" data-i18n="menu.staff">Staff</span>
+          </a>
+          <a class="nav-item" data-page="tasks" onclick="navigate('tasks')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 11 12 14 22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            <span data-i18n="menu.tasks" data-i18n="menu.tasks">Tasks</span>
+          </a>
+          <a class="nav-item" data-page="complaints" onclick="navigate('complaints')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span data-i18n="menu.complaints" data-i18n="menu.complaints">Complaints</span>
+          </a>
+          <a class="nav-item" data-page="visitors" onclick="navigate('visitors')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <span data-i18n="menu.visitors" data-i18n="menu.visitors">Visitors</span>
+          </a>
+          <a class="nav-item" data-page="documents" onclick="navigate('documents')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+            <span data-i18n="menu.documents" data-i18n="form.documents" data-i18n="menu.documents">Documents</span>
+          </a>
+        </div>
+
+        <!-- System -->
+        <div class="nav-group">
+          <div class="nav-group-label">System</div>
+          <a class="nav-item" data-page="notifications" onclick="navigate('notifications')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            <span data-i18n="menu.notifications" data-i18n="menu.notifications">Notifications</span>
+            <span class="nav-badge" style="display:none;">0</span>
+          </a>
+          <a class="nav-item" data-page="settings" onclick="navigate('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <span data-i18n="menu.settings" data-i18n="menu.settings">Settings</span>
+          </a>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-mini">
+          <div class="avatar" id="current-user-avatar">U</div>
+          <div class="user-mini-info">
+            <div class="user-mini-name" id="current-user-name">User</div>
+            <div class="user-mini-role" id="current-user-role">Role</div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-wrapper">
+      <!-- Topbar -->
+      <header class="topbar">
+        <button class="menu-btn" onclick="toggleSidebar()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div class="topbar-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input type="text" data-i18n="search.students" placeholder="Search students, seats, receipts…" />
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-btn" onclick="navigate('notifications')" title="Notifications"
+            style="position: relative;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            <span id="topbar-notif-dot"
+              style="position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background-color: #ef4444; border-radius: 50%; display: none;"></span>
+          </button>
+          <button class="icon-btn theme-toggle" id="theme-toggle" onclick="toggleTheme()"
+            title="Toggle light/dark mode">
+            <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+              height="18">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+            <svg id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+              height="18" style="display:none">
+              <circle cx="12" cy="12" r="5" />
+              <line x1="12" y1="1" x2="12" y2="3" />
+              <line x1="12" y1="21" x2="12" y2="23" />
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+              <line x1="1" y1="12" x2="3" y2="12" />
+              <line x1="21" y1="12" x2="23" y2="12" />
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+            </svg>
+          </button>
+          <div class="topbar-user" tabindex="0">
+            <div class="topbar-avatar" id="topbar-user-avatar" style="background:var(--primary); color:#fff;">V</div>
+            <span class="topbar-username" id="topbar-user-name">Vraj</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"
+              style="color:var(--text-muted)">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+
+            <div class="user-dropdown">
+              <div class="dropdown-header">Signed In As <span id="topbar-user-role">Employee</span></div>
+              <button class="dropdown-signout" onclick="window.logout()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Sign out</span>
+                <svg class="so-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Pages -->
+      <main class="page-content" id="page-content">
+        <!-- Student Portal Page -->
+        <div class="page" id="page-student-portal"></div>
+
+        <!-- Attendance Page (Admin/Manager) -->
+        <div class="page" id="page-attendance"></div>
+
+        <!-- Payments Page (Admin/Manager) -->
+        <div class="page" id="page-payments"></div>
+
+        <!-- Complaints Page (Admin/Manager) -->
+        <div class="page" id="page-complaints"></div>
+
+        <!-- Seats Page (Admin/Manager) -->
+        <div class="page" id="page-seats"></div>
+
+        <!-- Live Seat Map Page -->
+        <div class="page" id="page-live-seat-map"></div>
+
+        <!-- Expenses Page (Admin/Manager/Employee) -->
+        <div class="page" id="page-expenses"></div>
+
+        <!-- Visitors Page (Admin/Manager/Employee) -->
+        <div class="page" id="page-visitors"></div>
+
+        <!-- Old Students Page (Admin/Manager/Employee) -->
+        <div class="page" id="page-old-students"></div>
+
+        <!-- Message Logs Page (Admin/Manager/Employee) -->
+        <div class="page" id="page-message-logs"></div>
+
+        <!-- Dashboard Page -->
+        <div class="page active" id="page-dashboard">
+          <div class="page-header">
+            <div>
+              <h1 id="dashboard-greeting">Welcome back!</h1>
+              <p class="page-subtitle">Here's what's happening at Studyhaus today.</p>
+            </div>
+            <button class="btn btn-primary" onclick="navigate('admissions')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New admission
+            </button>
+          </div>
+
+          <!-- Metric Cards -->
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-icon emerald">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="1" x2="12" y2="23" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Today's collection</div>
+                <div class="metric-value" id="metric-earnings-today">Loading...</div>
+
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon violet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="5" width="20" height="14" rx="2" />
+                  <line x1="2" y1="10" x2="22" y2="10" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Monthly collection</div>
+                <div class="metric-value" id="metric-earnings-monthly">Loading...</div>
+
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon blue">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Active students</div>
+                <div class="metric-value" id="metric-active-students">Loading...</div>
+
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon amber">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2" />
+                  <path d="M6 20h12" />
+                  <rect x="2" y="9" width="20" height="11" rx="2" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Occupancy</div>
+                <div class="metric-value" id="metric-occupancy-percent">Loading...</div>
+                <div class="metric-change neutral" id="metric-occupancy-fraction">Calculating...</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon teal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Today's Expenses</div>
+                <div class="metric-value" id="metric-expenses-today">Loading...</div>
+
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon red">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Pending dues</div>
+                <div class="metric-value" id="pending-total-today">Loading...</div>
+                <div class="metric-change negative">Total Pending Today</div>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon teal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+              </div>
+              <div class="metric-info">
+                <div class="metric-label">Today's Visitors</div>
+                <div class="metric-value" id="metric-visitors-today">Loading...</div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- Two column: Reminder Panels -->
+          <div class="dashboard-grid">
+            <!-- Current Student Reminders -->
+            <div class="card">
+              <div class="card-header">
+                <h3>Current Reminders</h3>
+                <span class="badge" style="background:var(--bg-hover); color:var(--text-secondary);">Birthdays, Dues,
+                  Expirations</span>
+              </div>
+              <div class="attendance-list" id="current-reminders-list" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-muted);">Loading current reminders...
+                </div>
+              </div>
+            </div>
+
+            <!-- Old Student Follow-ups -->
+            <div class="card">
+              <div class="card-header">
+                <h3>Follow-up Reminders</h3>
+                <span class="badge" style="background:var(--bg-hover); color:var(--text-secondary);">Old Students</span>
+              </div>
+              <div class="attendance-list" id="old-reminders-list" style="max-height: 400px; overflow-y: auto;">
+                <div style="text-align: center; padding: 2rem; color: var(--text-muted);">Loading follow-ups...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Announcement Banner (filled live; hidden when none) -->
+          <div class="announcement-card" id="dashboard-announcement" style="display:none;">
+            <div class="ann-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <div class="ann-content">
+              <div class="ann-title" id="dash-ann-title"></div>
+              <div class="ann-text" id="dash-ann-text"></div>
+            </div>
+            <button class="btn btn-ghost" onclick="navigate('notifications')">Manage notifications</button>
+          </div>
+        </div>
+
+        <!-- Students Page -->
+        <div class="page" id="page-students">
+          <div class="page-header">
+            <div>
+              <h1>Students</h1>
+              <p class="page-subtitle">35 active · 4 inactive · 2 pending</p>
+            </div>
+            <button class="btn btn-primary" onclick="navigate('admissions')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add Student
+            </button>
+          </div>
+          <div class="card">
+            <div class="toolbar">
+              <div class="search-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input type="text" id="student-search-input" data-i18n="search.students"
+                  placeholder="Search students…" />
+              </div>
+              <div class="filter-tabs">
+                <button class="filter-tab active">All</button>
+                <button class="filter-tab">Active</button>
+                <button class="filter-tab">Inactive</button>
+                <button class="filter-tab">Pending</button>
+              </div>
+            </div>
+            <div class="table-container">
+              <table class="data-table" style="table-layout: fixed; min-width: 1000px;">
+                <thead>
+                  <tr>
+                    <th style="cursor:pointer; width: 220px;" onclick="window.setSort('name')">Student ↕</th>
+                    <th style="cursor:pointer; width: 150px;" onclick="window.setSort('planName')">Plan ↕</th>
+                    <th style="cursor:pointer; width: 120px;" onclick="window.setSort('createdAt')">Joined ↕</th>
+                    <th style="cursor:pointer; width: 120px;" onclick="window.setSort('paymentDueDate')">Due Date ↕</th>
+                    <th style="cursor:pointer; width: 130px;" onclick="window.setSort('plannedExitDate')">Leaving Date ↕</th>
+                    <th style="cursor:pointer; width: 100px;" onclick="window.setSort('status')">Status ↕</th>
+                  </tr>
+                </thead>
+                <tbody id="students-table-body">
+                  <tr>
+                    <td colspan="6" style="text-align:center;">Loading...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              style="padding: 1rem; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border);">
+              <div id="pagination-info" style="color: var(--text-muted); font-size: 0.85rem;">Showing 0-0 of 0 students
+              </div>
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <select onchange="window.changePageSize(this.value)" class="sp-input sp-select-sm" aria-label="Rows per page">
+                  <option value="10">10 per page</option>
+                  <option value="25">25 per page</option>
+                  <option value="50">50 per page</option>
+                  <option value="100">100 per page</option>
+                </select>
+                <div style="display: flex; gap: 0.5rem;">
+                  <button class="btn btn-ghost" onclick="window.changePage(-1)"
+                    style="padding: 0.25rem 0.5rem;">Prev</button>
+                  <button class="btn btn-ghost" onclick="window.changePage(1)"
+                    style="padding: 0.25rem 0.5rem;">Next</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <dialog id="student-profile-modal" class="card"
+            style="border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background: var(--bg-card); color: var(--text-primary);">
+          </dialog>
+          <dialog id="whatsapp-modal" class="card"
+            style="border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background: var(--bg-card); color: var(--text-primary);">
+          </dialog>
+          <dialog id="renewal-modal" class="card"
+            style="border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background: var(--bg-card); color: var(--text-primary);">
+          </dialog>
+          <dialog id="announcement-modal" class="card"
+            style="border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background: var(--bg-card); color: var(--text-primary);">
+            <div style="padding: 1.5rem; min-width: 400px; max-width: 500px; max-height: 85vh; overflow-y: auto;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0;">Schedule Announcement</h2>
+                <button class="btn btn-ghost" onclick="document.getElementById('announcement-modal').close()"
+                  style="padding: 0.25rem 0.5rem;">✕</button>
+              </div>
+              <form id="announcement-form" onsubmit="event.preventDefault(); window.submitAnnouncement()">
+                <div class="form-group" style="margin-bottom: 1rem;">
+                  <label>Title</label>
+                  <input type="text" id="ann-title" required placeholder="e.g. Diwali Holiday" />
+                </div>
+                <div class="form-group" style="margin-bottom: 1rem;">
+                  <label>Message</label>
+                  <textarea id="ann-message" required rows="3" placeholder="Announcement details..."></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 1rem;">
+                  <label>Type</label>
+                  <select id="ann-type">
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="success">Success</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 1rem;">
+                  <label>Audience</label>
+                  <select id="ann-audience" onchange="window.handleAudienceChange && window.handleAudienceChange()">
+                    <option value="All Students">All Students</option>
+                    <option value="Active Students">Active Students Only</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Specific Students">Specific Students</option>
+                  </select>
+                </div>
+                <div class="form-group" id="ann-specific-students-group" style="display: none; margin-bottom: 1rem;">
+                  <label>Select Students</label>
+                  <div id="ann-specific-students-list"
+                    style="max-height: 150px; overflow-y: auto; border:1px solid var(--border); border-radius: 8px; padding: 10px; background:var(--bg-card); font-size: 13px;">
+                    <!-- Checkboxes injected by JS -->
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 1.5rem;">
+                  <label>Scheduled Date & Time (Optional)</label>
+                  <input type="datetime-local" id="ann-date" />
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                  <button type="submit" class="btn btn-primary" id="btn-schedule-announcement">Schedule</button>
+                </div>
+              </form>
+            </div>
+          </dialog>
+        </div>
+
+        <!-- Seat Map Page -->
+        <div class="page" id="page-seats">
+          <div class="page-header">
+            <div>
+              <h1>Seat Map</h1>
+              <p class="page-subtitle">36 occupied · 18 available across 3 floors</p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button class="btn btn-ghost"
+                style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius: 999px; padding: 6px 16px;"><svg
+                  viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg> Filter</button>
+              <button class="btn btn-primary"
+                style="background:var(--text-primary); color:var(--bg-card); border:1px solid var(--border); border-radius:999px; padding:6px 16px;">+ Add seat</button>
+            </div>
+            <div class="seat-legend">
+              <span class="legend-pill available"><span class="legend-dot"></span>Available</span>
+              <span class="legend-pill occupied"><span class="legend-dot"></span>Occupied</span>
+              <span class="legend-pill reserved"><span class="legend-dot"></span>Reserved</span>
+              <span class="legend-pill maintenance"><span class="legend-dot"></span>Maintenance</span>
+            </div>
+          </div>
+          <div class="floor-tabs">
+            <button class="floor-tab active">Ground Floor</button>
+            <button class="floor-tab">First Floor</button>
+          </div>
+          <div class="card" style="padding: 1.5rem;">
+            <div class="seat-floors">
+              <div class="card floor-card">
+                <div class="floor-title">Ground Floor</div>
+                <div class="seat-grid">
+                  <div class="seat occupied" title="G-01 - Vihaan Verma"><span>01</span></div>
+                  <div class="seat occupied" title="G-02 - Ananya Patel"><span>02</span></div>
+                  <div class="seat available" title="G-03 - Available"><span>03</span></div>
+                  <div class="seat occupied" title="G-04 - Meera Nair"><span>04</span></div>
+                  <div class="seat occupied" title="G-05 - Rohan Gupta"><span>05</span></div>
+                  <div class="seat available" title="G-06 - Available"><span>06</span></div>
+                  <div class="seat occupied" title="G-07 - Priya Reddy"><span>07</span></div>
+                  <div class="seat maintenance" title="G-08 - Maintenance"><span>08</span></div>
+                  <div class="seat available" title="G-09 - Available"><span>09</span></div>
+                  <div class="seat occupied" title="G-10 - Arjun Mehta"><span>10</span></div>
+                  <div class="seat available" title="G-11 - Available"><span>11</span></div>
+                  <div class="seat occupied" title="G-12 - Sneha Kumar"><span>12</span></div>
+                  <div class="seat occupied" title="G-13 - Akash Roy"><span>13</span></div>
+                  <div class="seat available" title="G-14 - Available"><span>14</span></div>
+                  <div class="seat reserved" title="G-15 - Reserved"><span>15</span></div>
+                  <div class="seat occupied" title="G-16 - Deepa Nair"><span>16</span></div>
+                  <div class="seat available" title="G-17 - Available"><span>17</span></div>
+                  <div class="seat occupied" title="G-18 - Kiran Sharma"><span>18</span></div>
+                  <div class="seat occupied" title="G-19 - Pooja Iyer"><span>19</span></div>
+                  <div class="seat available" title="G-20 - Available"><span>20</span></div>
+                </div>
+              </div>
+              <div class="card floor-card">
+                <div class="floor-title">First Floor</div>
+                <div class="seat-grid">
+                  <div class="seat occupied" title="F-01 - Aarav Singh"><span>01</span></div>
+                  <div class="seat occupied" title="F-02 - Ananya Patel"><span>02</span></div>
+                  <div class="seat occupied" title="F-03 - Vivek Sharma"><span>03</span></div>
+                  <div class="seat available" title="F-04 - Available"><span>04</span></div>
+                  <div class="seat occupied" title="F-05 - Vivaan Kapoor"><span>05</span></div>
+                  <div class="seat available" title="F-06 - Available"><span>06</span></div>
+                  <div class="seat occupied" title="F-07 - Riaan Bose"><span>07</span></div>
+                  <div class="seat occupied" title="F-08 - Tara Singh"><span>08</span></div>
+                  <div class="seat available" title="F-09 - Available"><span>09</span></div>
+                  <div class="seat occupied" title="F-10 - Zara Khan"><span>10</span></div>
+                  <div class="seat maintenance" title="F-11 - Maintenance"><span>11</span></div>
+                  <div class="seat occupied" title="F-12 - Anika Patel"><span>12</span></div>
+                  <div class="seat available" title="F-13 - Available"><span>13</span></div>
+                  <div class="seat occupied" title="F-14 - Rohan Das"><span>14</span></div>
+                  <div class="seat reserved" title="F-15 - Reserved"><span>15</span></div>
+                  <div class="seat occupied" title="F-16 - Surya Rao"><span>16</span></div>
+                  <div class="seat available" title="F-17 - Available"><span>17</span></div>
+                  <div class="seat occupied" title="F-18 - Nila Iyer"><span>18</span></div>
+                  <div class="seat occupied" title="F-19 - Vijay Menon"><span>19</span></div>
+                  <div class="seat available" title="F-20 - Available"><span>20</span></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+    </div>
+    <!-- Memberships Page -->
+    <div class="page" id="page-memberships">
+      <div class="page-header">
+        <div>
+          <h1>Membership Plans</h1>
+          <p class="page-subtitle">Create and manage the plans students subscribe to.</p>
+        </div>
+        <button class="btn btn-primary" id="btn-new-plan">+ New Plan</button>
+      </div>
+      <div class="plan-grid" id="membership-plans-grid">
+        <div class="plan-card">
+          <div class="plan-top">
+            <div class="plan-name">6 Hours Daily</div>
+            <div class="plan-price">₹700<span>/month</span></div>
+          </div>
+          <div class="plan-features">
+            <div class="plan-feature">✓ 6 hours per day</div>
+            <div class="plan-feature">✓ Fixed seat</div>
+            <div class="plan-feature">✓ Locker access</div>
+            <div class="plan-feature muted">✗ Overnight stay</div>
+          </div>
+          <div class="plan-stats">
+            <div class="plan-stat">
+              <div class="plan-stat-val">12</div>
+              <div class="plan-stat-label">Students</div>
+            </div>
+            <div class="plan-stat">
+              <div class="plan-stat-val">₹8,400</div>
+              <div class="plan-stat-label">Monthly</div>
+            </div>
+          </div>
+        </div>
+        <div class="plan-card featured">
+          <div class="plan-badge">Most Popular</div>
+          <div class="plan-top">
+            <div class="plan-name">12 Hours Daily</div>
+            <div class="plan-price">₹1,000<span>/month</span></div>
+          </div>
+          <div class="plan-features">
+            <div class="plan-feature">✓ 12 hours per day</div>
+            <div class="plan-feature">✓ Fixed seat</div>
+            <div class="plan-feature">✓ Locker access</div>
+            <div class="plan-feature">✓ Study room access</div>
+          </div>
+          <div class="plan-stats">
+            <div class="plan-stat">
+              <div class="plan-stat-val">16</div>
+              <div class="plan-stat-label">Students</div>
+            </div>
+            <div class="plan-stat">
+              <div class="plan-stat-val">₹16,000</div>
+              <div class="plan-stat-label">Monthly</div>
+            </div>
+          </div>
+        </div>
+        <div class="plan-card">
+          <div class="plan-top">
+            <div class="plan-name">Weekly Access</div>
+            <div class="plan-price">₹2,700<span>/month</span></div>
+          </div>
+          <div class="plan-features">
+            <div class="plan-feature">✓ Full week access</div>
+            <div class="plan-feature">✓ Flexible seat</div>
+            <div class="plan-feature">✓ Locker access</div>
+            <div class="plan-feature">✓ Printing credits</div>
+          </div>
+          <div class="plan-stats">
+            <div class="plan-stat">
+              <div class="plan-stat-val">4</div>
+              <div class="plan-stat-label">Students</div>
+            </div>
+            <div class="plan-stat">
+              <div class="plan-stat-val">₹10,800</div>
+              <div class="plan-stat-label">Monthly</div>
+            </div>
+          </div>
+        </div>
+        <div class="plan-card">
+          <div class="plan-top">
+            <div class="plan-name">Quarterly Saver</div>
+            <div class="plan-price">₹250<span>/week</span></div>
+          </div>
+          <div class="plan-features">
+            <div class="plan-feature">✓ 3 month plan</div>
+            <div class="plan-feature">✓ 15% discount</div>
+            <div class="plan-feature">✓ Premium seat</div>
+            <div class="plan-feature">✓ Locker + printing</div>
+          </div>
+          <div class="plan-stats">
+            <div class="plan-stat">
+              <div class="plan-stat-val">2</div>
+              <div class="plan-stat-label">Students</div>
+            </div>
+            <div class="plan-stat">
+              <div class="plan-stat-val">₹3,000</div>
+              <div class="plan-stat-label">Monthly</div>
+            </div>
+          </div>
+        </div>
+        <div class="plan-card">
+          <div class="plan-top">
+            <div class="plan-name">Yearly Champion</div>
+            <div class="plan-price">₹9,600<span>/year</span></div>
+          </div>
+          <div class="plan-features">
+            <div class="plan-feature">✓ Full year plan</div>
+            <div class="plan-feature">✓ 20% discount</div>
+            <div class="plan-feature">✓ Premium seat</div>
+            <div class="plan-feature">✓ All amenities included</div>
+          </div>
+          <div class="plan-stats">
+            <div class="plan-stat">
+              <div class="plan-stat-val">1</div>
+              <div class="plan-stat-label">Students</div>
+            </div>
+            <div class="plan-stat">
+              <div class="plan-stat-val">₹9,600</div>
+              <div class="plan-stat-label">Yearly</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Page -->
+    <div class="page" id="page-attendance">
+      <div class="page-header">
+        <div>
+          <h1>Attendance</h1>
+          <p class="page-subtitle">Tuesday, July 22, 2026 · 21 present · 14 absent</p>
+        </div>
+        <button class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Mark Attendance
+        </button>
+      </div>
+      <div class="card">
+        <div class="toolbar">
+          <div class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15"
+              height="15">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg><input type="text" placeholder="Search…" /></div>
+          <div class="filter-tabs">
+            <button class="filter-tab active">All</button>
+            <button class="filter-tab">Present</button>
+            <button class="filter-tab">Absent</button>
+          </div>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Seat</th>
+              <th>Student</th>
+              <th>Check In</th>
+              <th>Check Out</th>
+              <th>Duration</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="seat-tag ground">G-01</span></td>
+              <td>Vihaan Verma</td>
+              <td>08:00 AM</td>
+              <td>still in</td>
+              <td>—</td>
+              <td><span class="badge badge-absent">Absent</span></td>
+            </tr>
+            <tr>
+              <td><span class="seat-tag first">F-02</span></td>
+              <td>Ananya Patel</td>
+              <td>09:07 AM</td>
+              <td>02:03 PM</td>
+              <td>4h 56m</td>
+              <td><span class="badge badge-present">Present</span></td>
+            </tr>
+            <tr>
+              <td><span class="seat-tag second">S-03</span></td>
+              <td>Navya Singh</td>
+              <td>10:14 AM</td>
+              <td>04:06 PM</td>
+              <td>5h 52m</td>
+              <td><span class="badge badge-present">Present</span></td>
+            </tr>
+            <tr>
+              <td><span class="seat-tag ground">G-04</span></td>
+              <td>Meera Nair</td>
+              <td>11:21 AM</td>
+              <td>06:09 PM</td>
+              <td>6h 48m</td>
+              <td><span class="badge badge-present">Present</span></td>
+            </tr>
+            <tr>
+              <td><span class="seat-tag first">F-05</span></td>
+              <td>Vivaan Kapoor</td>
+              <td>12:28 PM</td>
+              <td>08:12 PM</td>
+              <td>7h 44m</td>
+              <td><span class="badge badge-present">Present</span></td>
+            </tr>
+            <tr>
+              <td><span class="seat-tag second">S-06</span></td>
+              <td>Ishaan Verma</td>
+              <td>01:35 PM</td>
+              <td>still in</td>
+              <td>—</td>
+              <td><span class="badge badge-present">Present</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Admissions Page -->
+    <div class="page" id="page-admissions">
+      <div class="page-header" style="margin-bottom: 1.5rem;">
+        <div>
+          <h1>Admissions</h1>
+          <p class="page-subtitle">Add students directly or review pending self-registrations.</p>
+        </div>
+      </div>
+
+      <!-- Tab Pills -->
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 2rem;">
+        <button class="btn btn-primary" id="tab-new-admission" onclick="window.switchAdmissionTab('new')"
+          style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius:999px; font-weight:600; padding:6px 16px; font-size:13px;">New
+          admission</button>
+        <button class="btn btn-ghost" id="tab-pending-approval" onclick="window.switchAdmissionTab('pending')"
+          style="background:var(--bg-gray); color:var(--text-muted); border:none; border-radius:999px; font-weight:500; padding:6px 16px; font-size:13px;">Pending
+          approval</button>
+      </div>
+
+      <!-- New Admission Form View -->
+      <div id="view-new-admission" style="display: flex; gap: 1.5rem; align-items: flex-start;">
+
+        <!-- Form Card -->
+        <div class="card"
+          style="flex: 1; padding: 2rem; border-radius: 12px; background:var(--bg-card); border:1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);">
+          <h3 style="font-size: 15px; font-weight: 600; color:var(--text-primary); margin-bottom: 4px;">Student details</h3>
+          <p style="font-size: 13px; color:var(--text-secondary); margin-bottom: 2rem;">Fields marked * are required. Students can
+            sign in later using their phone number.</p>
+
+          <form id="admission-form" onsubmit="event.preventDefault(); window.submitAdmissionForm();">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
+                  data-i18n="form.studentName">Full name *</label>
+                <input type="text" id="adm-name" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Mobile
+                  *</label>
+                <input type="tel" pattern="[0-9]{10}" id="adm-phone" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Parent
+                  mobile</label>
+                <input type="tel" pattern="[0-9]{10}" id="adm-parent-phone"
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Email
+                  *</label>
+                <input type="email" id="adm-email" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
+                  data-i18n="form.dob">Date of birth </label>
+                <input type="date" id="adm-dob" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary);"
+                  / required>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
+                  data-i18n="form.gender">Gender *</label>
+                <select id="adm-gender" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary); background: var(--bg-card);">
+                  <option value="">Select</option>
+                  <option>Male</option>
+                  <option>Female</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">College
+                  / Institute</label>
+                <input type="text" id="adm-college"
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Course</label>
+                <input type="text" id="adm-course" placeholder="UPSC, CA, JEE..."
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1; margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
+                  data-i18n="form.address" data-i18n="form.address">Address</label>
+                <textarea id="adm-address" rows="2"
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;"></textarea>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Membership
+                  plan *</label>
+                <select id="adm-plan" required onchange="window.updateSummary()"
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary); background: var(--bg-card);">
+                  <option value="">Choose plan</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Seat
+                  (optional)</label>
+                <select id="adm-seat"
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary); background: var(--bg-card);">
+                  <option value="">Loading...</option>
+                </select>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Sticky Summary Sidebar -->
+        <div style="width: 280px; position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+          <div class="card"
+            style="padding: 1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius: 12px; box-shadow: none;">
+            <h4 style="font-size: 11px; font-weight: 700; color:var(--text-muted); letter-spacing: 0.5px; margin-bottom: 1rem;">
+              SUMMARY</h4>
+            <div
+              style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary); margin-bottom: 12px;">
+              <span>Plan</span><span id="summary-plan" style="color:var(--text-primary); font-weight: 600;">—</span>
+            </div>
+            <div
+              style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary); margin-bottom: 12px;">
+              <span>Amount</span><span id="summary-amount" style="color:var(--text-primary); font-weight: 600;">—</span>
+            </div>
+            <div
+              style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary); margin-bottom: 12px;">
+              <span>Start</span><span id="summary-start" style="color:var(--text-primary); font-weight: 600;">—</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary);">
+              <span>Ends</span><span id="summary-ends" style="color:var(--text-primary); font-weight: 600;">—</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btn-submit-admission"
+            onclick="document.getElementById('admission-form').requestSubmit()"
+            style="background:var(--primary); color: #fff; width: 100%; border-radius: 8px; padding: 12px; font-size: 14px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; border:none; cursor:pointer;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="8.5" cy="7" r="4" />
+              <line x1="20" y1="8" x2="20" y2="14" />
+              <line x1="23" y1="11" x2="17" y2="11" />
+            </svg>
+            Confirm admission
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Pending Approval View -->
+      <div id="view-pending-approval" style="display: none;">
+        <div class="card"
+          style="padding: 1.5rem; border-radius: 12px; background:var(--bg-card); border:1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);">
+          <h3 style="margin-bottom: 1.5rem; font-size: 15px; font-weight: 600;">Pending Approvals</h3>
+          <div class="table-container">
+            <table class="data-table" style="width: 100%; text-align: left; font-size: 13px;">
+              <thead>
+                <tr
+                  style="color:var(--text-muted); font-size: 11px; text-transform: uppercase; font-weight: 700; border-bottom:1px solid var(--border);">
+                  <th style="padding: 12px 16px;">Student</th>
+                  <th style="padding: 12px 16px;" data-i18n="form.phone">Phone</th>
+                  <th style="padding: 12px 16px;">Plan</th>
+                  <th style="padding: 12px 16px;">Date</th>
+                  <th style="padding: 12px 16px; text-align:right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="pending-admissions-body">
+                <tr>
+                  <td colspan="5" style="text-align:center; padding: 2rem;">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payments Page -->
+    <div class="page" id="page-payments">
+      <div class="page-header" style="margin-bottom: 2rem;">
+        <div>
+          <h1>Payments</h1>
+          <p class="page-subtitle">Collections, invoices, and outstanding dues.</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button class="btn btn-ghost"
+            style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;"><svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg> Export</button>
+          <button class="btn btn-primary"
+            style="background:var(--primary); color:#fff; border:none; border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;">+
+            Receive payment</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:1rem; margin-bottom:1.5rem;">
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Today</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary);">₹12,400</div>
+          </div>
+          <div
+            style="width:32px; height:32px; background:#f0fdf4; color:#16a34a; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg></div>
+        </div>
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              This Month</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">₹71,000</div>
+            <div style="font-size:11px; color:#16a34a; font-weight:600; display:flex; align-items:center; gap:2px;"><svg
+                width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                <polyline points="17 6 23 6 23 12" />
+              </svg> 8%</div>
+          </div>
+          <div
+            style="width:32px; height:32px; background:var(--bg-gray); color:var(--text-secondary); border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg></div>
+        </div>
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Pending</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">₹14,500</div>
+            <div style="font-size:11px; color:var(--text-muted); font-weight:500;">6 invoices</div>
+          </div>
+          <div
+            style="width:32px; height:32px; background:rgba(245,158,11,0.15); color:#d97706; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg></div>
+        </div>
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Receipts Issued</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary);">30</div>
+          </div>
+          <div
+            style="width:32px; height:32px; background:#e0f2fe; color:#0284c7; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg></div>
+        </div>
+      </div>
+
+      <div class="card card-theme" style="padding:1.5rem;">
+        <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:1.5rem;">Recent
+          transactions</h3>
+
+        <div style="overflow-x:auto;">
+          <table
+            style="width:100%; border-collapse:collapse; text-align:left; font-size:13px; color:var(--text-secondary);">
+            <thead>
+              <tr
+                style="color:var(--text-muted); font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--border);">
+                <th style="padding:12px 16px; font-weight:700;">Receipt</th>
+                <th style="padding:12px 16px; font-weight:700; color:var(--text-primary);">Student</th>
+                <th style="padding:12px 16px; font-weight:700;">Plan</th>
+                <th style="padding:12px 16px; font-weight:700;">Method</th>
+                <th style="padding:12px 16px; font-weight:700; text-align:right;">Amount</th>
+                <th style="padding:12px 16px; font-weight:700;">Date</th>
+                <th style="padding:12px 16px; font-weight:700; text-align:right;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24000</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Vihaan Verma</td>
+                <td style="padding:16px;">6 Hours Daily</td>
+                <td style="padding:16px;">Cash</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹700</td>
+                <td style="padding:16px;">2026-07-27</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:rgba(245,158,11,0.15); color:#d97706; border:1px solid rgba(245,158,11,0.3); padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Pending</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24001</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Ananya Patel</td>
+                <td style="padding:16px;">12 Hours Daily</td>
+                <td style="padding:16px;">UPI</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹1,000</td>
+                <td style="padding:16px;">2026-07-26</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24002</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Navya Singh</td>
+                <td style="padding:16px;">Weekly Access</td>
+                <td style="padding:16px;">Card</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹2,700</td>
+                <td style="padding:16px;">2026-07-25</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24003</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Meera Nair</td>
+                <td style="padding:16px;">Quarterly Saver</td>
+                <td style="padding:16px;">Bank Transfer</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹250</td>
+                <td style="padding:16px;">2026-07-24</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24004</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Vivaan Kapoor</td>
+                <td style="padding:16px;">Yearly Champion</td>
+                <td style="padding:16px;">UPI</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹9,600</td>
+                <td style="padding:16px;">2026-07-23</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24005</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Ishaan Verma</td>
+                <td style="padding:16px;">6 Hours Daily</td>
+                <td style="padding:16px;">Cash</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹700</td>
+                <td style="padding:16px;">2026-07-22</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24006</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Aadhya Patel</td>
+                <td style="padding:16px;">12 Hours Daily</td>
+                <td style="padding:16px;">UPI</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹1,000</td>
+                <td style="padding:16px;">2026-07-21</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px;">RC-24007</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary);">Neha Singh</td>
+                <td style="padding:16px;">Weekly Access</td>
+                <td style="padding:16px;">Card</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹2,700</td>
+                <td style="padding:16px;">2026-07-20</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expenses Page -->
+    <div class="page" id="page-expenses">
+      <div class="page-header" style="margin-bottom: 2rem;">
+        <div>
+          <h1>Expenses</h1>
+          <p class="page-subtitle">Track every operational cost.</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+          <button class="btn btn-ghost"
+            style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;"><svg
+              width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg> Export</button>
+          <button class="btn btn-primary"
+            style="background:var(--primary); color:#fff; border:none; border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;">+
+            Add expense</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Total This Month</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary);">₹74,720</div>
+          </div>
+          <div
+            style="width:32px; height:32px; background:#e0f2fe; color:#0284c7; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="5" width="20" height="14" rx="2" />
+              <line x1="2" y1="10" x2="22" y2="10" />
+            </svg></div>
+        </div>
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Pending Bills</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary);">₹1,650</div>
+          </div>
+        </div>
+        <div class="card card-theme"
+          style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div
+              style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">
+              Recurring</div>
+            <div style="font-size:24px; font-weight:700; color:var(--text-primary);">4</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:1.5rem; align-items:flex-start;">
+
+        <div class="card"
+          style="flex:2; padding:1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.02);">
+          <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:1.5rem;">Expense log</h3>
+
+          <div style="overflow-x:auto;">
+            <table
+              style="width:100%; border-collapse:collapse; text-align:left; font-size:13px; color:var(--text-secondary);">
+              <thead>
+                <tr
+                  style="color:var(--text-muted); font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--border);">
+                  <th style="padding:12px 16px; font-weight:700; color:var(--text-primary);">Category</th>
+                  <th style="padding:12px 16px; font-weight:700;">Vendor</th>
+                  <th style="padding:12px 16px; font-weight:700;">Bill #</th>
+                  <th style="padding:12px 16px; font-weight:700; text-align:right;">Amount</th>
+                  <th style="padding:12px 16px; font-weight:700;">Date</th>
+                  <th style="padding:12px 16px; font-weight:700; text-align:right;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Rent</td>
+                  <td style="padding:16px;">Kapoor Properties</td>
+                  <td style="padding:16px;">R-2410</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹45,000</td>
+                  <td style="padding:16px;">2026-07-24</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Electricity</td>
+                  <td style="padding:16px;">BSES</td>
+                  <td style="padding:16px;">E-8821</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹12,400</td>
+                  <td style="padding:16px;">2026-07-22</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Internet</td>
+                  <td style="padding:16px;">ACT Fibernet</td>
+                  <td style="padding:16px;">I-3320</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹2,100</td>
+                  <td style="padding:16px;">2026-07-21</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Salary</td>
+                  <td style="padding:16px;">Ramesh (Cleaner)</td>
+                  <td style="padding:16px;">S-021</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹9,000</td>
+                  <td style="padding:16px;">2026-07-25</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Cleaning</td>
+                  <td style="padding:16px;">Local Vendor</td>
+                  <td style="padding:16px;">C-99</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹850</td>
+                  <td style="padding:16px;">2026-07-23</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Repairs</td>
+                  <td style="padding:16px;">Kumar Electricals</td>
+                  <td style="padding:16px;">K-14</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹1,650</td>
+                  <td style="padding:16px;">2026-07-19</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:rgba(245,158,11,0.15); color:#d97706; border:1px solid rgba(245,158,11,0.3); padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Pending</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Snacks</td>
+                  <td style="padding:16px;">Big Basket</td>
+                  <td style="padding:16px;">BB-441</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹720</td>
+                  <td style="padding:16px;">2026-07-26</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary);">Marketing</td>
+                  <td style="padding:16px;">Meta Ads</td>
+                  <td style="padding:16px;">M-77</td>
+                  <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹3,000</td>
+                  <td style="padding:16px;">2026-07-17</td>
+                  <td style="padding:16px; text-align:right;"><span
+                      style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Paid</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card"
+          style="flex:1; padding:1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.02); display:flex; flex-direction:column;">
+          <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:4px;">By category</h3>
+          <p style="font-size:13px; color:var(--text-muted); margin-bottom:2.5rem;">This month</p>
+
+          <div style="flex:1; display:flex; align-items:center; justify-content:center; margin-bottom:2.5rem;">
+            <!-- Simulated Donut Chart using CSS conic-gradient -->
+            <div
+              style="width:160px; height:160px; border-radius:50%; background: conic-gradient(#1e3a8a 0% 60%, #0ea5e9 60% 75%, #06b6d4 75% 80%, #eab308 80% 90%, #f43f5e 90% 92%, #64748b 92% 95%, #84cc16 95% 96%, #8b5cf6 96% 100%); display:flex; align-items:center; justify-content:center; position:relative;">
+              <div style="width:100px; height:100px; border-radius:50%; background:var(--bg-card);"></div>
+              <!-- White slice borders for gap effect -->
+              <div
+                style="position:absolute; inset:0; border-radius:50%; background: conic-gradient(transparent 0% 59.5%, white 59.5% 60.5%, transparent 60.5% 74.5%, white 74.5% 75.5%, transparent 75.5% 79.5%, white 79.5% 80.5%, transparent 80.5% 89.5%, white 89.5% 90.5%, transparent 90.5% 91.5%, white 91.5% 92.5%, transparent 92.5% 94.5%, white 94.5% 95.5%, transparent 95.5% 95.8%, white 95.8% 96.2%, transparent 96.2% 100%); pointer-events:none;">
+              </div>
+            </div>
+          </div>
+
+          <div
+            style="display:flex; flex-wrap:wrap; gap:12px; font-size:11px; font-weight:600; color:var(--text-muted);">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:var(--primary);"></div>Rent
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#0ea5e9;"></div>Electricity
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#06b6d4;"></div>Internet
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#eab308;"></div>Salary
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#f43f5e;"></div>Cleaning
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#64748b;"></div>Repairs
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#84cc16;"></div>Snacks
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <div style="width:8px; height:8px; border-radius:50%; background:#8b5cf6;"></div>Marketing
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff Page -->
+    <div class="page" id="page-staff">
+      <div class="page-header" style="margin-bottom: 2rem;">
+        <div>
+          <h1>Staff</h1>
+          <p class="page-subtitle">Employees, roles, and payroll.</p>
+        </div>
+        <div>
+          <button class="btn btn-primary"
+            style="background:var(--primary); color:#fff; border:none; border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="8.5" cy="7" r="4" />
+              <line x1="20" y1="8" x2="20" y2="14" />
+              <line x1="23" y1="11" x2="17" y2="11" />
+            </svg> Add staff
+          </button>
+        </div>
+      </div>
+
+      <div class="card card-theme" style="padding:1.5rem;">
+        <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:1.5rem;">Team (4)</h3>
+
+        <div style="overflow-x:auto;">
+          <table
+            style="width:100%; border-collapse:collapse; text-align:left; font-size:13px; color:var(--text-secondary);">
+            <thead>
+              <tr
+                style="color:var(--text-muted); font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--border); border-top:1px solid var(--border);">
+                <th style="padding:12px 16px; font-weight:700; color:var(--text-primary);">Name</th>
+                <th style="padding:12px 16px; font-weight:700;">Role</th>
+                <th style="padding:12px 16px; font-weight:700;">Contact</th>
+                <th style="padding:12px 16px; font-weight:700;">Joined</th>
+                <th style="padding:12px 16px; font-weight:700; text-align:right;">Salary</th>
+                <th style="padding:12px 16px; font-weight:700; text-align:right;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px; display:flex; align-items:center; gap:12px;">
+                  <div
+                    style="width:32px; height:32px; border-radius:50%; background:var(--bg-gray); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600;">
+                    SY</div>
+                  <span style="font-weight:600; color:var(--text-primary);">Suresh Yadav</span>
+                </td>
+                <td style="padding:16px;">Receptionist</td>
+                <td style="padding:16px;">+91 9876500011</td>
+                <td style="padding:16px;">2024-06-10</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹15,000</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Active</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px; display:flex; align-items:center; gap:12px;">
+                  <div
+                    style="width:32px; height:32px; border-radius:50%; background:var(--bg-gray); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600;">
+                    RK</div>
+                  <span style="font-weight:600; color:var(--text-primary);">Ramesh Kumar</span>
+                </td>
+                <td style="padding:16px;">Cleaner</td>
+                <td style="padding:16px;">+91 9876500022</td>
+                <td style="padding:16px;">2024-08-01</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹9,000</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Active</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px; display:flex; align-items:center; gap:12px;">
+                  <div
+                    style="width:32px; height:32px; border-radius:50%; background:var(--bg-gray); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600;">
+                    AS</div>
+                  <span style="font-weight:600; color:var(--text-primary);">Anita Sharma</span>
+                </td>
+                <td style="padding:16px;">Manager</td>
+                <td style="padding:16px;">+91 9876500033</td>
+                <td style="padding:16px;">2024-01-15</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹25,000</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">Active</span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border);">
+                <td style="padding:16px; display:flex; align-items:center; gap:12px;">
+                  <div
+                    style="width:32px; height:32px; border-radius:50%; background:var(--bg-gray); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600;">
+                    VS</div>
+                  <span style="font-weight:600; color:var(--text-primary);">Vikas Singh</span>
+                </td>
+                <td style="padding:16px;">Security</td>
+                <td style="padding:16px;">+91 9876500044</td>
+                <td style="padding:16px;">2025-02-20</td>
+                <td style="padding:16px; font-weight:600; color:var(--text-primary); text-align:right;">₹12,000</td>
+                <td style="padding:16px; text-align:right;"><span
+                    style="background:rgba(245,158,11,0.15); color:#d97706; border:1px solid rgba(245,158,11,0.3); padding:4px 12px; border-radius:999px; font-size:11px; font-weight:600;">On
+                    Leave</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tasks Page -->
+    <div class="page" id="page-tasks">
+      <div class="page-header">
+        <div>
+          <h1>Tasks</h1>
+          <p class="page-subtitle">8 open · 3 completed today</p>
+        </div>
+        <button class="btn btn-primary">+ New Task</button>
+      </div>
+      <div class="card">
+        <div class="task-list">
+          <div class="task-item"><input type="checkbox" />
+            <div class="task-info">
+              <div class="task-title">Collect pending fees from Vihaan Verma</div>
+              <div class="task-meta">Due today · Assigned to Shreya</div>
+            </div><span class="badge badge-overdue">Urgent</span>
+          </div>
+          <div class="task-item"><input type="checkbox" />
+            <div class="task-info">
+              <div class="task-title">Send renewal reminder to 5 students</div>
+              <div class="task-meta">Due Jul 22 · Assigned to Maya</div>
+            </div><span class="badge badge-pending">Medium</span>
+          </div>
+          <div class="task-item"><input type="checkbox" />
+            <div class="task-info">
+              <div class="task-title">Check AC unit on Floor 1</div>
+              <div class="task-meta">Due Jul 23 · Assigned to Karan</div>
+            </div><span class="badge badge-pending">Low</span>
+          </div>
+          <div class="task-item"><input type="checkbox" checked />
+            <div class="task-info done">
+              <div class="task-title">Update seat map for Floor 2</div>
+              <div class="task-meta">Completed today · Ravi</div>
+            </div><span class="badge badge-paid">Done</span>
+          </div>
+          <div class="task-item"><input type="checkbox" checked />
+            <div class="task-info done">
+              <div class="task-title">Verify Navya Singh's Aadhaar</div>
+              <div class="task-meta">Completed today · Shreya</div>
+            </div><span class="badge badge-paid">Done</span>
+          </div>
+          <div class="task-item"><input type="checkbox" />
+            <div class="task-info">
+              <div class="task-title">Purchase new whiteboard markers</div>
+              <div class="task-meta">Due Jul 25 · Assigned to Maya</div>
+            </div><span class="badge badge-pending">Low</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Complaints Page -->
+    <div class="page" id="page-complaints">
+      <div class="page-header">
+        <div>
+          <h1>Complaints</h1>
+          <p class="page-subtitle">3 open · 12 resolved this month</p>
+        </div>
+        <button class="btn btn-primary">+ Log Complaint</button>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Subject</th>
+              <th>Date</th>
+              <th>Priority</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Vihaan Verma</td>
+              <td>Chair is broken at seat G-01</td>
+              <td>Jul 20, 2024</td>
+              <td><span class="badge badge-overdue">High</span></td>
+              <td><span class="badge badge-pending">Open</span></td>
+            </tr>
+            <tr>
+              <td>Ananya Patel</td>
+              <td>WiFi slow on first floor</td>
+              <td>Jul 18, 2024</td>
+              <td><span class="badge badge-pending">Medium</span></td>
+              <td><span class="badge badge-pending">Open</span></td>
+            </tr>
+            <tr>
+              <td>Navya Singh</td>
+              <td>Locker key not working</td>
+              <td>Jul 15, 2024</td>
+              <td><span class="badge badge-pending">Medium</span></td>
+              <td><span class="badge badge-pending">Open</span></td>
+            </tr>
+            <tr>
+              <td>Meera Nair</td>
+              <td>Noise disturbance from outside</td>
+              <td>Jul 10, 2024</td>
+              <td><span class="badge" style="background:rgba(16,185,129,0.15);color:#34d399">Low</span></td>
+              <td><span class="badge badge-paid">Resolved</span></td>
+            </tr>
+            <tr>
+              <td>Vivaan Kapoor</td>
+              <td>AC not cooling properly</td>
+              <td>Jul 8, 2024</td>
+              <td><span class="badge badge-overdue">High</span></td>
+              <td><span class="badge badge-paid">Resolved</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Visitors Page -->
+    <div class="page" id="page-visitors">
+      <div class="page-header">
+        <div>
+          <h1>Visitors</h1>
+          <p class="page-subtitle">4 visits today</p>
+        </div>
+        <button class="btn btn-primary">+ Log Visitor</button>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Purpose</th>
+              <th>Check In</th>
+              <th>Check Out</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Suresh Kumar</td>
+              <td>Enquiry about admission</td>
+              <td>09:30 AM</td>
+              <td>10:00 AM</td>
+              <td><span class="badge badge-paid">Left</span></td>
+            </tr>
+            <tr>
+              <td>Preethi Rao</td>
+              <td>Parent visit – Navya Singh</td>
+              <td>11:00 AM</td>
+              <td>11:45 AM</td>
+              <td><span class="badge badge-paid">Left</span></td>
+            </tr>
+            <tr>
+              <td>Delivery Agent</td>
+              <td>Stationery delivery</td>
+              <td>12:30 PM</td>
+              <td>12:45 PM</td>
+              <td><span class="badge badge-paid">Left</span></td>
+            </tr>
+            <tr>
+              <td>Aman Gupta</td>
+              <td>Trial session enquiry</td>
+              <td>02:00 PM</td>
+              <td>still in</td>
+              <td><span class="badge badge-present">Inside</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Inventory Page -->
+    <div class="page" id="page-inventory">
+      <div class="page-header">
+        <div>
+          <h1>Inventory</h1>
+          <p class="page-subtitle">42 items tracked</p>
+        </div>
+        <button class="btn btn-primary">+ Add Item</button>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Category</th>
+              <th>Quantity</th>
+              <th>Condition</th>
+              <th>Last Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Study Chairs</td>
+              <td>Furniture</td>
+              <td>60</td>
+              <td><span class="badge badge-paid">Good</span></td>
+              <td>Jul 10, 2024</td>
+            </tr>
+            <tr>
+              <td>Study Tables</td>
+              <td>Furniture</td>
+              <td>60</td>
+              <td><span class="badge badge-paid">Good</span></td>
+              <td>Jul 10, 2024</td>
+            </tr>
+            <tr>
+              <td>Ceiling Fans</td>
+              <td>Electrical</td>
+              <td>18</td>
+              <td><span class="badge badge-pending">Fair</span></td>
+              <td>Jun 25, 2024</td>
+            </tr>
+            <tr>
+              <td>AC Units</td>
+              <td>Electrical</td>
+              <td>6</td>
+              <td><span class="badge badge-pending">Fair</span></td>
+              <td>Jul 3, 2024</td>
+            </tr>
+            <tr>
+              <td>Lockers</td>
+              <td>Storage</td>
+              <td>40</td>
+              <td><span class="badge badge-paid">Good</span></td>
+              <td>Jul 1, 2024</td>
+            </tr>
+            <tr>
+              <td>CCTV Cameras</td>
+              <td>Security</td>
+              <td>8</td>
+              <td><span class="badge badge-paid">Good</span></td>
+              <td>Jun 15, 2024</td>
+            </tr>
+            <tr>
+              <td>Whiteboards</td>
+              <td>Supplies</td>
+              <td>4</td>
+              <td><span class="badge badge-overdue">Poor</span></td>
+              <td>May 20, 2024</td>
+            </tr>
+            <tr>
+              <td>Fire Extinguishers</td>
+              <td>Safety</td>
+              <td>6</td>
+              <td><span class="badge badge-paid">Good</span></td>
+              <td>Jul 5, 2024</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Maintenance Page -->
+    <div class="page" id="page-maintenance">
+      <div class="page-header">
+        <div>
+          <h1>Maintenance</h1>
+          <p class="page-subtitle">2 active issues · 5 scheduled</p>
+        </div>
+        <button class="btn btn-primary">+ Log Issue</button>
+      </div>
+      <div class="card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Issue</th>
+              <th>Location</th>
+              <th>Reported</th>
+              <th>Technician</th>
+              <th>Priority</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Broken Chair</td>
+              <td>G-01</td>
+              <td>Jul 20, 2024</td>
+              <td>Karan Rao</td>
+              <td><span class="badge badge-overdue">High</span></td>
+              <td><span class="badge badge-pending">Open</span></td>
+            </tr>
+            <tr>
+              <td>AC Repair</td>
+              <td>First Floor</td>
+              <td>Jul 18, 2024</td>
+              <td>External Tech</td>
+              <td><span class="badge badge-overdue">High</span></td>
+              <td><span class="badge badge-pending">In Progress</span></td>
+            </tr>
+            <tr>
+              <td>Locker Key</td>
+              <td>S-06 Area</td>
+              <td>Jul 15, 2024</td>
+              <td>Amit Joshi</td>
+              <td><span class="badge badge-pending">Medium</span></td>
+              <td><span class="badge badge-pending">Open</span></td>
+            </tr>
+            <tr>
+              <td>Leaking Tap</td>
+              <td>Ground Floor WC</td>
+              <td>Jul 12, 2024</td>
+              <td>External Tech</td>
+              <td><span class="badge badge-pending">Medium</span></td>
+              <td><span class="badge badge-paid">Fixed</span></td>
+            </tr>
+            <tr>
+              <td>Tube Light</td>
+              <td>S-09</td>
+              <td>Jul 10, 2024</td>
+              <td>Karan Rao</td>
+              <td><span class="badge" style="background:rgba(16,185,129,0.15);color:#34d399">Low</span></td>
+              <td><span class="badge badge-paid">Fixed</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Documents Page -->
+    <div class="page" id="page-documents">
+      <div class="page-header">
+        <div>
+          <h1 data-i18n="form.documents">Documents</h1>
+          <p class="page-subtitle">Student IDs, agreements and receipts</p>
+        </div>
+        <button class="btn btn-primary" onclick="document.getElementById('generic-doc-upload').click()">+
+          Upload</button>
+        <input type="file" id="generic-doc-upload" style="display:none;"
+          onchange="window.uploadGenericDocument(this)" />
+      </div>
+      <div class="card">
+        <div id="document-list-container"></div>
+      </div>
+    </div>
+
+    <!-- Notifications Page -->
+    <div class="page" id="page-notifications">
+      <div class="page-header">
+        <div>
+          <h1>Notifications</h1>
+          <p class="page-subtitle">Announcements & Alerts</p>
+        </div>
+        <button class="btn btn-primary" onclick="document.getElementById('announcement-modal').showModal()">+ Schedule
+          Announcement</button>
+      </div>
+      <div class="card">
+        <div class="notif-list">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics Page -->
+    <div class="page" id="page-analytics">
+      <div class="page-header">
+        <div>
+          <h1 data-i18n="analytics.title">Analytics</h1>
+          <p class="page-subtitle">July 2024 performance overview</p>
+        </div>
+        <div class="filter-tabs"><button class="filter-tab active" data-range="month" data-i18n="analytics.thisMonth">This Month</button><button class="filter-tab" data-range="last" data-i18n="analytics.lastMonth">Last
+            Month</button><button class="filter-tab" data-range="quarter" data-i18n="analytics.quarter">Quarter</button></div>
+      </div>
+      <div class="metrics-grid" style="margin-bottom:1.5rem">
+        <div class="metric-card">
+          <div class="metric-icon emerald"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="1" x2="12" y2="23" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg></div>
+          <div class="metric-info">
+            <div class="metric-label" data-i18n="analytics.revenue">Revenue</div>
+            <div class="metric-value">₹71,000</div>
+            <div class="metric-change positive">↑ 12%</div>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+            </svg></div>
+          <div class="metric-info">
+            <div class="metric-label" data-i18n="analytics.newStudents">New Students</div>
+            <div class="metric-value">8</div>
+            <div class="metric-change positive">↑ 3 vs last month</div>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2" />
+              <rect x="2" y="9" width="20" height="11" rx="2" />
+            </svg></div>
+          <div class="metric-info">
+            <div class="metric-label" data-i18n="analytics.occupancy">Avg Occupancy</div>
+            <div class="metric-value">68%</div>
+            <div class="metric-change positive">↑ 5%</div>
+          </div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 11 12 14 22 4" />
+            </svg></div>
+          <div class="metric-info">
+            <div class="metric-label" data-i18n="analytics.attendanceRate">Attendance Rate</div>
+            <div class="metric-value">72%</div>
+            <div class="metric-change neutral">Similar to last month</div>
+          </div>
+        </div>
+      </div>
+      <!-- Chart area (visual bar chart using CSS) -->
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header">
+            <h3 data-i18n="analytics.monthlyRevenue">Monthly Revenue</h3>
+          </div>
+          <div class="chart-area">
+            <div class="bar-chart">
+              <div class="bar-group">
+                <div class="bar" style="--h:45%"><span class="bar-label">Feb</span></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar" style="--h:58%"><span class="bar-label">Mar</span></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar" style="--h:50%"><span class="bar-label">Apr</span></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar" style="--h:62%"><span class="bar-label">May</span></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar" style="--h:75%"><span class="bar-label">Jun</span></div>
+              </div>
+              <div class="bar-group">
+                <div class="bar active-bar" style="--h:90%"><span class="bar-label">Jul</span></div>
+              </div>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-box emerald"></span> Revenue (₹ thousands)
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h3 data-i18n="analytics.planDistribution">Plan Distribution</h3>
+          </div>
+          <div class="plan-dist">
+            <div class="dist-row">
+              <div class="dist-label">12 Hours Daily</div>
+              <div class="dist-bar-wrap">
+                <div class="dist-bar" style="width:46%; background: var(--accent-emerald)"></div>
+              </div>
+              <div class="dist-val">16</div>
+            </div>
+            <div class="dist-row">
+              <div class="dist-label">6 Hours Daily</div>
+              <div class="dist-bar-wrap">
+                <div class="dist-bar" style="width:34%; background:var(--accent-violet)"></div>
+              </div>
+              <div class="dist-val">12</div>
+            </div>
+            <div class="dist-row">
+              <div class="dist-label">Weekly Access</div>
+              <div class="dist-bar-wrap">
+                <div class="dist-bar" style="width:12%; background:var(--accent-blue)"></div>
+              </div>
+              <div class="dist-val">4</div>
+            </div>
+            <div class="dist-row">
+              <div class="dist-label">Quarterly Saver</div>
+              <div class="dist-bar-wrap">
+                <div class="dist-bar" style="width:6%; background:var(--accent-amber)"></div>
+              </div>
+              <div class="dist-val">2</div>
+            </div>
+            <div class="dist-row">
+              <div class="dist-label">Yearly Champion</div>
+              <div class="dist-bar-wrap">
+                <div class="dist-bar" style="width:3%; background:var(--accent-teal)"></div>
+              </div>
+              <div class="dist-val">1</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reports Page -->
+    <div class="page" id="page-reports">
+      <div class="page-header">
+        <div>
+          <h1>Reports</h1>
+          <p class="page-subtitle" data-i18n="report.subtitle">Generate and download reports</p>
+        </div>
+      </div>
+      <div class="report-grid">
+        <div class="report-card" onclick="window.openReportViewer('dashboard')">
+          <div class="report-icon emerald"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.dashboardTitle">Dashboard Summary</div>
+          <div class="report-desc" data-i18n="report.dashboardDesc">Master P&L, Revenue vs Expenses</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('payments')">
+          <div class="report-icon emerald"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <line x1="12" y1="1" x2="12" y2="23" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.paymentTitle">Payment Report</div>
+          <div class="report-desc" data-i18n="report.paymentDesc">All collections, dues, and breakdowns</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('students')">
+          <div class="report-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.studentTitle">Student Report</div>
+          <div class="report-desc" data-i18n="report.studentDesc">Active, inactive, and pending students list</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('attendance')">
+          <div class="report-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <polyline points="9 11 12 14 22 4" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.attendanceTitle">Attendance Report</div>
+          <div class="report-desc" data-i18n="report.attendanceDesc">Daily and monthly attendance records</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('seats')">
+          <div class="report-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M20 9V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2" />
+              <rect x="2" y="9" width="20" height="11" rx="2" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.seatTitle">Seat Occupancy Report</div>
+          <div class="report-desc" data-i18n="report.seatDesc">Seat utilization and floor-wise breakdown</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('expenses')">
+          <div class="report-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.expenseTitle">Expense Report</div>
+          <div class="report-desc" data-i18n="report.expenseDesc">Monthly expenses breakdown by category</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('membershipPlans')">
+          <div class="report-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.membershipTitle">Membership Report</div>
+          <div class="report-desc" data-i18n="report.membershipDesc">Plan distribution and tracking</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('renewals')">
+          <div class="report-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M1 4v6h6" />
+              <path d="M23 20v-6h-6" />
+              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.renewalTitle">Renewal Report</div>
+          <div class="report-desc" data-i18n="report.renewalDesc">Historical log of all membership renewals</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('visitors')">
+          <div class="report-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.visitorTitle">Visitor Report</div>
+          <div class="report-desc" data-i18n="report.visitorDesc">Walk-ins, inquiries and foot traffic</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+        <div class="report-card" onclick="window.openReportViewer('complaints')">
+          <div class="report-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              width="24" height="24">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg></div>
+          <div class="report-name" data-i18n="report.complaintTitle">Complaint Report</div>
+          <div class="report-desc" data-i18n="report.complaintDesc">Student issues and resolution tracking</div>
+          <button class="btn btn-ghost btn-sm" data-i18n="btn.viewReport">View Report</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Report Viewer Page (Dynamically Populated) -->
+    <div class="page" id="page-report-viewer" style="display:none;">
+      <div class="page-header" style="align-items: center;">
+        <div style="display:flex; align-items:center; gap: 1rem;">
+          <button class="btn btn-ghost" onclick="window.closeReportViewer()">← Back</button>
+          <div>
+            <h1 id="rv-title">Report Title</h1>
+            <p class="page-subtitle">Live analytics generated from Firestore</p>
+          </div>
+        </div>
+        <div style="display:flex; gap: 0.5rem;">
+          <button class="btn btn-secondary" onclick="window.handleReportExport('csv')" id="btn-export-csv">Export
+            CSV</button>
+          <button class="btn btn-secondary" onclick="window.handleReportExport('excel')" id="btn-export-excel">Export
+            Excel</button>
+          <button class="btn btn-primary" onclick="window.handleReportExport('pdf')" id="btn-export-pdf">Export
+            PDF</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: 2rem;">
+        <div class="toolbar">
+          <div style="display:flex; gap: 1rem; align-items:center;">
+            <label>Date Range:</label>
+            <select id="rv-date-filter" onchange="window.handleReportFilterChange()">
+              <option value="thisMonth">This Month</option>
+              <option value="last30">Last 30 Days</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
+        </div>
+        <div class="metrics-grid" id="rv-summary-container" style="margin-top: 1.5rem;">
+          <!-- Summary cards injected here -->
+        </div>
+      </div>
+
+      <!-- Chart Area -->
+      <div class="card" id="rv-chart-container" style="margin-bottom: 2rem; height: 350px;">
+        <canvas id="rv-chart-canvas"></canvas>
+      </div>
+
+      <!-- Data Table -->
+      <div class="card">
+        <h3>Detailed Records</h3>
+        <div class="table-container" id="rv-table-container">
+          <!-- Table injected here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Page -->
+    <div class="page" id="page-settings">
+      <div class="page-header">
+        <div>
+          <h1>Settings</h1>
+          <p class="page-subtitle" data-i18n="settings.configureReadingSpace">Configure your reading space</p>
+        </div>
+        <button class="btn btn-primary">Save Changes</button>
+      </div>
+      <div class="settings-grid">
+        <div class="card settings-card">
+          <div class="settings-section-title">Reading Space Info</div>
+          <div class="form-grid">
+            <div class="form-group full-width"><label data-i18n="settings.spaceName">Space Name</label><input
+                type="text" value="Studyhaus" /></div>
+            <div class="form-group full-width"><label data-i18n="form.address"
+                data-i18n="form.address">Address</label><textarea rows="2">123, MG Road, Bangalore - 560001</textarea>
+            </div>
+            <div class="form-group"><label data-i18n="form.phone" data-i18n="form.phone">Phone</label><input type="tel"
+                pattern="[0-9]{10}" title="Must be exactly 10 digits" value="+91 98765 43210" /></div>
+            <div class="form-group"><label data-i18n="form.email" data-i18n="form.email">Email</label><input
+                type="email" value="admin@studyhaus.com" /></div>
+            <div class="form-group"><label data-i18n="settings.gstNumber">GST Number</label><input type="text"
+                value="29ABCDE1234F1Z5" /></div>
+            <div class="form-group"><label data-i18n="settings.openingTime">Opening Time</label><input type="time"
+                value="06:00" /></div>
+            <div class="form-group"><label data-i18n="settings.closingTime">Closing Time</label><input type="time"
+                value="23:00" /></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </main>
+  </div>
+  </div>
+  <!-- Firebase Import Map for native browser ES modules -->
+  <script type="importmap">
+    {
+      "imports": {
+        "firebase/app":      "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+        "firebase/auth":     "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+        "firebase/firestore":"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"
+      }
+    }
+  </script>
+  <script src="../app.js"></script>
+  <script type="module" src="../firebase-entry.js"></script>
+</body>
+
+</html>
