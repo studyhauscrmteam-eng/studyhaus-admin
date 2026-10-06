@@ -224,6 +224,53 @@ export const loadStudentDocuments = async (studentId) => {
 };
 
 /**
+ * READ-ONLY: every stored file across ALL students (`studentDocuments/{id}`),
+ * each entry tagged with the owning student's name. Used by the sidebar
+ * Documents gallery for view + download ONLY — this function never writes.
+ */
+export const loadAllStudentDocuments = async () => {
+  const { collection, getDocs } = await import("firebase/firestore");
+  const docsSnap = await getDocs(collection(db, "studentDocuments"));
+
+  // Names are cosmetic — fall back to the raw id if the students read fails.
+  let studentNames = {};
+  try {
+    const studentsSnap = await getDocs(collection(db, "students"));
+    studentsSnap.docs.forEach(d => {
+      const s = d.data() || {};
+      if (s.name) studentNames[d.id] = s.name;
+    });
+  } catch (_) { /* permission/network — show ids instead of names */ }
+
+  const files = [];
+  docsSnap.docs.forEach(d => {
+    const data = d.data() || {};
+    const studentId = String(data.studentId || d.id);
+    for (const f of STUDENT_DOC_FIELDS) {
+      let value = data[f.key] || "";
+      if (f.key === "photo" && !value) {
+        value = data.profilePhoto || data.selfie || ""; // legacy single-photo fields
+      }
+      if (typeof value === "string" && value.length > 0) {
+        files.push({
+          studentId,
+          studentName: studentNames[studentId] || "",
+          key: f.key,
+          label: f.label,
+          dataUrl: value,
+          updatedAt: data.updatedAt || ""
+        });
+      }
+    }
+  });
+
+  files.sort((a, b) =>
+    (a.studentName || a.studentId).localeCompare(b.studentName || b.studentId)
+  );
+  return files;
+};
+
+/**
  * Fields stored per student in `studentDocuments/{studentId}`.
  * There is exactly ONE photo field: `photo`. Legacy `selfie` and
  * `profilePhoto` copies from older builds are still READ as a fallback

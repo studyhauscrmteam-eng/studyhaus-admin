@@ -412,6 +412,7 @@ const ensureDocService = async () => {
     const mod = await import('./services/documentUploadService.js');
     window.uploadGlobalDocument = mod.uploadGlobalDocument;
     window.loadGlobalDocuments = mod.loadGlobalDocuments;
+    window.loadAllStudentDocuments = mod.loadAllStudentDocuments;
     window.downloadBase64File = mod.downloadBase64File;
     return true;
   } catch (e) {
@@ -451,55 +452,107 @@ window.renderGlobalDocuments = async () => {
     st.textContent = `@keyframes doc-spin { to { transform: rotate(360deg); } }
       #document-list-container .doc-spinner { width:28px; height:28px; border-radius:50%;
         border:3px solid rgba(128,128,128,.25); border-top-color: var(--primary, #8b5cf6);
-        animation: doc-spin .8s linear infinite; }`;
+        animation: doc-spin .8s linear infinite; }
+      #document-list-container .docs-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:1rem; }
+      #document-list-container .doc-sec-title { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+        color:var(--text-muted); margin:0 0 .75rem; }
+      #document-list-container .doc-thumb { width:52px; height:52px; border-radius:8px; overflow:hidden; flex-shrink:0;
+        background:var(--bg-hover); display:flex; align-items:center; justify-content:center; color:var(--primary); }
+      #document-list-container .doc-thumb img { width:100%; height:100%; object-fit:cover; }`;
     document.head.appendChild(st);
   }
 
   container.innerHTML = `<div style="text-align:center;padding:2rem;"><div class="doc-spinner" style="margin:0 auto;"></div><p style="margin-top:.75rem;color:var(--text-secondary);">Loading documents...</p></div>`;
+
   try {
     if (!(await ensureDocService())) {
       throw new Error("Document service could not be loaded.");
     }
-    const docs = await window.loadGlobalDocuments();
-    if (docs.length === 0) {
+    if (typeof window.loadAllStudentDocuments !== 'function') {
+      const mod = await import('./services/documentUploadService.js');
+      window.loadAllStudentDocuments = mod.loadAllStudentDocuments;
+    }
+
+    // Read-only: general documents + every student document in the DB.
+    const [docs, studentFiles] = await Promise.all([
+      window.loadGlobalDocuments(),
+      window.loadAllStudentDocuments(),
+    ]);
+    window.__globalDocs = docs;
+    window.__studentDocsAll = studentFiles;
+
+    if (docs.length === 0 && studentFiles.length === 0) {
       container.innerHTML = `<div style="text-align:center;padding:3rem 1rem;border:1px dashed var(--border);border-radius:12px;background:var(--bg-card);">
         <div style="font-size:2rem;opacity:0.5;margin-bottom:1rem;">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
-        <p style="color:var(--text-secondary);">No documents uploaded yet</p>
-        <p style="color:var(--text-muted);font-size:13px;margin-top:.35rem;">Use the <strong>+ Upload</strong> button above to add one.</p>
+        <p style="color:var(--text-secondary);">No documents found</p>
+        <p style="color:var(--text-muted);font-size:13px;margin-top:.35rem;">Documents stored in the database will appear here.</p>
       </div>`;
       return;
     }
 
-    let html = `<div style="display:grid;gap:1rem;">`;
-    window.__globalDocs = docs;
     const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, c => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
-    docs.forEach((doc, index) => {
-      const uploadedAt = doc.uploadedAt ? new Date(doc.uploadedAt) : null;
-      const date = uploadedAt && !isNaN(uploadedAt) ? uploadedAt.toLocaleString() : 'Unknown date';
-      const fileType = doc.fileType || '';
-      let iconSvg = fileType.includes("image")
-        ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`
-        : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-      const title = escapeHtml(doc.title || doc.fileName || 'Untitled');
-      const fileName = escapeHtml(doc.fileName || doc.title || 'document');
-      html += `
+    const imageIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`;
+    const fileIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+    const downloadBtn = (handler) => `
+        <button type="button" onclick="${handler}" class="btn btn-secondary" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download
+        </button>`;
+
+    let html = "";
+
+    // ── 1. Student documents (every studentDocuments file in the DB) ──
+    if (studentFiles.length > 0) {
+      html += `<p class="doc-sec-title">Student documents — ${studentFiles.length} file${studentFiles.length === 1 ? "" : "s"}</p>
+      <div class="docs-grid" style="margin-bottom:1.75rem;">`;
+      studentFiles.forEach((f, index) => {
+        const isImg = String(f.dataUrl).startsWith("data:image");
+        const thumb = isImg
+          ? `<img src="${f.dataUrl}" alt="${escapeHtml(f.label)}">`
+          : fileIcon;
+        const who = escapeHtml(f.studentName || f.studentId);
+        html += `
+        <div style="display:flex;flex-direction:column;gap:.6rem;padding:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;">
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <div class="doc-thumb">${thumb}</div>
+            <div style="min-width:0;">
+              <h4 style="margin:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${who}">${who}</h4>
+              <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(f.label)}</p>
+            </div>
+          </div>
+          ${downloadBtn(`window.__downloadStudentDocFile(${index})`)}
+        </div>`;
+      });
+      html += `</div>`;
+    }
+
+    // ── 2. General documents (globalDocuments) ──
+    if (docs.length > 0) {
+      html += `<p class="doc-sec-title">General documents — ${docs.length} file${docs.length === 1 ? "" : "s"}</p>
+      <div style="display:grid;gap:1rem;">`;
+      docs.forEach((doc, index) => {
+        const uploadedAt = doc.uploadedAt ? new Date(doc.uploadedAt) : null;
+        const date = uploadedAt && !isNaN(uploadedAt) ? uploadedAt.toLocaleString() : 'Unknown date';
+        const fileType = doc.fileType || '';
+        const iconSvg = fileType.includes("image") ? imageIcon : fileIcon;
+        const title = escapeHtml(doc.title || doc.fileName || 'Untitled');
+        html += `
       <div class="data-card" style="display:flex;align-items:center;padding:1rem;gap:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;">
         <div style="background:var(--bg-hover);border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:center;color:var(--primary);">${iconSvg}</div>
         <div style="flex:1;min-width:0;">
           <h4 style="margin:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</h4>
           <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${date}</p>
         </div>
-        <button type="button" onclick="window.__downloadDoc(${index})" class="btn btn-secondary" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download
-        </button>
+        ${downloadBtn(`window.__downloadDoc(${index})`)}
       </div>
     `;
-    });
-    html += `</div>`;
+      });
+      html += `</div>`;
+    }
+
     container.innerHTML = html;
   } catch (e) {
     console.error(e);
@@ -532,6 +585,21 @@ window.__downloadDoc = async (index) => {
     }
   }
   window.downloadBase64File(d.base64Data || '', d.fileName || d.title || 'document');
+};
+
+// Download one student document from the read-only Documents gallery.
+window.__downloadStudentDocFile = (index) => {
+  const f = (window.__studentDocsAll || [])[index];
+  if (!f || !f.dataUrl) {
+    if (typeof showToast === 'function') showToast('No file to download.', 'error');
+    return;
+  }
+  if (typeof window.downloadBase64File !== 'function') {
+    if (typeof showToast === 'function') showToast('Downloader could not be loaded. Please refresh the page.', 'error');
+    return;
+  }
+  const who = String(f.studentName || f.studentId || 'student').replace(/[^\w\-]+/g, '_');
+  window.downloadBase64File(f.dataUrl, `${who}_${f.key}`);
 };
 
 

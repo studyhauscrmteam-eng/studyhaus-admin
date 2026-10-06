@@ -43,9 +43,10 @@ window.openReportViewer = openReportViewer;
 window.closeReportViewer = closeReportViewer;
 
 // Expose Document Upload logic globally
-import { uploadGlobalDocument, loadGlobalDocuments, downloadBase64File } from "./services/documentUploadService.js";
+import { uploadGlobalDocument, loadGlobalDocuments, loadAllStudentDocuments, downloadBase64File } from "./services/documentUploadService.js";
 window.uploadGlobalDocument = uploadGlobalDocument;
 window.loadGlobalDocuments = loadGlobalDocuments;
+window.loadAllStudentDocuments = loadAllStudentDocuments;
 window.downloadBase64File = downloadBase64File;
 
 // Ensure downloadBase64File is available immediately (fallback)
