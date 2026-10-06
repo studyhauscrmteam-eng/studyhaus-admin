@@ -116,12 +116,29 @@ const resolveUserRole = async (user) => {
       throw new Error("Account Disabled, Inactive, or Moved to Old Students. Please contact administration.");
     }
 
-    // Revoke gate: Clear login sets loginRevoked=true on the doc.
-    // Revoked users are signed out and refused here.
-    if (userDoc.loginRevoked === true) {
-      try { await authLogout(); } catch (_) {}
-      try { localStorage.removeItem("userRole"); localStorage.removeItem("userId"); } catch (_) {}
-      throw new Error("This login has been revoked by the administrator. Please contact the office.");
+    // Student logins require stored credentials: a cleared (or never
+    // created) login has no loginId/loginPassword — refuse before redirect.
+    // Staff roles (Owner/Manager/Employee) never carry these fields.
+    if (userDoc.role === ROLES.STUDENT) {
+      // Same rule the student card uses to display credentials: raw fields
+      // first, then the legacy "id / pass" string.
+      let credId = String(userDoc.loginId || "").trim();
+      let credPass = String(userDoc.loginPassword || "").trim();
+      if ((!credId || !credPass) && userDoc.loginCredentials) {
+        const raw = String(userDoc.loginCredentials);
+        const slash = raw.indexOf("/");
+        if (slash !== -1) {
+          if (!credId) credId = raw.slice(0, slash).trim();
+          if (!credPass) credPass = raw.slice(slash + 1).trim();
+        } else if (!credId) {
+          credId = raw.trim();
+        }
+      }
+      if (!credId || !credPass) {
+        try { await authLogout(); } catch (_) {}
+        try { localStorage.removeItem("userRole"); localStorage.removeItem("userId"); } catch (_) {}
+        throw new Error("Login not created. Please contact the administration to set up your portal login.");
+      }
     }
 
     return { userDoc, docId };

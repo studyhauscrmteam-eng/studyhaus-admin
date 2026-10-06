@@ -575,16 +575,16 @@ const renderProfileModal = (s, role) => {
   if (clearBtn) {
     clearBtn.addEventListener("click", async () => {
       const ok = await window.showCustomConfirm(
-        "Revoke Portal Login",
-        "Revoke this student's portal login? Stored ID / Password removed, card link cleared, sign-in blocked. (Finish in Firebase Console — disable the Auth user — for full revoke.)",
-        "Revoke",
+        "Remove Portal Login",
+        "Remove this student's portal login? Stored ID / Password deleted — sign-in stops working. Profile and everything else stay untouched.",
+        "Remove",
         false
       );
       if (!ok) return;
       clearBtn.disabled = true;
       try {
         await clearPortalCredentials(s.id);
-        window.showToast("Login revoked — card cleared, sign-in blocked. Disable the Auth user in Console for full revoke.", "success");
+        window.showToast("Login removed — credentials deleted, sign-in blocked.", "success");
         window.closeStudentProfile();
       } catch (e) {
         window.showToast("Could not remove credentials: " + e.message, "error");
