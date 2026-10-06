@@ -576,7 +576,7 @@ const renderProfileModal = (s, role) => {
     clearBtn.addEventListener("click", async () => {
       const ok = await window.showCustomConfirm(
         "Remove Login Credentials",
-        "Remove ONLY the stored Login ID / Login Password for this student? All other data stays untouched.",
+        "Remove ONLY the stored Login ID / Login Password for this student? Profile cleared — but Auth sign-in stays active until the Auth user is disabled in Firebase Console (or revoked by Function).",
         "Remove",
         false
       );
@@ -584,7 +584,7 @@ const renderProfileModal = (s, role) => {
       clearBtn.disabled = true;
       try {
         await clearPortalCredentials(s.id);
-        window.showToast("Credentials removed. Enter a fresh Login ID + Password and Save.", "success");
+        window.showToast("Profile cleared — Auth still active until Function revoke is done. Disable the Auth user in Firebase Console to fully revoke.", "success");
         window.closeStudentProfile();
       } catch (e) {
         window.showToast("Could not remove credentials: " + e.message, "error");

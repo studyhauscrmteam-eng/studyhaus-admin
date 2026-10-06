@@ -146,8 +146,12 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
 /**
  * Remove ONLY the portal-login credential fields from a student document —
  * profile, payments, seat, documents and everything else stay untouched.
- * (The Firebase Auth account itself cannot be deleted from a browser; if the
- * same ID + password are entered again they simply re-link to it.)
+ *
+ * HONEST LIMIT: this clears the card link, NOT the Firebase Auth account
+ * (a browser SDK cannot delete Auth users). Sign-in with the same ID keeps
+ * working until the Auth user is disabled/deleted in Firebase Console
+ * (Authentication panel) or a backend Function revokes it. Do not show
+ * "removed/disabled" copy that implies sign-in is dead.
  */
 export const clearPortalCredentials = async (studentId) => {
   await updateDoc(doc(db, "students", studentId), {

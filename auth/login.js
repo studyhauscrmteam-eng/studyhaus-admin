@@ -1,6 +1,6 @@
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
-import { login as authServiceLogin, loginWithPhone, setSessionPersistence } from "../services/authService.js";
+import { login as authServiceLogin, loginWithPhone, setSessionPersistence, logout as authLogout } from "../services/authService.js";
 import { getDocument } from "../services/firestoreService.js";
 import { ROLES } from "./roles.js";
 import { toUserFriendlyAuthError } from "./errorMessages.js";
@@ -114,6 +114,14 @@ const resolveUserRole = async (user) => {
 
     if (userDoc.status === "disabled" || userDoc.status === "Inactive" || userDoc.status === "Old" || userDoc.status === "Old Student") {
       throw new Error("Account Disabled, Inactive, or Moved to Old Students. Please contact administration.");
+    }
+
+    // Read-side revoke gate (no writes): honored only once Clear sets
+    // loginRevoked=true on the doc. Until then this changes nothing.
+    if (userDoc.loginRevoked === true) {
+      try { await authLogout(); } catch (_) {}
+      try { localStorage.removeItem("userRole"); localStorage.removeItem("userId"); } catch (_) {}
+      throw new Error("This login has been revoked by the administrator. Please contact the office.");
     }
 
     return { userDoc, docId };
