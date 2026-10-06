@@ -116,8 +116,8 @@ const resolveUserRole = async (user) => {
       throw new Error("Account Disabled, Inactive, or Moved to Old Students. Please contact administration.");
     }
 
-    // Read-side revoke gate (no writes): honored only once Clear sets
-    // loginRevoked=true on the doc. Until then this changes nothing.
+    // Revoke gate: Clear login sets loginRevoked=true on the doc.
+    // Revoked users are signed out and refused here.
     if (userDoc.loginRevoked === true) {
       try { await authLogout(); } catch (_) {}
       try { localStorage.removeItem("userRole"); localStorage.removeItem("userId"); } catch (_) {}
