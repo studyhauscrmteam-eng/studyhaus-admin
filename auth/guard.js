@@ -186,12 +186,8 @@ export const initAuthGuard = () => {
       }
 
       if (!isPublicPage) {
-        // Redirect to login if on a protected page
-        if (currentPath.startsWith("/student/")) {
-          window.location.href = "/student-login.html";
-        } else {
-          window.location.href = "/login.html";
-        }
+        // Admin-only copy: all protected pages use the admin login.
+        window.location.href = "/login.html";
       } else {
         if (loader) loader.style.display = "none";
       }

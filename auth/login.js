@@ -35,7 +35,7 @@ export const getRedirectUrlForRole = (rawRole) => {
     case ROLES.EMPLOYEE:
       return "/employee/dashboard.html";
     case ROLES.STUDENT:
-      return "/student/dashboard.html";
+      return "/unauthorized.html";
     default:
       return "/unauthorized.html";
   }

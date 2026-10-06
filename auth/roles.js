@@ -30,14 +30,6 @@ export const PERMISSIONS = {
     "complaints",
     "seats",
     "notifications"
-  ],
-  [ROLES.STUDENT]: [
-    "student-portal",
-    "student-payments",
-    "student-attendance",
-    "student-complaints",
-    "student-profile",
-    "notifications"
   ]
 };
 

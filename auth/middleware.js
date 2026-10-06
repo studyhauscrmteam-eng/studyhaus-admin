@@ -16,10 +16,9 @@ export const protectRoute = (rawRole, path) => {
   // If unauthorized page, anyone logged in can view it (usually to see the "Go Back" button)
   if (path.includes("unauthorized.html")) return;
 
-  // Student portal is students-only. Staff (including Owner) are bounced to
-  // their own dashboard — no viewing, no testing inside.
-  if (path.includes("/student/") && role !== ROLES.STUDENT) {
-    window.location.href = getDefaultRoute(role);
+  // Admin-only copy: no student portal. Any legacy /student/ URL is denied.
+  if (path.includes("/student/")) {
+    window.location.href = "/unauthorized.html";
     return;
   }
 
@@ -35,9 +34,6 @@ export const protectRoute = (rawRole, path) => {
   } else if (role === ROLES.EMPLOYEE) {
     // Employee should be in /employee/
     if (path.includes("/employee/")) isAllowed = true;
-  } else if (role === ROLES.STUDENT) {
-    // Student should be in /student/
-    if (path.includes("/student/")) isAllowed = true;
   }
 
   // If the user tries to access the root index.html manually after login, redirect them to their correct dashboard
@@ -65,7 +61,7 @@ const getDefaultRoute = (rawRole) => {
     case ROLES.OWNER: return "/admin/dashboard.html";
     case ROLES.MANAGER: return "/manager/dashboard.html";
     case ROLES.EMPLOYEE: return "/employee/dashboard.html";
-    case ROLES.STUDENT: return "/student/dashboard.html";
+    case ROLES.STUDENT: return "/unauthorized.html";
     default: return "/unauthorized.html";
   }
 };

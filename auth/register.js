@@ -36,7 +36,7 @@ const getDashboardUrl = (rawRole) => {
     case ROLES.OWNER:    return "/admin/dashboard.html";
     case ROLES.MANAGER:  return "/manager/dashboard.html";
     case ROLES.EMPLOYEE: return "/employee/dashboard.html";
-    case ROLES.STUDENT:  return "/student/dashboard.html";
+    case ROLES.STUDENT:  return "/unauthorized.html";
     default:             return "/login.html";
   }
 };
