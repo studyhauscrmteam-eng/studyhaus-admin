@@ -318,11 +318,6 @@ const renderProfileModal = (s, role) => {
   const hideForEmployee = !canEdit ? "display:none;" : "";
 
   // ── Portal login state (Owner sets/creates it from this popup) ──────────
-  // "Login active" ONLY when the credential pair is actually on file.
-  // uid/authEmail alone means an Auth account is linked but the card has
-  // nothing to show — that must never render as active.
-  const hasAuthLink = !!(s.uid || s.authEmail);
-  const hasPortalAccount = !!(portalId && portalPass);
   // Split into two fields: prefer raw fields, fall back to legacy "id / pass"
   let portalId = s.loginId || "";
   let portalPass = s.loginPassword || "";
@@ -336,6 +331,12 @@ const renderProfileModal = (s, role) => {
       portalId = rawCred.trim();
     }
   }
+  // "Login active" ONLY when the credential pair is actually on file.
+  // uid/authEmail alone means an Auth account is linked but the card has
+  // nothing to show — that must never render as active. (Declared after
+  // portalId/portalPass — referencing them earlier throws a TDZ error.)
+  const hasAuthLink = !!(s.uid || s.authEmail);
+  const hasPortalAccount = !!(portalId && portalPass);
 
   let planOptions = `<option value="">Select Plan...</option>`;
   availablePlans.forEach(p => {
