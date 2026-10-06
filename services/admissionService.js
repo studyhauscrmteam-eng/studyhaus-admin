@@ -211,8 +211,23 @@ export const initAdmissionsUI = async () => {
   window.approveStudent = async (id) => {
     const confirmed = await window.showCustomConfirm("Approve Admission", "Are you sure you want to approve this student?", "Approve", false);
     if (confirmed) {
+      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
       const res = await approveAdmission(id);
-      if (res.success) window.showToast("Admission Approved! Student is now Active.", "success");
+      if (res.success) {
+        // Log the decision so it stays visible on the Notifications page
+        // after the item leaves the live pending queue.
+        if (typeof window.recordAdmissionDecision === "function") {
+          window.recordAdmissionDecision({
+            admissionId: id,
+            name: rec.name || "Admission",
+            phone: rec.phone || "",
+            planName: rec.planName || "",
+            seat: rec.seatAssigned || rec.seatNumber || "",
+            decision: "Approved",
+          });
+        }
+        window.showToast("Admission Approved! Student is now Active.", "success");
+      }
       else window.showToast("Error: " + res.error, "error");
     }
   };
@@ -220,8 +235,22 @@ export const initAdmissionsUI = async () => {
   window.rejectStudent = async (id) => {
     const reason = await window.showCustomPrompt("Reject Admission", "Please provide a reason for rejection (optional):", "Reject", true);
     if (reason !== null) {
+      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
       const res = await rejectAdmission(id, reason);
-      if (res.success) window.showToast("Admission Rejected.", "info");
+      if (res.success) {
+        if (typeof window.recordAdmissionDecision === "function") {
+          window.recordAdmissionDecision({
+            admissionId: id,
+            name: rec.name || "Admission",
+            phone: rec.phone || "",
+            planName: rec.planName || "",
+            seat: rec.seatAssigned || rec.seatNumber || "",
+            decision: "Rejected",
+            reason: reason || "",
+          });
+        }
+        window.showToast("Admission Rejected.", "info");
+      }
       else window.showToast("Error: " + res.error, "error");
     }
   };
@@ -350,7 +379,15 @@ export const initAdmissionsUI = async () => {
         } else if (r.paymentMethod === "Pay Later") {
           paymentInfo = `<div style="font-size:11px; color:var(--warning); font-weight:600; margin-top:4px;">Pay Later</div>`;
         }
-        
+
+        // Preferred seat — only exists when the plan allows seat selection
+        // and one was picked (plans without seat preference strip the field
+        // at submit/approve, so nothing renders there).
+        const seatValue = String(r.seatAssigned || r.seatNumber || "").trim();
+        const seatInfo = (seatValue && seatValue !== "undefined")
+          ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${seatValue}</div>`
+          : "";
+
         html += `
           <tr>
             <td>
@@ -359,7 +396,7 @@ export const initAdmissionsUI = async () => {
               ${paymentInfo}
             </td>
             <td>${r.phone}</td>
-            <td>${r.planName}</td>
+            <td>${r.planName}${seatInfo}</td>
             <td>${d}</td>
             <td style="text-align:right; white-space:nowrap;">
               <button class="btn btn-sm btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
