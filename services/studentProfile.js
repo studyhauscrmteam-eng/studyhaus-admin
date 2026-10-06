@@ -364,6 +364,13 @@ const renderProfileModal = (s, role) => {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.08);
       }
+      /* Credential hints must never look like filled data */
+      #view-login-id::placeholder,
+      #view-login-pass::placeholder {
+        color: var(--text-muted);
+        opacity: 0.55;
+        font-style: italic;
+      }
       #student-profile-modal .form-group input, 
       #student-profile-modal .form-group select {
         transition: all 0.2s ease;
@@ -506,7 +513,7 @@ const renderProfileModal = (s, role) => {
                 ${hasPortalAccount
                   ? `<small style="font-size:11.5px; color:#166534; font-weight:600;">🟢 Login active</small>`
                   : `<small style="font-size:11.5px; color:#b91c1c; font-weight:600;">🔴 Login not created — fill both &amp; Save</small>`}
-                ${hasPortalAccount || portalId || portalPass
+                ${hasPortalAccount || portalId || portalPass || s.uid || s.authEmail
                   ? `<button type="button" id="btn-clear-login" class="btn btn-ghost" title="Remove only the stored Login ID / Password — nothing else"
                       style="margin-left:auto; padding:5px 12px; font-size:11.5px; font-weight:600; border-radius:8px;">Clear login</button>`
                   : ""}
