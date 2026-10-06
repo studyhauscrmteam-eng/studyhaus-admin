@@ -318,7 +318,11 @@ const renderProfileModal = (s, role) => {
   const hideForEmployee = !canEdit ? "display:none;" : "";
 
   // ── Portal login state (Owner sets/creates it from this popup) ──────────
-  const hasPortalAccount = !!(s.uid || s.authEmail);
+  // "Login active" ONLY when the credential pair is actually on file.
+  // uid/authEmail alone means an Auth account is linked but the card has
+  // nothing to show — that must never render as active.
+  const hasAuthLink = !!(s.uid || s.authEmail);
+  const hasPortalAccount = !!(portalId && portalPass);
   // Split into two fields: prefer raw fields, fall back to legacy "id / pass"
   let portalId = s.loginId || "";
   let portalPass = s.loginPassword || "";
@@ -503,8 +507,10 @@ const renderProfileModal = (s, role) => {
               <div style="display:flex; gap:10px; align-items:center;">
                 ${hasPortalAccount
                   ? `<small style="font-size:11.5px; color:#166534; font-weight:600;">🟢 Login active</small>`
+                  : hasAuthLink
+                  ? `<small style="font-size:11.5px; color:#b45309; font-weight:600;">🟡 Account linked${s.authEmail ? ` (${escAttr(s.authEmail)})` : ``} but credentials not on file — re-enter the original ID + password and Save, or Clear login to reset.</small>`
                   : `<small style="font-size:11.5px; color:#b91c1c; font-weight:600;">🔴 Login not created — fill both &amp; Save</small>`}
-                ${hasPortalAccount || portalId || portalPass
+                ${hasAuthLink || portalId || portalPass
                   ? `<button type="button" id="btn-clear-login" class="btn btn-ghost" title="Remove only the stored Login ID / Password — nothing else"
                       style="margin-left:auto; padding:5px 12px; font-size:11.5px; font-weight:600; border-radius:8px;">Clear login</button>`
                   : ""}
@@ -584,7 +590,7 @@ const renderProfileModal = (s, role) => {
     });
   }
 
-  if (isOwner && hasPortalAccount && !portalId && !portalPass && s.uid) {
+  if (isOwner && hasAuthLink && s.uid && (!portalId || !portalPass)) {
     // Rare: uid-keyed doc without stored credentials — check the auth profile.
     import("./firestoreService.js").then(({ getDocument }) => {
       getDocument("users", s.uid).then(userDoc => {
