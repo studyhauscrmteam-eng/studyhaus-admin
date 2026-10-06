@@ -125,6 +125,50 @@ export const initStudentManagementUI = async () => {
     const modal = document.getElementById("student-profile-modal");
     if (modal) modal.close();
   };
+
+  // Defined once (modal re-renders every open): SVG eye toggle + copy.
+  // Read-only helpers — no Firestore writes.
+  if (!window.togglePortalPass) {
+    window.togglePortalPass = (btn) => {
+      const input = document.getElementById("view-login-pass");
+      if (!input) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = show
+        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+        : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+      btn.setAttribute("aria-pressed", String(show));
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      btn.title = show ? "Hide password" : "Show password";
+    };
+  }
+
+  if (!window.copyPortalField) {
+    window.copyPortalField = async (inputId, btn) => {
+      const el = document.getElementById(inputId);
+      if (!el || !el.value) {
+        if (window.showToast) window.showToast("Nothing to copy.", "warning");
+        return;
+      }
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(el.value);
+        ok = true;
+      } catch (_) {
+        try {
+          el.focus();
+          el.select();
+          ok = document.execCommand("copy");
+        } catch (__) { ok = false; }
+      }
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => { btn.innerHTML = orig; }, 1200);
+      }
+      if (!ok && window.showToast) window.showToast("Copy failed — select the text manually.", "error");
+    };
+  }
 };
 
 // ==========================================
@@ -289,6 +333,16 @@ const renderProfileModal = (s, role) => {
     }
   }
 
+  // Display-only fallback (never written back — submit skips locked fields):
+  // derive the real login ID from authEmail when the stored loginId is
+  // missing. Phone logins use "<10-digit>@student.shreejilibrary.com";
+  // email logins use the email itself.
+  let displayId = portalId;
+  if (!displayId && s.authEmail) {
+    const m = String(s.authEmail).match(/^(\d{10})@student\.shreejilibrary\.com$/);
+    displayId = m ? m[1] : String(s.authEmail);
+  }
+
   let planOptions = `<option value="">Select Plan...</option>`;
   availablePlans.forEach(p => {
     const selected = p.id === s.planId ? "selected" : "";
@@ -418,32 +472,42 @@ const renderProfileModal = (s, role) => {
             ${isOwner ? `
             <div class="form-group">
               <label>Login ID</label>
+              <div style="position: relative;">
               <input type="text" id="view-login-id"
-                value="${portalId}"
-                placeholder="e.g. 9876543210 or student@email.com"
+                value="${escAttr(displayId)}"
+                placeholder="${hasPortalAccount ? 'Not stored on this record' : 'e.g. 9876543210 or student@email.com'}"
                 autocapitalize="none" autocorrect="off" spellcheck="false"
                 ${hasPortalAccount
-                  ? `readonly disabled style="background: var(--bg-hover); color: var(--text-muted); cursor: not-allowed; font-size:13px; font-family:inherit;"`
+                  ? `readonly data-locked="1" onfocus="this.select()" title="Click to select, copy button on the right" style="background: var(--bg-hover); color: var(--text-primary); cursor: text; font-size:13px; font-family:inherit; padding-right:34px; width:100%; user-select:text;"`
                   : `style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); cursor: text; font-size:13px; font-family:inherit; -webkit-text-fill-color: var(--text-primary); -webkit-box-shadow: 0 0 0 30px var(--bg-card) inset !important; -moz-box-shadow: 0 0 0 30px var(--bg-card) inset !important; box-shadow: 0 0 0 30px var(--bg-card) inset !important;"`}
                  />
-                <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">10-digit phone (e.g. 9876543210) or an email (e.g. name@gmail.com)</small>
+              ${hasPortalAccount
+                ? `<button type="button" title="Copy login ID" aria-label="Copy login ID" onclick="window.copyPortalField('view-login-id', this)"
+                    style="position:absolute; right:3px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+                : ``}
+              </div>
+                <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">${hasPortalAccount ? 'Active login — read-only. Use Clear login below to replace it.' : '10-digit phone (e.g. 9876543210) or an email (e.g. name@gmail.com)'}</small>
             </div>
             <div class="form-group">
               <label>Login Password</label>
               <div style="position: relative;">
                 <input type="password" id="view-login-pass"
-                  value="${portalPass}"
-                  placeholder="••••••••"
+                  value="${escAttr(portalPass)}"
+                  placeholder="${hasPortalAccount ? 'Not stored on this record' : '••••••••'}"
                   autocapitalize="none" autocorrect="off" spellcheck="false"
                   ${hasPortalAccount
-                    ? `readonly disabled style="background: var(--bg-hover); color: var(--text-muted); cursor: not-allowed; font-size:13px; font-family:inherit; padding-right:34px; width:100%;"`
-                    : `style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); cursor: text; font-size:13px; font-family:inherit; padding-right:34px; width:100%; -webkit-text-fill-color: var(--text-primary); -webkit-box-shadow: 0 0 0 30px var(--bg-card) inset !important; -moz-box-shadow: 0 0 0 30px var(--bg-card) inset !important; box-shadow: 0 0 0 30px var(--bg-card) inset !important;"`}
+                    ? `readonly data-locked="1" onfocus="this.select()" title="Click to select, eye icon toggles visibility" style="background: var(--bg-hover); color: var(--text-primary); cursor: text; font-size:13px; font-family:inherit; padding-right:64px; width:100%; user-select:text;"`
+                    : `style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); cursor: text; font-size:13px; font-family:inherit; padding-right:64px; width:100%; -webkit-text-fill-color: var(--text-primary); -webkit-box-shadow: 0 0 0 30px var(--bg-card) inset !important; -moz-box-shadow: 0 0 0 30px var(--bg-card) inset !important; box-shadow: 0 0 0 30px var(--bg-card) inset !important;"`}
                    />
-                <button type="button" id="btn-eye-pass" title="Show / hide password"
-                  onclick="var i=document.getElementById('view-login-pass');if(i){var h=i.type==='password';i.type=h?'text':'password';this.textContent=h?'🙈':'👁';}"
-                  style="position:absolute; right:3px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; font-size:15px; line-height:1; color:var(--text-muted); padding:0;">👁</button>
+                <button type="button" id="btn-eye-pass" title="Show password" aria-label="Show password" aria-pressed="false"
+                  onclick="window.togglePortalPass(this)"
+                  style="position:absolute; right:33px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                ${hasPortalAccount
+                  ? `<button type="button" title="Copy password" aria-label="Copy password" onclick="window.copyPortalField('view-login-pass', this)"
+                      style="position:absolute; right:3px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
+                  : ``}
               </div>
-                <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">Minimum 6 characters.</small>
+                <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">${hasPortalAccount && !portalPass ? 'Stored password not on file — the student signs in with the original password.' : 'Minimum 6 characters.'}</small>
             </div>
             <div class="form-group" style="grid-column: span 2;">
               <div style="display:flex; gap:10px; align-items:center;">
@@ -530,8 +594,9 @@ const renderProfileModal = (s, role) => {
     });
   }
 
-  if (isOwner && hasPortalAccount && !portalId && !portalPass && s.uid) {
+  if (isOwner && hasPortalAccount && s.uid && (!portalId || !portalPass)) {
     // Rare: uid-keyed doc without stored credentials — check the auth profile.
+    // Read-only fill: only empty fields, never overwrites, never writes back.
     import("./firestoreService.js").then(({ getDocument }) => {
       getDocument("users", s.uid).then(userDoc => {
         if (userDoc && userDoc.loginCredentials) {
@@ -539,8 +604,8 @@ const renderProfileModal = (s, role) => {
           const sIdx = rawCred.indexOf("/");
           const idEl = document.getElementById("view-login-id");
           const passEl = document.getElementById("view-login-pass");
-          if (idEl && sIdx !== -1) idEl.value = rawCred.slice(0, sIdx).trim();
-          if (passEl && sIdx !== -1) passEl.value = rawCred.slice(sIdx + 1).trim();
+          if (idEl && sIdx !== -1 && !idEl.value) idEl.value = rawCred.slice(0, sIdx).trim();
+          if (passEl && sIdx !== -1 && !passEl.value) passEl.value = rawCred.slice(sIdx + 1).trim();
         }
       }).catch(() => {});
     }).catch(() => {});
@@ -610,7 +675,7 @@ window.submitStudentEdit = async (id) => {
       // Account was already created earlier in this modal session (retry after
       // a failed save) — just target the migrated document.
       targetId = portalCreated.uid;
-    } else if (idInput && !idInput.disabled) {
+    } else if (idInput && !idInput.disabled && !idInput.hasAttribute("data-locked")) {
       const loginId = (idInput.value || "").trim();
       const loginPassword = (passInput ? passInput.value : "").trim();
       if (!loginId && !loginPassword) {
