@@ -144,14 +144,13 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
  * @returns {Promise<{uid, authEmail, loginCredentials}>}
  */
 /**
- * Remove ONLY the portal-login credential fields from a student document —
- * profile, payments, seat, documents and everything else stay untouched.
+ * Revoke a student's portal login: set loginRevoked + remove the five
+ * credential/link fields. Profile, payments, seat, documents stay untouched.
  *
- * HONEST LIMIT: this clears the card link, NOT the Firebase Auth account
- * (a browser SDK cannot delete Auth users). Sign-in with the same ID keeps
- * working until the Auth user is disabled/deleted in Firebase Console
- * (Authentication panel) or a backend Function revokes it. Do not show
- * "removed/disabled" copy that implies sign-in is dead.
+ * HONEST LIMIT: the Firebase Auth account itself survives (a browser SDK
+ * cannot delete Auth users). Portal sign-in is blocked by the loginRevoked
+ * gate in resolveUserRole; finish in Firebase Console (disable/delete the
+ * Auth user) or a backend Function for full revoke.
  */
 export const clearPortalCredentials = async (studentId) => {
   await updateDoc(doc(db, "students", studentId), {
@@ -159,7 +158,8 @@ export const clearPortalCredentials = async (studentId) => {
     loginPassword: deleteField(),
     loginCredentials: deleteField(),
     uid: deleteField(),
-    authEmail: deleteField()
+    authEmail: deleteField(),
+    loginRevoked: true
   });
 };
 
