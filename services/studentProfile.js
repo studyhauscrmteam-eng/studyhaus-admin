@@ -50,16 +50,11 @@ export const mergedTargetId = (s) => {
  * Duplicates are prevented at the write (uniqueness claims) and resolved by
  * merging, so a "Possible duplicate" tag on a row was pure noise.
  */
-export const buildFlagBadges = (s) => {
-  const flags = [];
-  if (s && s.source === "Website") {
-    flags.push(`<span class="badge badge-info" style="font-size:10px; padding:1px 7px;" title="Lead came in through the public website">Website</span>`);
-  }
-  if (s && s.mergedInto) {
-    const target = mergedTargetId(s);
-    flags.push(`<span class="badge badge-overdue" style="font-size:10px; padding:1px 7px;" title="Merged into ${escAttr(s.mergedInto)} — this record is kept as history">Merged duplicate record${target ? ` → ${escAttr(target)}` : ""}</span>`);
-  }
-  return flags.length ? `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px;">${flags.join("")}</div>` : "";
+export const buildFlagBadges = () => {
+  // Chips removed on request: the students table shows plain data only, no
+  // coloured pills. (The information itself is still on the record — the
+  // profile card shows source and merge state where it is actually useful.)
+  return "";
 };
 
 // ==========================================
@@ -271,9 +266,10 @@ const renderTable = () => {
 
   processed.forEach(s => {
     const initials = s.name ? s.name.substring(0, 2).toUpperCase() : "??";
-    const statusBadge = s.status === "Active" ? `<span class="badge badge-paid">Active</span>` 
-                      : s.status === "Pending" || s.approvalStatus === "Pending" ? `<span class="badge badge-pending">Pending</span>`
-                      : `<span class="badge badge-overdue">${s.status}</span>`;
+    // Status as plain text — no coloured pill (owner does not want badges).
+    const statusText = s.status === "Active" ? "Active"
+                     : (s.status === "Pending" || s.approvalStatus === "Pending") ? "Pending"
+                     : (s.status || "—");
 
     let planHtml = `<span style="white-space: normal;">${s.planName || "None"}</span>`;
     const priceMatch = s.planName ? s.planName.match(/(.*?)( - | · | )₹(\d+.*)/) : null;
@@ -298,13 +294,8 @@ const renderTable = () => {
         const diffTime = exitD - today;
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         const short = exitD.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-        let chip = "";
-        if (diffDays <= 3) {
-          chip = `<span class="badge" style="background:var(--danger); color:#fff; font-size:10px; padding:1px 7px; margin-top:3px; display:inline-block;">${diffDays < 0 ? 'Passed' : diffDays + 'd left'}</span>`;
-        } else if (diffDays <= 7) {
-          chip = `<span class="badge" style="background:var(--warning); color:#fff; font-size:10px; padding:1px 7px; margin-top:3px; display:inline-block;">${diffDays}d left</span>`;
-        }
-        leavingDateHtml = `<div style="line-height:1.5;" title="${s.plannedExitDate}"><div style="font-weight:500; white-space:nowrap;">${short}</div>${chip}</div>`;
+        const left = diffDays < 0 ? "Passed" : diffDays + "d left";
+        leavingDateHtml = `<div style="line-height:1.5;" title="${s.plannedExitDate}"><div style="font-weight:500; white-space:nowrap;">${short}</div><div style="font-size:11px; color:var(--text-muted);">${left}</div></div>`;
       }
     }
 
@@ -326,7 +317,7 @@ const renderTable = () => {
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.createdAt?.toDate ? new Date(s.createdAt.toDate()).toLocaleDateString() : 'N/A'}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.paymentDueDate || "N/A"}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; max-width: 130px;">${leavingDateHtml}</td>
-        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusBadge}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusText}</td>
       </tr>
     `;
   });

@@ -446,11 +446,7 @@ export const initAdmissionsUI = async () => {
           ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${escHtml(seatValue)}</div>`
           : "";
 
-        // Source badge (Website | Portal | Admin) — what the applicant filled in
-        const sourceVal = r.source ? String(r.source) : "";
-        const sourceBadge = sourceVal
-          ? `<span class="badge badge-info" style="margin-left:6px; font-size:10px;">${escHtml(sourceVal)}</span>`
-          : "";
+        // Source tag removed on request — no chip, no pill, nothing here.
 
         // Payment line: method + transaction id OR payment due date
         const method = r.paymentMethod ? String(r.paymentMethod) : "";
@@ -472,7 +468,7 @@ export const initAdmissionsUI = async () => {
         html += `
           <tr>
             <td>
-              <div style="font-weight:600; color:var(--text-primary);">${escHtml(r.name)}${sourceBadge}</div>
+              <div style="font-weight:600; color:var(--text-primary);">${escHtml(r.name)}</div>
               <div style="font-size:11px; color:var(--text-muted);">${escHtml(r.email || "")}</div>
               <div style="font-size:10px; color:var(--text-muted);">${escHtml(r.studentId || r.admissionNo || r.id)}</div>
             </td>
