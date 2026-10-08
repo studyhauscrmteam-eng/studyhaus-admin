@@ -56,15 +56,25 @@ export const getAllStudentsForDropdown = async () => {
 /**
  * Listens to all announcements in real-time
  */
-export const listenToAnnouncements = (onUpdate) => {
+export const listenToAnnouncements = (onUpdate, onError) => {
   const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
-  return onSnapshot(q, (snapshot) => {
-    const announcements = [];
-    snapshot.forEach(doc => {
-      announcements.push({ id: doc.id, ...doc.data() });
-    });
-    onUpdate(announcements);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const announcements = [];
+      snapshot.forEach(doc => {
+        announcements.push({ id: doc.id, ...doc.data() });
+      });
+      onUpdate(announcements);
+    },
+    (error) => {
+      // No error callback meant a denied read or a missing composite index
+      // left the page on "Loading announcements..." for ever, with nothing in
+      // the console — indistinguishable from "notifications don't work".
+      console.error("[announcements] listener failed:", error?.message || error);
+      if (typeof onError === "function") onError(error);
+    }
+  );
 };
 
 /**

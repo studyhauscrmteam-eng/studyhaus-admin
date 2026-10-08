@@ -1,8 +1,8 @@
-import { collection, addDoc, serverTimestamp, getDocs, query, where, onSnapshot, doc, updateDoc, setDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, getDocs, getDoc, query, where, onSnapshot, doc, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { validateStudentData } from "./studentValidation.js";
-import { approveAdmission, rejectAdmission } from "./approvalService.js?v=login3";
-import { createPortalAccount } from "./authService.js?v=login5";
+import { approveAdmission, rejectAdmission } from "./approvalService.js";
+import { createPortalAccount } from "./authService.js";
 import { ensureStudentId } from "./studentIdService.js";
 import { getAuth } from "firebase/auth";
 
@@ -24,13 +24,14 @@ export const fetchPlansForDropdown = async (isStudent) => {
 };
 
 /**
- * Update payment details for an existing pending admission.
+ * Update payment details for an existing pending application.
+ * Pending applications now live in `students`; the legacy `admissions/{id}`
+ * path is kept as a fallback for the 11 retired history records.
  * NOTE: paying does NOT auto-approve. The request stays in the
  * "Pending approval" queue until an admin explicitly approves it.
  */
 export const updateAdmissionPayment = async (admissionId, transactionId, paymentScreenshotUrl) => {
   try {
-    const admissionRef = doc(db, "admissions", admissionId);
     const updates = {
       paymentMethod: "Paid",
       transactionId: transactionId,
@@ -39,7 +40,14 @@ export const updateAdmissionPayment = async (admissionId, transactionId, payment
     if (paymentScreenshotUrl) {
       updates.paymentScreenshotUrl = paymentScreenshotUrl;
     }
-    await updateDoc(admissionRef, updates);
+    try {
+      await updateDoc(doc(db, "students", admissionId), updates);
+    } catch (e) {
+      // Legacy record — only fall back when the students doc doesn't exist.
+      const snap = await getDoc(doc(db, "students", admissionId));
+      if (snap.exists()) throw e;
+      await updateDoc(doc(db, "admissions", admissionId), updates);
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -49,13 +57,15 @@ export const updateAdmissionPayment = async (admissionId, transactionId, payment
 /**
  * Submit an admission form.
  *
- * WEBSITE / STUDENT submissions (isStudent = true) ALWAYS go to the
- * 'admissions' collection with status "Pending" — they NEVER enter the
- * main 'students' list directly. An admin must Approve (or Reject) them
- * from Admissions → Pending approval. Paying only attaches payment info.
+ * WEBSITE / STUDENT submissions (isStudent = true) land in the 'students'
+ * collection with approvalStatus "Pending" — they NEVER become Active
+ * directly. An admin must Approve (or Reject) them from
+ * Admissions → Pending approval. Paying only attaches payment info.
+ * (The 'admissions' collection is RETIRED as a data store — no new writes.)
  *
- * ADMIN submissions (isStudent = false) go straight to 'students' as Active
- * and get a sequential admission number (SH-0001, SH-0002, …).
+ * ADMIN submissions (isStudent = false) go straight to 'students' as
+ * approvalStatus "Approved" / status "Active" and get a sequential admission
+ * number (SH-0001, SH-0002, …).
  */
 export const submitAdmission = async (formData, isStudent) => {
   try {
@@ -67,7 +77,8 @@ export const submitAdmission = async (formData, isStudent) => {
 
     // Website submissions need no portal account: if the visitor is signed in
     // (portal student OR anonymous website session) we key by uid, otherwise
-    // we use an auto-ID. Either way it lands in Pending — never in students.
+    // we use an auto-ID. Either way it lands in students/{id} as Pending —
+    // never as an Active student.
     if (isStudent) {
       const auth = getAuth();
       const uid = auth.currentUser ? auth.currentUser.uid : null;
@@ -115,10 +126,10 @@ export const submitAdmission = async (formData, isStudent) => {
       formData.status = "Pending";
       let admissionId = uid;
       if (admissionId) {
-        await setDoc(doc(db, "admissions", admissionId), formData, { merge: true });
+        await setDoc(doc(db, "students", admissionId), formData, { merge: true });
       } else {
         // Pure website form (no account at all) — auto-ID record.
-        const ref = await addDoc(collection(db, "admissions"), formData);
+        const ref = await addDoc(collection(db, "students"), formData);
         admissionId = ref.id;
       }
 
@@ -129,7 +140,7 @@ export const submitAdmission = async (formData, isStudent) => {
         notifyNewAdmission({ id: admissionId, ...formData }).catch(() => {});
         const { sendAdmissionReceivedMail, sendAdminNewAdmissionMail } = await import("./emailService.js");
         sendAdmissionReceivedMail({ id: admissionId, ...formData }).catch(() => {});
-        const { getSettings } = await import("./settingsService.js?v=ui1");
+        const { getSettings } = await import("./settingsService.js");
         getSettings().then((settings) => {
           if (settings && settings.adminEmail) {
             sendAdminNewAdmissionMail(settings.adminEmail, { id: admissionId, ...formData }).catch(() => {});
@@ -180,15 +191,23 @@ export const submitAdmission = async (formData, isStudent) => {
 };
 
 /**
- * Listen to pending admissions for the Admin queue
+ * Listen to pending admissions for the Admin queue.
+ * `students` is the single source of truth: a pending application is a
+ * students doc with approvalStatus == "Pending". The `admissions`
+ * collection is retired as a data store (11 legacy history docs only).
  */
 export const listenToPendingAdmissions = (onUpdate, onError) => {
-  const q = query(collection(db, "admissions"), where("status", "==", "Pending"));
+  const q = query(collection(db, "students"), where("approvalStatus", "==", "Pending"));
   
   return onSnapshot(q, (snapshot) => {
     const list = [];
     snapshot.forEach(doc => {
       list.push({ id: doc.id, ...doc.data() });
+    });
+    list.sort((a, b) => {
+      const ta = a.createdAt ? (typeof a.createdAt.toMillis === "function" ? a.createdAt.toMillis() : new Date(a.createdAt).getTime()) : 0;
+      const tb = b.createdAt ? (typeof b.createdAt.toMillis === "function" ? b.createdAt.toMillis() : new Date(b.createdAt).getTime()) : 0;
+      return (tb || 0) - (ta || 0);
     });
     onUpdate(list);
   }, onError);
@@ -199,6 +218,11 @@ export const listenToPendingAdmissions = (onUpdate, onError) => {
 // ==========================================
 
 let availablePlansList = [];
+
+/** Minimal HTML escaping for user-supplied strings rendered into the queue. */
+const escHtml = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 export const initAdmissionsUI = async () => {
   const container = document.getElementById("page-admissions");
@@ -257,14 +281,17 @@ export const initAdmissionsUI = async () => {
 
   window.viewPaymentScreenshot = async (studentId) => {
     try {
-        // 1. Prefer the payment screenshot stored on the admission itself.
+        // 1. Prefer the payment screenshot stored on the student record
+        //    (legacy fallback: the retired admissions doc).
         const { doc: fsDoc, getDoc: fsGet } = await import("firebase/firestore");
         const { db: _db } = await import("../firebase/firebase.js");
         let shot = null;
-        try {
-          const aSnap = await fsGet(fsDoc(_db, "admissions", studentId));
-          if (aSnap.exists() && aSnap.data().paymentScreenshotUrl) shot = aSnap.data().paymentScreenshotUrl;
-        } catch (_) { /* fall through to documents */ }
+        for (const colName of ["students", "admissions"]) {
+          try {
+            const sSnap = await fsGet(fsDoc(_db, colName, studentId));
+            if (sSnap.exists() && sSnap.data().paymentScreenshotUrl) { shot = sSnap.data().paymentScreenshotUrl; break; }
+          } catch (_) { /* fall through to documents */ }
+        }
         // 2. Fall back to the single student photo (or legacy selfie/profile).
         if (!shot) {
           const { loadStudentDocuments, getStudentPhoto } = await import("./documentUploadService.js");
@@ -288,6 +315,40 @@ export const initAdmissionsUI = async () => {
         }
     } catch (e) {
         window.showToast("Error loading screenshot: " + e.message, "error");
+    }
+  };
+
+  /**
+   * Open the uploaded documents (studentDocuments/{id} → aadhaarFront,
+   * aadhaarBack, photo, paymentScreenshot) for a pending applicant in a
+   * modal — the profile card's Documents tab, reused read-only.
+   */
+  window.viewStudentDocuments = async (studentId) => {
+    try {
+      const { renderStudentDocuments } = await import("./documentUploadService.js");
+      let modal = document.getElementById("adm-docs-modal");
+      if (!modal) {
+        modal = document.createElement("dialog");
+        modal.id = "adm-docs-modal";
+        modal.className = "card";
+        modal.style.cssText = "border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); max-width:760px; width:92%; margin:auto;";
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div style="padding:1.5rem; max-height:85vh; overflow-y:auto;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+            <div>
+              <h2 style="margin:0; font-size:1.1rem;">Uploaded Documents</h2>
+              <div style="font-size:12px; color:var(--text-muted);">Aadhaar front/back, photo and payment screenshot.</div>
+            </div>
+            <button class="btn btn-ghost" onclick="document.getElementById('adm-docs-modal').close()" style="padding:0.25rem 0.5rem;">✕</button>
+          </div>
+          <div id="adm-docs-list"></div>
+        </div>`;
+      if (!modal.open) modal.showModal();
+      await renderStudentDocuments(studentId, "adm-docs-list");
+    } catch (e) {
+      window.showToast("Could not load documents: " + e.message, "error");
     }
   };
 
@@ -320,13 +381,14 @@ export const initAdmissionsUI = async () => {
       // Self-heal: records created before admission numbers existed (or
       // written directly by the website without one) get a unique SH- number
       // assigned silently in the background. Approval carries it forward.
+      // (Queue records ARE students docs now — never write to `admissions`.)
       records
         .filter((r) => !r.studentId && !r.admissionNo)
         .forEach(async (r) => {
           try {
             const tmp = {};
             await ensureStudentId(tmp);
-            await updateDoc(doc(db, "admissions", r.id), {
+            await updateDoc(doc(db, "students", r.id), {
               studentId: tmp.studentId,
               admissionNo: tmp.studentId,
               updatedAt: serverTimestamp(),
@@ -368,39 +430,56 @@ export const initAdmissionsUI = async () => {
             createdAtDate = new Date(r.createdAt);
           }
         }
-        const d = createdAtDate ? createdAtDate.toLocaleDateString() : "Just now";
-        
-        let paymentInfo = ``;
-        if (r.paymentMethod === "Paid") {
-          paymentInfo = `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Txn ID: ${r.transactionId || 'N/A'}</div>`;
-          if (r.paymentScreenshotUrl) {
-            paymentInfo += `<button class="btn btn-sm btn-ghost" onclick="window.viewPaymentScreenshot('${r.id}')" style="padding:2px 6px; font-size:10px; margin-top:4px; height:auto; line-height:1.2;">View Screenshot</button>`;
-          }
-        } else if (r.paymentMethod === "Pay Later") {
-          paymentInfo = `<div style="font-size:11px; color:var(--warning); font-weight:600; margin-top:4px;">Pay Later</div>`;
-        }
+        const d = createdAtDate
+          ? `${createdAtDate.toLocaleDateString()}<div style="font-size:10px; color:var(--text-muted);">${createdAtDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>`
+          : "Just now";
 
         // Preferred seat — only exists when the plan allows seat selection
         // and one was picked (plans without seat preference strip the field
         // at submit/approve, so nothing renders there).
         const seatValue = String(r.seatAssigned || r.seatNumber || "").trim();
         const seatInfo = (seatValue && seatValue !== "undefined")
-          ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${seatValue}</div>`
+          ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${escHtml(seatValue)}</div>`
           : "";
+
+        // Source badge (Website | Portal | Admin) — what the applicant filled in
+        const sourceVal = r.source ? String(r.source) : "";
+        const sourceBadge = sourceVal
+          ? `<span class="badge badge-info" style="margin-left:6px; font-size:10px;">${escHtml(sourceVal)}</span>`
+          : "";
+
+        // Payment line: method + transaction id OR payment due date
+        const method = r.paymentMethod ? String(r.paymentMethod) : "";
+        let paymentLine = "";
+        if (method === "Paid") {
+          paymentLine = `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Paid${r.transactionId ? ` · Txn: ${escHtml(r.transactionId)}` : ""}</div>`;
+        } else if (method === "Pay Later") {
+          paymentLine = `<div style="font-size:11px; color:var(--warning); font-weight:600; margin-top:4px;">Pay Later${r.paymentDueDate ? ` · due ${escHtml(r.paymentDueDate)}` : ""}</div>`;
+        } else if (method) {
+          paymentLine = `<div style="font-size:11px; color:var(--text-muted); font-weight:600; margin-top:4px;">${escHtml(method)}</div>`;
+        }
+        if (method !== "Paid" && r.transactionId) {
+          paymentLine += `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Txn: ${escHtml(r.transactionId)}</div>`;
+        }
+        if (r.paymentScreenshotUrl) {
+          paymentLine += `<button class="btn btn-sm btn-ghost" onclick="window.viewPaymentScreenshot('${r.id}')" style="padding:2px 6px; font-size:10px; margin-top:4px; height:auto; line-height:1.2;">View Screenshot</button>`;
+        }
 
         html += `
           <tr>
             <td>
-              <div style="font-weight:600; color:var(--text-primary);">${r.name}</div>
-              <div style="font-size:11px; color:var(--text-muted);">${r.email || ""}</div>
-              ${paymentInfo}
+              <div style="font-weight:600; color:var(--text-primary);">${escHtml(r.name)}${sourceBadge}</div>
+              <div style="font-size:11px; color:var(--text-muted);">${escHtml(r.email || "")}</div>
+              <div style="font-size:10px; color:var(--text-muted);">${escHtml(r.studentId || r.admissionNo || r.id)}</div>
             </td>
-            <td>${r.phone}</td>
-            <td>${r.planName}${seatInfo}</td>
+            <td>${escHtml(r.phone)}${paymentLine}</td>
+            <td>${escHtml(r.planName || "")}${seatInfo}</td>
             <td>${d}</td>
             <td style="text-align:right; white-space:nowrap;">
               <button class="btn btn-sm btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
               <button class="btn btn-sm btn-reject" onclick="window.rejectStudent('${r.id}')">Reject</button>
+              <button class="btn btn-sm btn-ghost" title="Open full student card" onclick="window.openStudentProfileById('${r.id}')" style="padding:4px 10px; border-radius:999px; font-weight:600; margin-right:4px;">Open</button>
+              <button class="btn btn-sm btn-ghost" title="View uploaded documents" onclick="window.viewStudentDocuments('${r.id}')" style="padding:4px 10px; border-radius:999px; font-weight:600;">Docs</button>
             </td>
           </tr>
         `;

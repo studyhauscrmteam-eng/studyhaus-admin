@@ -1,4 +1,4 @@
-import { listenToAllAttendance, checkIn, checkOut } from "./attendanceService.js?v=seat1";
+import { listenToAllAttendance, checkIn, checkOut } from "./attendanceService.js";
 import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { listenToAllStudents } from "./studentService.js";

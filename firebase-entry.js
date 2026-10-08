@@ -4,27 +4,27 @@ import { enforceModulePermissions } from "./auth/middleware.js";
 import { handleLogout } from "./auth/logout.js";
 import { initDashboardListeners } from "./services/dashboardService.js";
 import { initMembershipPlans } from "./services/membershipService.js";
-import { initAdmissionsUI } from "./services/admissionService.js?v=ui2";
-import { initStudentManagementUI } from "./services/studentProfile.js?v=ui4";
-import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js?v=seat1";
+import { initAdmissionsUI } from "./services/admissionService.js";
+import { initStudentManagementUI } from "./services/studentProfile.js";
+import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js";
 import { initPaymentAdminUI } from "./services/paymentAdminUI.js";
-import { initComplaintAdminUI } from "./services/complaintAdminUI.js?v=ui2";
-import { initSeatMapUI } from "./services/seatMapUI.js?v=ui1";
-import { initLiveSeatMapUI } from "./services/liveSeatMapUI.js?v=play3";
+import { initComplaintAdminUI } from "./services/complaintAdminUI.js";
+import { initSeatMapUI } from "./services/seatMapUI.js";
+import { initLiveSeatMapUI } from "./services/liveSeatMapUI.js";
 import { initExpenseAdminUI } from "./services/expenseAdminUI.js";
 import { initVisitorAdminUI } from "./services/visitorAdminUI.js";
 import { initMessageLogAdminUI } from "./services/messageLogAdminUI.js";
-import { initOldStudentAdminUI } from "./services/oldStudentAdminUI.js?v=ui2";
+import { initOldStudentAdminUI } from "./services/oldStudentAdminUI.js";
 import { initDashboardReminders } from "./services/dashboardReminderUI.js";
 import { initRenewalAdminUI, renderRenewalForm, renderRenewalHistory } from "./services/renewalAdminUI.js";
 import { websiteAdminUI } from "./services/websiteAdminUI.js";
 import { openReportViewer, closeReportViewer } from "./services/reportAdminUI.js";
 import { initAnalyticsUI } from "./services/analyticsService.js";
 import { initAnnouncementAdminUI } from "./services/announcementAdminUI.js";
-import { initAdminNotificationUI } from "./services/adminNotificationUI.js?v=ui1";
+import { initAdminNotificationUI } from "./services/adminNotificationUI.js";
 import { initStaffAdminUI } from "./services/staffAdminUI.js";
 import { initTasksAdminUI } from "./services/tasksAdminUI.js";
-import { initSettingsAdminUI } from "./services/settingsAdminUI.js?v=ui1";
+import { initSettingsAdminUI } from "./services/settingsAdminUI.js";
 import "./services/translationService.js";
 import "./services/whatsappModalUI.js"; // Auto-injects modal styles and functions
 
@@ -132,32 +132,53 @@ const initPageModule = (page) => {
     console.error(`Page module '${page}' failed to init:`, e);
   }
 };
+// Role is written asynchronously by auth/guard.js (onAuthStateChanged -> Firestore
+// profile read -> localStorage). Counted so a login that never resolves a role
+// gives up instead of rescheduling forever.
+let __crmInitAttempts = 0;
+
 const initCrmModules = () => {
   if (__crmInitDone) return;
+
+  const role = localStorage.getItem("userRole");
+  if (!role) {
+    // Re-arm instead of latching. The old code set __crmInitDone = true FIRST and
+    // then bailed here, so on a fresh login the guard was still resolving the role
+    // when this ran: the latch was burnt and every module below was skipped for
+    // the whole session — no bell/badges, and the lazy-page wrapper never installed
+    // (so Visitors/Seats/Payments/Attendance/Expenses/Complaints stayed blank).
+    if (__crmInitAttempts++ < 80) setTimeout(initCrmModules, 150);
+    return;
+  }
+
   __crmInitDone = true;
   // Move all dialogs to body to prevent them from failing to open if their parent page is hidden
   document.querySelectorAll("dialog").forEach((d) => document.body.appendChild(d));
 
-  const role = localStorage.getItem("userRole");
-  if (!role) return;
   enforceModulePermissions(role);
 
   // Admin-only copy: no student portal bootstrap.
   // Block any legacy Student role from loading staff modules.
   if (role === "Student") return;
 
+  // Each init is isolated: one throwing module used to abort the rest of the list,
+  // which left the app looking half-alive with no error the user could act on.
+  const safe = (label, fn) => {
+    try { fn(); } catch (e) { console.error(`[init] ${label} failed:`, e); }
+  };
+
     // Initialize real-time dashboard listeners if we're on the dashboard
-    initDashboardListeners();
+    safe("initDashboardListeners", initDashboardListeners);
     // Initialize the new unified Dashboard Reminders
-    initDashboardReminders();
+    safe("initDashboardReminders", initDashboardReminders);
     // Admissions flow (Pending queue + bell badge stay live)
-    initAdmissionsUI();
+    safe("initAdmissionsUI", initAdmissionsUI);
     // Core student table (live)
-    initStudentManagementUI();
+    safe("initStudentManagementUI", initStudentManagementUI);
     // Announcements + admission-alert bell (live)
-    initAnnouncementAdminUI();
+    safe("initAnnouncementAdminUI", initAnnouncementAdminUI);
     // Admin admission-alert bell: count pill, tab badge, in-portal alerts
-    initAdminNotificationUI();
+    safe("initAdminNotificationUI", initAdminNotificationUI);
 
     // Everything else boots on first page open (see __pageInitMap) so login
     // stays fast no matter how much data grows. Wrap navigate() once.

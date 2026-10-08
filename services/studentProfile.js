@@ -1,4 +1,4 @@
-import { listenToAllStudents, softDeleteStudent, permanentlyDeleteStudent, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials } from "./studentService.js?v=login6";
+import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials } from "./studentService.js";
 import { searchStudents, filterStudents, sortStudents, paginateStudents } from "./studentDataProcessing.js";
 import { fetchPlansForDropdown } from "./admissionService.js";
 import { convertToOldStudent } from "./oldStudentService.js";
@@ -35,6 +35,32 @@ export const isOldStatus = (s) => {
 };
 
 export const escAttr = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
+
+/** The surviving record of a merge (`students/xyz` → `xyz`). */
+export const mergedTargetId = (s) => {
+  if (!s || !s.mergedInto) return "";
+  return String(s.mergedInto).split("/").filter(Boolean).pop() || "";
+};
+
+/**
+ * Badges for the rows that came in through the website, or that were merged
+ * into another record. Never used to filter anybody out — only to label them.
+ *
+ * NOTE: the migration's "needsReview" flag is deliberately NOT surfaced here.
+ * Duplicates are prevented at the write (uniqueness claims) and resolved by
+ * merging, so a "Possible duplicate" tag on a row was pure noise.
+ */
+export const buildFlagBadges = (s) => {
+  const flags = [];
+  if (s && s.source === "Website") {
+    flags.push(`<span class="badge badge-info" style="font-size:10px; padding:1px 7px;" title="Lead came in through the public website">Website</span>`);
+  }
+  if (s && s.mergedInto) {
+    const target = mergedTargetId(s);
+    flags.push(`<span class="badge badge-overdue" style="font-size:10px; padding:1px 7px;" title="Merged into ${escAttr(s.mergedInto)} — this record is kept as history">Merged duplicate record${target ? ` → ${escAttr(target)}` : ""}</span>`);
+  }
+  return flags.length ? `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px;">${flags.join("")}</div>` : "";
+};
 
 // ==========================================
 // INITIALIZATION
@@ -124,6 +150,39 @@ export const initStudentManagementUI = async () => {
   window.closeStudentProfile = () => {
     const modal = document.getElementById("student-profile-modal");
     if (modal) modal.close();
+  };
+
+  /**
+   * Open the student card by id from anywhere (approval queue, merge badge,
+   * notification). Uses the live list when possible, otherwise reads the doc
+   * directly — pending applicants live in `students` before they ever reach
+   * the main table, and legacy records may still sit in `admissions`.
+   */
+  window.openStudentProfileById = async (id) => {
+    if (!id) return;
+    const currentRole = localStorage.getItem("userRole");
+    const cached = allStudents.find(s => s.id === id);
+    if (cached) {
+      renderProfileModal(cached, currentRole);
+      return;
+    }
+    try {
+      const { getDoc, doc: fsDoc } = await import("firebase/firestore");
+      const { db: fsDb } = await import("../firebase/firebase.js");
+      const snap = await getDoc(fsDoc(fsDb, "students", id));
+      if (snap.exists()) {
+        renderProfileModal({ id: snap.id, ...snap.data() }, currentRole);
+        return;
+      }
+      const legacy = await getDoc(fsDoc(fsDb, "admissions", id));
+      if (legacy.exists()) {
+        renderProfileModal({ id: legacy.id, ...legacy.data() }, currentRole);
+        return;
+      }
+      if (window.showToast) window.showToast("Student record not found.", "warning");
+    } catch (e) {
+      if (window.showToast) window.showToast("Could not open student: " + e.message, "error");
+    }
   };
 
   // Defined once (modal re-renders every open): SVG eye toggle + copy.
@@ -229,7 +288,9 @@ const renderTable = () => {
 
     let nameHtml = s.name ? `<div class="name" style="line-height: 1.3;">${s.name}</div>` : `<div class="name">Unknown</div>`;
 
-
+    // Migration / provenance flags. These records are NEVER hidden or
+    // removed — they are only labelled so staff know what they're looking at.
+    const flagsHtml = buildFlagBadges(s);
     let leavingDateHtml = `<span style="color:var(--text-muted);">—</span>`;
     if (s.plannedExitDate) {
       const exitD = new Date(s.plannedExitDate);
@@ -257,6 +318,7 @@ const renderTable = () => {
             <div>
               ${nameHtml}
               <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}</div>
+              ${flagsHtml}
             </div>
           </div>
         </td>
@@ -341,6 +403,17 @@ const renderProfileModal = (s, role) => {
     planOptions += `<option value="${p.id}" ${selected}>${p.planName}</option>`;
   });
 
+  // Payment method the student picked in the portal (or the admin wrote):
+  // shown round-trippable so staff can correct a typo without losing it.
+  const PAYMENT_METHODS = ["Pay Later", "Paid", "Admin Created", "Pending"];
+  let payOptions = `<option value="">Not set</option>`;
+  PAYMENT_METHODS.forEach(m => {
+    payOptions += `<option value="${m}" ${s.paymentMethod === m ? "selected" : ""}>${m}</option>`;
+  });
+  if (s.paymentMethod && PAYMENT_METHODS.indexOf(s.paymentMethod) === -1) {
+    payOptions += `<option value="${escAttr(s.paymentMethod)}" selected>${escAttr(s.paymentMethod)}</option>`;
+  }
+
   modal.innerHTML = `
     <style>
       @keyframes modalFadeIn {
@@ -395,7 +468,11 @@ const renderProfileModal = (s, role) => {
         </div>`; })()}
         <div>
           <h3 style="margin: 0; font-size: 1.25rem;">${s.name}</h3>
-          <div style="color: var(--text-muted);">${s.studentId || s.admissionNo || "No ID"} · ${s.status || "Active"}</div>
+          <div style="color: var(--text-muted);">${s.studentId || s.admissionNo || "No ID"} · ${s.status || "Active"}${s.approvalStatus ? ` · ${s.approvalStatus}` : ""}</div>
+          <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+            ${buildFlagBadges(s)}
+            ${s.mergedInto ? `<button type="button" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;" onclick="window.openStudentProfileById('${escAttr(mergedTargetId(s))}')">Open merged record</button>` : ""}
+          </div>
           <div style="margin-top: 0.5rem; display:flex; gap: 0.5rem;">
             <a href="tel:${s.phone}" class="btn btn-primary sp-action-btn" style="padding: 0.25rem 0.75rem; font-size: 0.85rem; text-decoration: none;">Call</a>
             <button type="button" class="btn sp-action-btn" style="background: #25D366; color: white; border: none; padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="window.triggerWhatsAppModal('${s.id}')">WhatsApp</button>
@@ -539,17 +616,31 @@ const renderProfileModal = (s, role) => {
                 <option value="Pending" ${s.status === 'Pending' ? 'selected' : ''}>Pending</option>
               </select>
             </div>
+
+            <div class="form-group">
+              <label>Seat</label>
+              <input type="text" id="edit-seat" value="${escAttr(s.seatNumber || s.seatAssigned || '')}" placeholder="e.g. A17" ${!canEdit ? 'disabled' : ''} />
+            </div>
+            <div class="form-group">
+              <label>Payment Method</label>
+              <select id="edit-payment-method" class="sp-input" ${!canEdit ? 'disabled' : ''}>
+                ${payOptions}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Transaction ID</label>
+              <input type="text" id="edit-txn-id" value="${escAttr(s.transactionId || '')}" placeholder="UPI / bank reference" ${!canEdit ? 'disabled' : ''} />
+            </div>
+            <div class="form-group">
+              <label>Payment Due Date</label>
+              <input type="date" id="edit-payment-due" value="${escAttr(s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} />
+            </div>
           </div>
 
           <div class="form-actions" style="margin-top: 2rem; justify-content: flex-end; ${hideForEmployee}">
-            ${isOwner ? `<button type="button" class="btn btn-ghost" style="color: var(--danger); margin-right: auto;" onclick="window.triggerSoftDelete('${s.id}')">Delete Student</button>` : ''}
             ${isOwner && s.email ? `<button type="button" class="btn btn-secondary sp-action-btn" style="padding: 0.5rem 1rem; font-size: 0.85rem;" onclick="window.triggerStudentEmail('${s.id}')">Email</button>` : ''}
             <button type="submit" class="btn btn-primary" id="btn-save-edit">Save Changes</button>
           </div>
-          ${isOwner ? `
-          <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px dashed var(--border); display: flex; justify-content: flex-end;">
-            <button type="button" class="btn btn-ghost" style="color: var(--danger); font-size: 0.78rem; padding: 0.25rem 0.5rem;" onclick="window.triggerPermanentDelete('${s.id}', '${(s.name || '').replace(/'/g, "\\'")}')">Delete permanently (cannot be undone)</button>
-          </div>` : ''}
         </form>
       </div>
 
@@ -663,6 +754,19 @@ window.submitStudentEdit = async (id) => {
       plannedExitDate: document.getElementById("edit-leaving-date").value,
       remarks: document.getElementById("edit-remarks").value
     };
+
+    // ── Seat + payment detail the student filled in the portal ────────────
+    // Round-tripped through the same updateDoc (updateStudentProfile NEVER
+    // creates a document), so this can't spawn a second student record.
+    // Missing elements (old cached markup) are simply skipped.
+    const seatEl = document.getElementById("edit-seat");
+    const payMethodEl = document.getElementById("edit-payment-method");
+    const txnEl = document.getElementById("edit-txn-id");
+    const dueEl = document.getElementById("edit-payment-due");
+    if (seatEl && !seatEl.disabled) updates.seatNumber = seatEl.value.trim();
+    if (payMethodEl && !payMethodEl.disabled) updates.paymentMethod = payMethodEl.value;
+    if (txnEl && !txnEl.disabled) updates.transactionId = txnEl.value.trim();
+    if (dueEl && !dueEl.disabled) updates.paymentDueDate = dueEl.value;
 
     // ── Owner: create the Student Portal login from the two Login fields ──
     let targetId = id;
@@ -788,45 +892,6 @@ window.openRenewalModal = (studentId) => {
 
 window.loadRenewalHistory = (studentId) => {
   window.renderRenewalHistory(studentId, "sp-renewal-history-container");
-};
-
-window.triggerSoftDelete = async (id) => {
-  const confirmed = await window.showCustomConfirm("Delete Student", "Are you sure you want to delete this student? They will be moved to Old Students.", "Delete", true);
-  if (confirmed) {
-    const res = await softDeleteStudent(id);
-    if (res.success) {
-      window.showToast("Student deleted.", "success");
-      window.closeStudentProfile();
-    } else {
-      window.showToast("Error: " + res.error, "error");
-    }
-  }
-};
-
-window.triggerPermanentDelete = async (id, name) => {
-  const s = allStudents.find(x => x.id === id);
-  const label = (s && s.name) || name || "this student";
-  const first = await window.showCustomConfirm(
-    "Delete Permanently?",
-    `Permanently delete <b>${label}</b>?<br><br>This removes the student, login, documents and admission record, and frees the seat. <b>This cannot be undone.</b>`,
-    "Continue",
-    true
-  );
-  if (!first) return;
-  const second = await window.showCustomConfirm(
-    "Final Confirmation",
-    `Type-confirm: really erase <b>${label}</b> forever?<br><br>Move to Old Students instead if you only want to deactivate.`,
-    "Delete Forever",
-    true
-  );
-  if (!second) return;
-  const res = await permanentlyDeleteStudent(id);
-  if (res.success) {
-    window.showToast(`Permanently deleted ${label}.`, "success");
-    window.closeStudentProfile();
-  } else {
-    window.showToast("Error: " + res.error, "error");
-  }
 };
 
 window.triggerStudentEmail = async (id) => {

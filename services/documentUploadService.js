@@ -13,12 +13,25 @@ let selfieStream = null;
 
 /**
  * Compress and resize an image File to a base64 string.
- * Max width/height: 600px. Quality: 0.6 (JPEG).
- * Ensures result is under 1MB (Firestore field limit).
+ * Max width/height: 600px. Quality starts at 0.6 (JPEG).
+ *
+ * The security rules reject any single image field in
+ * `studentDocuments/{id}` larger than 240 000 base64 chars, so the hard cap
+ * is 220 000 (with headroom). Quality steps down to 0.2 and dimensions
+ * scale down to 320px before giving up; if the string still cannot get
+ * under the cap the promise rejects with a clear message instead of writing
+ * a document the rules would refuse.
+ *
  * @param {File} file
+ * @param {number} [maxChars] override for callers that are not image fields
+ *   (e.g. chunked global documents)
  * @returns {Promise<string>} base64 data URL
  */
-const compressImage = (file) => {
+const MAX_BASE64_CHARS = 220000; // rules cap: 240000 — keep headroom
+const MIN_QUALITY = 0.2;
+const MIN_DIMENSION = 320;
+
+const compressImage = (file, maxChars = MAX_BASE64_CHARS) => {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
       // For non-images (e.g. PDF), read as base64 directly (no compression)
@@ -50,25 +63,33 @@ const compressImage = (file) => {
         return canvas.toDataURL("image/jpeg", q);
       };
 
-      // Try with initial quality, reduce if too large
       let dataUrl = tryCompress(quality);
-      let attempts = 0;
-      const MAX_BYTES = 900000; // Stay safely under Firestore's ~1MB doc limit
-      
-      while (dataUrl.length > MAX_BYTES && attempts < 5) {
-        attempts++;
-        quality = Math.max(0.3, quality - 0.1);
+      let guard = 0;
+
+      // 1) Step the JPEG quality down to the floor…
+      while (dataUrl.length > maxChars && quality > MIN_QUALITY && guard < 20) {
+        guard++;
+        quality = Math.max(MIN_QUALITY, quality - 0.1);
         dataUrl = tryCompress(quality);
       }
 
-      // If still too large, reduce dimensions further
-      while (dataUrl.length > MAX_BYTES && (width > 300 || height > 300)) {
-        width = Math.round(width * 0.8);
-        height = Math.round(height * 0.8);
+      // 2) …then shrink the image itself, down to the minimum dimension.
+      while (dataUrl.length > maxChars && Math.min(width, height) > MIN_DIMENSION && guard < 60) {
+        guard++;
+        width = Math.max(MIN_DIMENSION, Math.round(width * 0.85));
+        height = Math.max(MIN_DIMENSION, Math.round(height * 0.85));
         dataUrl = tryCompress(quality);
       }
 
       URL.revokeObjectURL(url);
+
+      if (dataUrl.length > maxChars) {
+        reject(new Error(
+          `This image could not be compressed below the ${maxChars.toLocaleString()}-character storage limit. ` +
+          `Please upload a smaller or simpler photo (a plain JPEG under ~150 KB works best).`
+        ));
+        return;
+      }
       resolve(dataUrl);
     };
     img.onerror = reject;
@@ -138,7 +159,10 @@ export const uploadGlobalDocument = async (file, title, description, onProgress 
   }
 
   onProgress(10);
-  const base64 = await compressImage(file);
+  // Global documents are NOT an image field, so the security rules' 240 000
+  // char image budget does not apply here — keep the historic 900 000 cap
+  // (and chunking above it) instead of downgrading uploaded files.
+  const base64 = await compressImage(file, 900000);
   onProgress(50);
 
   const { collection, addDoc, setDoc, deleteDoc, doc: fsDoc } = await import("firebase/firestore");
@@ -280,6 +304,7 @@ export const STUDENT_DOC_FIELDS = [
   { key: "aadhaarFront", label: "Aadhaar Front", accept: "image/*,.pdf", hint: "Front of ID proof" },
   { key: "aadhaarBack", label: "Aadhaar Back", accept: "image/*,.pdf", hint: "Back of ID proof" },
   { key: "photo", label: "Photo", accept: "image/*", hint: "Upload or take a live selfie — one photo only" },
+  { key: "paymentScreenshot", label: "Payment Screenshot", accept: "image/*,.pdf", hint: "UPI / bank transfer proof" },
 ];
 
 /**

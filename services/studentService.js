@@ -162,7 +162,7 @@ export const clearPortalCredentials = async (studentId) => {
 };
 
 export const createPortalLoginForStudent = async (studentId, loginId, loginPassword) => {
-  const { createPortalAccount } = await import("./authService.js?v=login5");
+  const { createPortalAccount } = await import("./authService.js");
   const account = await createPortalAccount(loginId, loginPassword); // throws with a clear message
 
   const oldRef = doc(db, "students", studentId);

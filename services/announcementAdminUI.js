@@ -8,6 +8,63 @@ let lastAnnouncements = [];
 let showReadAdmin = false;
 
 /**
+ * System notifications (approval decisions, new admission requests) are written
+ * to the `notifications` collection by notifyAdmins(), but nothing ever
+ * subscribed to that collection — so those events produced no visible message.
+ * adminNotificationUI.js pushes the live list here; we render it above the
+ * announcements so both share one bell and one list.
+ */
+const systemNotifs = () => {
+  const a = Array.isArray(window.__systemNotifs) ? window.__systemNotifs : [];
+  const b = Array.isArray(window.__leadNotifs) ? window.__leadNotifs : [];
+  if (b.length === 0) return a;
+  return [...a, ...b].sort(
+    (x, y) => (y.createdAt?.seconds || 0) - (x.createdAt?.seconds || 0)
+  );
+};
+
+/** Normalise a Firestore Timestamp / ISO string / {value} into epoch ms. */
+const tsMs = (v) => {
+  if (v == null) return null;
+  if (typeof v.seconds === "number") return v.seconds * 1000;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "string") { const t = Date.parse(v); return Number.isNaN(t) ? null : t; }
+  if (typeof v.value === "string") { const t = Date.parse(v.value); return Number.isNaN(t) ? null : t; }
+  return null;
+};
+
+const renderSystemNotifs = () => {
+  const items = systemNotifs();
+  if (items.length === 0) return { html: "", unread: 0 };
+
+  let unread = 0;
+  const html =
+    `<div style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); padding:0.4rem 0.2rem 0.5rem;">Activity</div>` +
+    items.map((n) => {
+      const key = `sys_${n.id}`;
+      const isUnread = !isNotifRead(key);
+      if (isUnread) unread++;
+      const ms = tsMs(n.createdAt);
+      // Never claim "Just now" for a record we couldn't read a date from —
+      // that made a page of old entries look like they all just fired.
+      const when = ms ? new Date(ms).toLocaleString() : "Date unavailable";
+      return `
+        <div class="notif-item" data-notif-id="${key}" title="Click to mark as read" style="opacity:${isUnread ? 1 : 0.62};">
+          <div class="notif-icon ${n.type === "new-admission" || n.type === "new-lead" ? "amber" : "green"}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          </div>
+          <div class="notif-content" style="flex:1;">
+            <div class="notif-title">${n.title || "Notification"}${isUnread ? ' <span style="font-size:9px; font-weight:800; background:var(--primary); color:#fff; padding:1px 6px; border-radius:999px; vertical-align:middle;">NEW</span>' : ""}</div>
+            <div class="notif-body">${n.body || ""}</div>
+            <div class="notif-time">${when}</div>
+          </div>
+        </div>`;
+    }).join("");
+
+  return { html, unread };
+};
+
+/**
  * Initializes the announcements UI listener
  */
 export const initAnnouncementAdminUI = () => {
@@ -29,10 +86,21 @@ export const initAnnouncementAdminUI = () => {
     });
   }
 
-  listenToAnnouncements((announcements) => {
-    lastAnnouncements = Array.isArray(announcements) ? announcements : [];
-    renderAnnouncementList();
-  });
+  listenToAnnouncements(
+    (announcements) => {
+      lastAnnouncements = Array.isArray(announcements) ? announcements : [];
+      renderAnnouncementList();
+    },
+    (error) => {
+      lastAnnouncements = [];
+      const list = document.querySelector("#page-notifications .notif-list");
+      if (list) {
+        list.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--danger);">
+          Announcements could not load (${error?.code || "permission denied"}). Check Firestore rules or the composite index.
+        </div>`;
+      }
+    }
+  );
 };
 
 const renderAnnouncementList = () => {
@@ -46,7 +114,10 @@ const renderAnnouncementList = () => {
 
   // Admission alerts (website form submissions) share the same bell.
   const admissionUnread = window.__admissionUnread || 0;
-  const total = unread + admissionUnread;
+  // Approval decisions / new admission requests written to `notifications`
+  // by notifyAdmins() — these were subscribed by nobody until now.
+  const sys = renderSystemNotifs();
+  const total = unread + admissionUnread + sys.unread;
   const alertsBlock = typeof window.__renderAdmissionAlerts === "function"
     ? window.__renderAdmissionAlerts()
     : "";
@@ -64,7 +135,7 @@ const renderAnnouncementList = () => {
     if (bellDot) bellDot.style.display = total > 0 ? "" : "none";
   }
 
-  if (announcements.length === 0 && !alertsBlock) {
+  if (announcements.length === 0 && !alertsBlock && !sys.html) {
     notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
     renderDashboardBanner([]);
     return;
@@ -75,7 +146,7 @@ const renderAnnouncementList = () => {
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";
 
-  if (visible.length === 0 && !alertsBlock) {
+  if (visible.length === 0 && !alertsBlock && !sys.html) {
     notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">All caught up — no unread announcements.</div>` + toggle;
     return;
   }
@@ -122,7 +193,7 @@ const renderAnnouncementList = () => {
         </div>
       `;
     });
-    notifList.innerHTML = alertsBlock + html + toggle;
+    notifList.innerHTML = alertsBlock + sys.html + html + toggle;
   renderDashboardBanner(announcements);
 };
 

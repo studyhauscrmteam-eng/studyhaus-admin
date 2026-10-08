@@ -1,6 +1,10 @@
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, getDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, getDoc, runTransaction } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { validateTransactionId } from "./paymentValidation.js";
+
+// Legacy import marker (bulk-imported history rows carry it). It is not a
+// real UPI reference, so it must never trip the uniqueness guard.
+const TXN_SENTINELS = ["rc-imp"];
 
 // ===============================================
 // STUDENT PAYMENT ACTIONS
@@ -28,8 +32,49 @@ export const submitPaymentRequest = async (student, transactionId, renewalMonths
     // Store which specific month is being paid (for sequential overdue payments)
     if (monthLabel) paymentData.monthLabel = monthLabel; // e.g. "June 2026"
 
-    await addDoc(collection(db, "payments"), paymentData);
-    
+    const txnId = String(paymentData.transactionId);
+    const isImportMarker = TXN_SENTINELS.indexOf(txnId.toLowerCase()) !== -1;
+    const claimSafe = !/[/]/.test(txnId) && txnId !== "." && txnId !== "..";
+
+    if (isImportMarker || !claimSafe) {
+      // Sentinel / unsafe id: no claim, but still create the document the
+      // same way as before (nothing to guard).
+      if (!isImportMarker) await validateTransactionId(txnId);
+      await addDoc(collection(db, "payments"), paymentData);
+      return { success: true };
+    }
+
+    // The same UPI reference must never be submitted twice. Everything —
+    // the duplicate check AND the document itself — happens inside ONE
+    // transaction so two racing submissions can't both slip through.
+    await runTransaction(db, async (tx) => {
+      // 1. Re-check every payment already stored (throws a friendly error).
+      try {
+        await validateTransactionId(txnId);
+      } catch (e) {
+        // A student profile may be denied reading other students' payments;
+        // that is not a duplicate — the atomic claim below still guards us.
+        if (!/permission|denied|insufficient/i.test(e?.message || "")) throw e;
+      }
+
+      // 2. Atomic claim: uniqueness/txn_<txnId> (spec §2). Reading it via
+      //    tx.get makes the check + claim indivisible.
+      const claimRef = doc(db, "uniqueness", `txn_${txnId}`);
+      const claimSnap = await tx.get(claimRef);
+      if (claimSnap.exists()) {
+        throw new Error(`Transaction ID ${txnId} has already been used. Please check your UPI reference.`);
+      }
+
+      // 3. Create the payment document in the same transaction.
+      const paymentRef = doc(collection(db, "payments"));
+      tx.set(claimRef, {
+        kind: "transactionId",
+        paymentId: paymentRef.id,
+        createdAt: serverTimestamp()
+      });
+      tx.set(paymentRef, paymentData);
+    });
+
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

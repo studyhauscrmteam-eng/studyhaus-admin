@@ -83,7 +83,7 @@ export const initExpenseAdminUI = () => {
       </div>
     </div>
     
-    <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
       <div class="card card-theme" style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
         <div><div style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">Total This Month</div><div style="font-size:24px; font-weight:700; color:var(--text-primary);" id="exp-total-month">₹0</div></div>
         <div style="width:32px; height:32px; background:#e0f2fe; color:#0284c7; border-radius:8px; display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>

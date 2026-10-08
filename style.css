@@ -942,10 +942,16 @@ body.light-mode .theme-toggle {
   }
 }
 
-.table-container {
+.table-container,
+/* visitorAdminUI / messageLogAdminUI / oldStudentAdminUI wrap their tables in
+   .table-responsive, which previously had no rule at all. Without it the wide
+   (10-11 column) tables had nothing to scroll inside and simply spilled out of
+   .card — which is what the owner was seeing as "everything overlapping". */
+.table-responsive {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   width: 100%;
+  max-width: 100%;
 }
 
 .data-table {
@@ -2908,7 +2914,11 @@ body.light-mode .amenity-card-item:hover {
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th, .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 .data-table th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-@media (max-width: 640px) { .card { padding: 1rem; } .data-table { display: block; overflow-x: auto; white-space: nowrap; } }
+/* The old rule here put `display:block` on .data-table, which drops the table
+   out of table layout so <thead> no longer lines up with <tbody>. The scroll
+   wrapper (.table-container / .table-responsive) already handles overflow, so
+   only the card padding is needed at this width. */
+@media (max-width: 640px) { .card { padding: 1rem; } .data-table { min-width: 640px; } }
 
 /* ============ FIX: missing theme variables (used across the app) ============ */
 :root {

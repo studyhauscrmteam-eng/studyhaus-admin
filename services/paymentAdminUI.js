@@ -1,15 +1,49 @@
 import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment } from "./paymentService.js";
+import { ROLES, hasPermission } from "../auth/roles.js";
 
 let allPayments = [];
 let unsubscribe = null;
 let currentFilters = { status: "All", search: "" };
+
+/**
+ * Payment status normalisation.
+ *
+ * Canonical values are pending | approved | rejected (spec §2), but legacy
+ * rows still carry `Completed` (written by the renewal flow before the
+ * schema was fixed) and a few unknown values may exist. Rendering anything
+ * that isn't pending/approved as "Rejected" was wrong — a Completed payment
+ * is money that WAS collected.
+ *
+ *   pending            -> Pending
+ *   approved|Completed -> Paid
+ *   rejected           -> Rejected
+ *   anything else      -> Paid when it is a legacy "Completed", otherwise the raw value
+ */
+const normalisePaymentStatus = (raw) => {
+  const s = String(raw == null ? "" : raw);
+  const key = s.trim().toLowerCase();
+  if (key === "pending") return { key: "pending", label: "Pending", tone: "pending" };
+  if (key === "approved" || key === "completed") return { key: "approved", label: "Paid", tone: "paid" };
+  if (key === "rejected") return { key: "rejected", label: "Rejected", tone: "rejected" };
+  // Unknown value: show it verbatim — never as Rejected.
+  return { key: key || "unknown", label: s.trim() || "Unknown", tone: "unknown" };
+};
+
+const STATUS_STYLES = {
+  pending: "background:#fffbeb; color:#d97706; border:1px solid #fde68a;",
+  paid: "background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;",
+  rejected: "background:#fef2f2; color:#991b1b; border:1px solid #fecaca;",
+  unknown: "background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border);"
+};
 
 export const initPaymentAdminUI = () => {
   const container = document.getElementById("page-payments");
   if (!container) return; 
 
   const role = localStorage.getItem("userRole");
-  if (role === "Student") return; // Security guard
+  // Module access: Owner/Admin + Manager + Employee (auth/roles.js).
+  // Legacy role strings ("Owner"/"Admin") still kept so old sessions work.
+  if (!hasPermission(role, "payments") && role !== "Owner" && role !== "Admin") return; // Security guard
 
   // Initial UI Setup
   container.innerHTML = `
@@ -24,7 +58,7 @@ export const initPaymentAdminUI = () => {
       </div>
     </div>
     
-    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:1rem; margin-bottom:1.5rem;">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
       <div class="card card-theme" style="padding:1.5rem; display:flex; justify-content:space-between; align-items:flex-start;">
         <div><div style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">Today</div><div style="font-size:24px; font-weight:700; color:var(--text-primary);" id="pay-today">₹0</div></div>
         <div style="width:32px; height:32px; background:#f0fdf4; color:#16a34a; border-radius:8px; display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>
@@ -207,7 +241,12 @@ const renderPaymentAdminTable = () => {
   if (!tbody) return;
 
   const role = localStorage.getItem("userRole");
-  const canApprove = (role === "Owner" || role === "Admin" || role === "Manager");
+  // THE REAL ROLE STRING IS "Owner/Admin" (auth/roles.js → ROLES.OWNER).
+  // The old test (`role === "Owner" || "Admin" || "Manager"`) compared
+  // against roles that don't exist here, so approval rights were wrong for
+  // every staff member. Legacy "Owner"/"Admin" strings are still honoured.
+  const canApprove =
+    role === ROLES.OWNER || role === ROLES.MANAGER || role === "Owner" || role === "Admin";
 
   // Calculate Metrics
   let todayTotal = 0;
@@ -224,11 +263,13 @@ const renderPaymentAdminTable = () => {
   allPayments.forEach(p => {
     const amt = parseFloat(p.amount) || 0;
     const d = p.date ? new Date(p.date) : new Date();
+    const st = normalisePaymentStatus(p.status);
     
-    if (p.status === "pending") {
+    if (st.key === "pending") {
       pendingTotal += amt;
       pendingCount++;
-    } else if (p.status === "approved") {
+    } else if (st.key === "approved") {
+      // includes legacy `Completed` rows — they ARE collected money
       receiptsIssued++;
       if (d.getMonth() === month && d.getFullYear() === year) {
         monthTotal += amt;
@@ -254,7 +295,9 @@ const renderPaymentAdminTable = () => {
   // Filter Data
   let filtered = allPayments;
   if (currentFilters.status !== "All") {
-    filtered = filtered.filter(r => r.status === currentFilters.status);
+    // Compare on the normalised key so legacy `Completed` rows match the
+    // "approved" (Paid) filter instead of silently disappearing.
+    filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === currentFilters.status);
   }
   if (currentFilters.search.trim() !== "") {
     filtered = filtered.filter(r => {
@@ -271,11 +314,10 @@ const renderPaymentAdminTable = () => {
 
   let html = "";
   filtered.forEach(r => {
-    const isPending = r.status === "pending";
-    const statusText = isPending ? "Pending" : (r.status === "approved" ? "Paid" : "Rejected");
-    const statusStyle = isPending 
-      ? "background:var(--bg-card)beb; color:#d97706; border:1px solid #fde68a;" 
-      : (r.status === "approved" ? "background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;" : "background:#fef2f2; color:#991b1b; border:1px solid #fecaca;");
+    const st = normalisePaymentStatus(r.status);
+    const isPending = st.key === "pending";
+    const statusText = st.label;
+    const statusStyle = STATUS_STYLES[st.tone] || STATUS_STYLES.unknown;
     
     // Make the row clickable for admins to approve if it's pending.
     const clickAttr = (isPending && canApprove) ? `onclick="window.handleApprovePayment('${r.id}')" style="cursor:pointer;" title="Click to Approve"` : "";
@@ -313,7 +355,7 @@ const renderPaymentAdminTable = () => {
       // Filter Data same as render logic
       let filtered = allPayments;
       if (currentFilters.status !== "All") {
-        filtered = filtered.filter(r => r.status === currentFilters.status);
+        filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === currentFilters.status);
       }
       if (currentFilters.search.trim() !== "") {
         filtered = filtered.filter(r => {
@@ -324,8 +366,7 @@ const renderPaymentAdminTable = () => {
       }
 
       const rows = filtered.map(r => {
-        const isPending = r.status === "pending";
-        const statusText = isPending ? "Pending" : (r.status === "approved" ? "Paid" : "Rejected");
+        const statusText = normalisePaymentStatus(r.status).label;
         const date = (() => {
           const raw = r.date || r.paymentDate || (r.createdAt && r.createdAt.seconds ? r.createdAt.seconds * 1000 : null);
           if (!raw) return "N/A";

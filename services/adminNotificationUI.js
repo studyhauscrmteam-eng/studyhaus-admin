@@ -1,4 +1,7 @@
 import { listenToPendingAdmissions } from "./admissionService.js";
+import { listenToAdminNotifications } from "./notificationService.js";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { db } from "../firebase/firebase.js";
 
 const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
 let firstSnapshot = true;
@@ -200,6 +203,69 @@ export const initAdminNotificationUI = () => {
   window.__pendingAdmissions = [];
   window.__admissionUnread = 0;
   paintTab(0);
+
+  // The `notifications` collection (approval decisions + new admission
+  // requests written by notifyAdmins()) had no reader anywhere in the app —
+  // events were recorded but never surfaced. Subscribe here and hand the list
+  // to the announcements renderer so both share one bell and one list.
+  window.__systemNotifs = [];
+  window.__leadNotifs = [];
+  try {
+    listenToAdminNotifications((records) => {
+      window.__systemNotifs = Array.isArray(records) ? records : [];
+      if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+    });
+  } catch (e) {
+    console.error("[notifications] list listener failed:", e);
+  }
+
+  // New website enquiries. The public form writes `visitors` straight from the
+  // browser, so no admin module ever runs on that path and notifyAdmins() never
+  // fired for it — which is why the owner saw nothing when someone signed up.
+  // Watch the lead queue itself so a fresh enquiry still rings the bell.
+  try {
+    let knownLeads = null;
+    onSnapshot(
+      query(collection(db, "visitors"), where("source", "==", "Website")),
+      (snap) => {
+        const live = new Set();
+        const fresh = [];
+        snap.forEach((d) => {
+          const v = d.data() || {};
+          if ((v.leadStatus || "New") !== "New") return;
+          live.add(d.id);
+          if (knownLeads && !knownLeads.has(d.id)) fresh.push({ id: d.id, ...v });
+        });
+        const first = knownLeads === null;
+        knownLeads = live;
+        if (first || fresh.length === 0) return;
+
+        beep();
+        const n = fresh[0];
+        const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
+        if (typeof window.showToast === "function") {
+          window.showToast(
+            `🌐 New website enquiry: ${n.visitorName || n.phone || "someone"}${extra} — open Visitors.`,
+            "info"
+          );
+        }
+        window.__leadNotifs = [
+          ...fresh.map((v) => ({
+            id: "lead_" + v.id,
+            type: "new-lead",
+            title: "New website enquiry",
+            body: `${v.visitorName || ""}${v.phone ? " · " + v.phone : ""}${v.planName ? " · " + v.planName : ""}`,
+            createdAt: v.createdAt,
+          })),
+          ...(window.__leadNotifs || []),
+        ].slice(0, 20);
+        if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+      },
+      (e) => console.error("[notifications] lead watch failed:", e?.message || e)
+    );
+  } catch (e) {
+    console.error("[notifications] lead watch setup failed:", e);
+  }
 
   // Source of truth = the live Pending-approval queue itself. Works no
   // matter how the admission was created (portal, admin, or the website

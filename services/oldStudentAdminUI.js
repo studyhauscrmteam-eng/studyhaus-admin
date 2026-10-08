@@ -1,5 +1,5 @@
 import { listenToOldStudents, restoreOldStudent, updateOldStudentFee, updateOldStudentPosition } from "./oldStudentService.js";
-import { permanentlyDeleteStudent } from "./studentService.js?v=login6";
+import { permanentlyDeleteStudent } from "./studentService.js";
 import { generateOldStudentsPDF } from "./pdfService.js";
 
 let allOldStudents = [];

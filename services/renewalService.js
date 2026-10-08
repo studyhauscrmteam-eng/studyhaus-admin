@@ -77,7 +77,10 @@ export const processRenewal = async (data) => {
           amount: Number(data.amount),
           paymentMethod: data.paymentMethod,
           paymentDate: new Date().toISOString().split("T")[0],
-          status: "Completed", // Auto-completed because they paid during renewal
+          // MUST be one of pending|approved|rejected: firestore.rules rejects
+          // any other value on create (and the canonical schema forbids
+          // "Completed" on payments — it is money that was collected).
+          status: "approved",
           recordedBy: data.renewedBy,
           createdAt: serverTimestamp()
         });

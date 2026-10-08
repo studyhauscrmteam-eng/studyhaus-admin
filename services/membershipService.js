@@ -105,22 +105,17 @@ export const initMembershipPlans = async () => {
 };
 
 /**
- * Seeds default plans if the collection is empty
+ * DEPRECATED — no-op.
+ * `membershipPlans` is seeded by exactly ONE seeder now:
+ * `websiteAdminUI.seedInitialPlans()`. Two seeders both writing an empty
+ * collection produced two competing sets of default plans, so this one was
+ * retired. The export is kept because other code may still call it — it
+ * only logs a warning and writes nothing.
  */
 const seedDefaultPlans = async () => {
-  try {
-    const plansRef = collection(db, "membershipPlans");
-    const snapshot = await getDocs(query(plansRef));
-    
-    if (snapshot.empty) {
-      console.log("No plans found. Seeding default plans...");
-      for (const plan of DEFAULT_PLANS) {
-        await addDoc(plansRef, plan);
-      }
-    }
-  } catch (error) {
-    console.error("Error seeding default plans:", error);
-  }
+  console.warn(
+    "[membershipService] seedDefaultPlans() is a no-op — default plans are seeded by websiteAdminUI.seedInitialPlans(). Nothing was written."
+  );
 };
 
 /**

@@ -1,4 +1,4 @@
-import { getSettings, saveSettings } from "./settingsService.js?v=ui1";
+import { getSettings, saveSettings } from "./settingsService.js";
 import { fetchAllTemplates, addTemplate, updateTemplate, deleteTemplate } from "./messageTemplateService.js";
 
 /**
