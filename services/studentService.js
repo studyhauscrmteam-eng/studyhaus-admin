@@ -1,5 +1,39 @@
 import { collection, doc, updateDoc, onSnapshot, getDocs, query, where, serverTimestamp, getDoc, addDoc, setDoc, deleteDoc, deleteField } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { db } from "../firebase/firebase.js";
+
+// Vercel backend (same host as the public website). CORS is open there, so
+// the portal passes the caller's own ID token for authorisation.
+const API_BASE = "https://www.shreejilibrary.co.in/api";
+
+/**
+ * Kill the Firebase Auth credential for a student — plus everything only the
+ * server may touch (history rows, the seat, uniqueness claims).
+ *
+ * The browser SDK has NO way to delete an Auth user, which is exactly why a
+ * student "deleted" from the admin portal could still sign in. The server
+ * route `api/index.js -> POST /api/students/purge` owns the Admin SDK, so it
+ * does the credential first and refuses unless the caller is Owner/Admin.
+ *
+ * @returns {Promise<{ok: boolean, removed?: object, error?: string}>}
+ */
+export const purgeStudentOnServer = async (studentId) => {
+  try {
+    const user = getAuth().currentUser;
+    if (!user) return { ok: false, error: "You are not signed in." };
+    const token = await user.getIdToken();
+    const res = await fetch(`${API_BASE}/students/purge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ studentId }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: body.error || `Server refused (HTTP ${res.status}).` };
+    return { ok: true, removed: body.removed || {} };
+  } catch (e) {
+    return { ok: false, error: e.message || "Could not reach the server." };
+  }
+};
 
 /**
  * Validates updates to ensure no duplicates for Phone/Email/Student ID
@@ -83,6 +117,19 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
     const snap = await getDoc(doc(db, "students", studentId));
     if (!snap.exists()) throw new Error("Student record not found.");
     const data = snap.data() || {};
+
+    // 0. Credential FIRST, while the record still exists to identify the
+    // account. The browser cannot delete a Firebase Auth user, and deleting
+    // the documents before the login was revoked is exactly the half-state
+    // that let "deleted" students keep opening the portal. If the server
+    // refuses, abort — we never leave docs gone but login alive.
+    const purge = await purgeStudentOnServer(studentId);
+    if (!purge.ok) {
+      throw new Error(
+        `Portal login could not be removed (${purge.error || "unknown error"}). ` +
+        "Nothing was deleted — fix that first or the student could still sign in."
+      );
+    }
 
     // 1. Free the seat (if one is assigned)
     const seatNo = data.seatNumber || data.seatAssigned || "";

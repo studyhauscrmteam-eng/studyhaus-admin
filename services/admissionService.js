@@ -360,8 +360,12 @@ export const initAdmissionsUI = async () => {
       const st = document.createElement("style");
       st.id = "admission-action-styles";
       st.textContent = `
-        .btn-approve, .btn-reject { padding: 4px 12px; border-radius: 999px; margin-right: 4px; font-weight: 600; cursor: pointer; transition: filter .15s, transform .1s; }
-        .btn-approve:last-child, .btn-reject:last-child { margin-right: 0; }
+        /* Decision row: 2 primary actions over 2 secondary, never four buttons
+           jammed edge-to-edge in one line. Wraps cleanly on narrow screens. */
+        .approval-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; max-width: 240px; margin-left: auto; }
+        .approval-actions .btn { flex: 0 0 auto; min-height: 32px; padding: 7px 15px; font-size: 13px; font-weight: 700; line-height: 1.2; border-radius: 999px; letter-spacing: .01em; }
+        .approval-actions .btn-approve, .approval-actions .btn-reject { flex: 1 1 84px; }
+        .btn-approve, .btn-reject { padding: 7px 15px; border-radius: 999px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .1s; }
         .btn-approve { background: rgba(16,185,129,.14); color: var(--accent-emerald); border: 1px solid rgba(16,185,129,.45); }
         .btn-reject { background: rgba(244,63,94,.14); color: var(--accent-red); border: 1px solid rgba(244,63,94,.45); }
         .btn-approve:hover, .btn-reject:hover { filter: brightness(1.15); }
@@ -475,11 +479,13 @@ export const initAdmissionsUI = async () => {
             <td>${escHtml(r.phone)}${paymentLine}</td>
             <td>${escHtml(r.planName || "")}${seatInfo}</td>
             <td>${d}</td>
-            <td style="text-align:right; white-space:nowrap;">
-              <button class="btn btn-sm btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
-              <button class="btn btn-sm btn-reject" onclick="window.rejectStudent('${r.id}')">Reject</button>
-              <button class="btn btn-sm btn-ghost" title="Open full student card" onclick="window.openStudentProfileById('${r.id}')" style="padding:4px 10px; border-radius:999px; font-weight:600; margin-right:4px;">Open</button>
-              <button class="btn btn-sm btn-ghost" title="View uploaded documents" onclick="window.viewStudentDocuments('${r.id}')" style="padding:4px 10px; border-radius:999px; font-weight:600;">Docs</button>
+            <td style="text-align:right;">
+              <div class="approval-actions">
+                <button class="btn btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
+                <button class="btn btn-reject" onclick="window.rejectStudent('${r.id}')">Reject</button>
+                <button class="btn btn-ghost" title="Open full student card" onclick="window.openStudentProfileById('${r.id}')">Open</button>
+                <button class="btn btn-ghost" title="View uploaded documents" onclick="window.viewStudentDocuments('${r.id}')">Docs</button>
+              </div>
             </td>
           </tr>
         `;

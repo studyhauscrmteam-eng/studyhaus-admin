@@ -1,5 +1,5 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
-import { isNotifRead, markNotifRead, countUnread } from "./notificationReadState.js";
+import { isNotifRead, markNotifRead, markAllNotifsRead, countUnread } from "./notificationReadState.js";
 
 // Cache of the latest announcements + whether read items are shown.
 // Clicking a notification marks it read (persisted per user) so it stays
@@ -117,10 +117,25 @@ const renderAnnouncementList = () => {
   // Approval decisions / new admission requests written to `notifications`
   // by notifyAdmins() — these were subscribed by nobody until now.
   const sys = renderSystemNotifs();
-  const total = unread + admissionUnread + sys.unread;
   const alertsBlock = typeof window.__renderAdmissionAlerts === "function"
     ? window.__renderAdmissionAlerts()
     : "";
+
+  // ── Auto-clear (owner's choice): opening this page IS the ack. ──────────
+  // Every counter drops to zero immediately and every id on screen is written
+  // to the read store, so the badge cannot come back after a refresh or a page
+  // switch — nothing is left sitting unread.
+  const notifPageEl = document.getElementById("page-notifications");
+  const onNotifPage = !!(notifPageEl && notifPageEl.getClientRects().length);
+  if (onNotifPage) {
+    markAllNotifsRead([
+      ...unreadIds,
+      ...systemNotifs().map((n) => `sys_${n.id}`),
+      ...(Array.isArray(window.__leadNotifs) ? window.__leadNotifs : []).map((n) => n.id),
+      ...(Array.isArray(window.__pendingAdmissions) ? window.__pendingAdmissions : []).map((r) => `adm_${r.id}`),
+    ]);
+  }
+  const total = onNotifPage ? 0 : unread + admissionUnread + sys.unread;
 
   // Update badges AND the topbar bell dot with the UNREAD count only.
   // Both start hidden in the template, so zero means zero everywhere.
@@ -134,6 +149,8 @@ const renderAnnouncementList = () => {
     const bellDot = document.getElementById("topbar-notif-dot");
     if (bellDot) bellDot.style.display = total > 0 ? "" : "none";
   }
+  // Reading this page clears the tab counter too.
+  if (onNotifPage && document.title.indexOf(BASE_TITLE) !== -1) document.title = BASE_TITLE;
 
   if (announcements.length === 0 && !alertsBlock && !sys.html) {
     notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
@@ -141,8 +158,13 @@ const renderAnnouncementList = () => {
     return;
   }
 
-  const visible = showReadAdmin ? announcements : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
-  const toggle = readCount > 0
+  // On the Notifications page everything is already acknowledged, so the list
+  // must keep showing its items (they are read, not deleted) and the
+  // hide-read toggle would be pure noise.
+  const visible = (showReadAdmin || onNotifPage)
+    ? announcements
+    : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
+  const toggle = (readCount > 0 && !onNotifPage)
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";
 

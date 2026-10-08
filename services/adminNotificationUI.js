@@ -36,8 +36,18 @@ const beep = () => {
   } catch (_) { /* autoplay blocked or no audio — skip */ }
 };
 
+/** True while the Notifications page is on screen. */
+const notifPageOpen = () => {
+  const p = document.getElementById("page-notifications");
+  return !!(p && p.getClientRects().length);
+};
+
 /** Turn the topbar dot into a WhatsApp-style count pill. */
 const paintBell = (unread) => {
+  // Auto-clear: being on the Notifications page always paints zero, no matter
+  // which listener asked — a live Firestore snapshot must not re-raise the
+  // badge while the owner is looking at the list.
+  if (notifPageOpen()) unread = 0;
   const dot = document.getElementById("topbar-notif-dot");
   if (!dot) return;
   if (unread > 0) {
@@ -64,6 +74,7 @@ const paintBell = (unread) => {
 
 /** Browser tab badge: "(3) Studyhaus — Reading Space CRM". */
 const paintTab = (unread) => {
+  if (notifPageOpen()) unread = 0;
   document.title = unread > 0 ? `(${unread > 9 ? "9+" : unread}) ${BASE_TITLE}` : BASE_TITLE;
 };
 
