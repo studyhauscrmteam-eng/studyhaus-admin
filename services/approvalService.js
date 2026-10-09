@@ -352,6 +352,57 @@ export const rejectAdmission = async (admissionId, reason) => {
 };
 
 // ──────────────────────────────────────────────────────────────────────────
+// Dismiss (take it out of the queue without deciding it)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Remove a request from the Pending-approval queue WITHOUT approving or
+ * rejecting it. The record is fully preserved — only the lifecycle flags
+ * change — so it stays searchable in Students and can be reasoned about later.
+ * A seat Reserved for THIS applicant is released; an Occupied seat is never
+ * touched.
+ */
+export const dismissAdmission = async (admissionId) => {
+  try {
+    const studentRef = doc(db, "students", admissionId);
+    const studentSnap = await getDoc(studentRef);
+    const targetRef = studentSnap.exists() ? studentRef : doc(db, "admissions", admissionId);
+
+    const docSnap = await getDoc(targetRef);
+    if (!docSnap.exists()) throw new Error("Admission record not found.");
+    const data = docSnap.data() || {};
+
+    const seatNumber = String(data.seatAssigned || data.seatNumber || "").trim();
+    if (seatNumber && seatNumber !== "undefined") {
+      const seatDoc = await findSeat(seatNumber);
+      if (seatDoc &&
+          seatDoc.data.status === "Reserved" &&
+          seatDoc.data.assignedStudentId === admissionId) {
+        await updateDoc(seatDoc.ref, {
+          status: "Available",
+          assignedStudentId: null,
+          assignedStudentName: null,
+          planType: null,
+          lastUpdated: serverTimestamp(),
+        });
+      }
+    }
+
+    await updateDoc(targetRef, {
+      approvalStatus: "Dismissed",
+      status: "Dismissed",
+      dismissedAt: serverTimestamp(),
+      dismissedBy: (typeof localStorage !== "undefined" && localStorage.getItem("userName")) || "Staff",
+      updatedAt: serverTimestamp(),
+    });
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────────
 // Request changes
 // ──────────────────────────────────────────────────────────────────────────
 

@@ -1,11 +1,23 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
-import { isNotifRead, markNotifRead, markAllNotifsRead, countUnread } from "./notificationReadState.js";
+import { isNotifRead, markNotifRead, countUnread } from "./notificationReadState.js";
+
+// OWN copy of the tab title. This used to reference BASE_TITLE from
+// adminNotificationUI.js — a module-scoped const that is NOT in scope here —
+// so every render while the Notifications page was open threw
+// "ReferenceError: BASE_TITLE is not defined" BEFORE the list was written and
+// the page froze on "Loading announcements..." for ever.
+const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
 
 // Cache of the latest announcements + whether read items are shown.
 // Clicking a notification marks it read (persisted per user) so it stays
 // gone; the badge counts only unread items.
 let lastAnnouncements = [];
 let showReadAdmin = false;
+
+/** Ids of every admission alert currently in the live pending queue. */
+const admissionIds = () =>
+  (Array.isArray(window.__pendingAdmissions) ? window.__pendingAdmissions : [])
+    .map((r) => `adm_${r.id}`);
 
 /**
  * System notifications (approval decisions, new admission requests) are written
@@ -35,26 +47,28 @@ const tsMs = (v) => {
 
 const renderSystemNotifs = () => {
   const items = systemNotifs();
-  if (items.length === 0) return { html: "", unread: 0 };
+  // Clicked = read = GONE from the list (the owner's rule: click it and it
+  // disappears). Only unread items are rendered.
+  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`));
+  if (live.length === 0) return { html: "", unread: 0 };
 
   let unread = 0;
   const html =
     `<div style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); padding:0.4rem 0.2rem 0.5rem;">Activity</div>` +
-    items.map((n) => {
+    live.map((n) => {
       const key = `sys_${n.id}`;
-      const isUnread = !isNotifRead(key);
-      if (isUnread) unread++;
+      unread++;
       const ms = tsMs(n.createdAt);
       // Never claim "Just now" for a record we couldn't read a date from —
       // that made a page of old entries look like they all just fired.
       const when = ms ? new Date(ms).toLocaleString() : "Date unavailable";
       return `
-        <div class="notif-item" data-notif-id="${key}" title="Click to mark as read" style="opacity:${isUnread ? 1 : 0.62};">
+        <div class="notif-item" data-notif-id="${key}" title="Click to dismiss">
           <div class="notif-icon ${n.type === "new-admission" || n.type === "new-lead" ? "amber" : "green"}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </div>
           <div class="notif-content" style="flex:1;">
-            <div class="notif-title">${n.title || "Notification"}${isUnread ? ' <span style="font-size:9px; font-weight:800; background:var(--primary); color:#fff; padding:1px 6px; border-radius:999px; vertical-align:middle;">NEW</span>' : ""}</div>
+            <div class="notif-title">${n.title || "Notification"}</div>
             <div class="notif-body">${n.body || ""}</div>
             <div class="notif-time">${when}</div>
           </div>
@@ -112,45 +126,33 @@ const renderAnnouncementList = () => {
   const unread = countUnread(unreadIds);
   const readCount = announcements.length - unread;
 
-  // Admission alerts (website form submissions) share the same bell.
-  const admissionUnread = window.__admissionUnread || 0;
   // Approval decisions / new admission requests written to `notifications`
-  // by notifyAdmins() — these were subscribed by nobody until now.
+  // by notifyAdmins().
   const sys = renderSystemNotifs();
   const alertsBlock = typeof window.__renderAdmissionAlerts === "function"
     ? window.__renderAdmissionAlerts()
     : "";
+  // Admission alerts are counted by their own read-state, NOT by the raw
+  // queue length — that is what made the badge impossible to clear.
+  const admissionUnread = countUnread(admissionIds());
 
-  // ── Auto-clear (owner's choice): opening this page IS the ack. ──────────
-  // Every counter drops to zero immediately and every id on screen is written
-  // to the read store, so the badge cannot come back after a refresh or a page
-  // switch — nothing is left sitting unread.
-  const notifPageEl = document.getElementById("page-notifications");
-  const onNotifPage = !!(notifPageEl && notifPageEl.getClientRects().length);
-  if (onNotifPage) {
-    markAllNotifsRead([
-      ...unreadIds,
-      ...systemNotifs().map((n) => `sys_${n.id}`),
-      ...(Array.isArray(window.__leadNotifs) ? window.__leadNotifs : []).map((n) => n.id),
-      ...(Array.isArray(window.__pendingAdmissions) ? window.__pendingAdmissions : []).map((r) => `adm_${r.id}`),
-    ]);
-  }
-  const total = onNotifPage ? 0 : unread + admissionUnread + sys.unread;
+  // ── ONE number for every surface. ────────────────────────────────────────
+  // Opening this page acknowledges NOTHING. The badge only drops when the
+  // owner actually clicks a notification (or decides an admission).
+  const total = unread + admissionUnread + sys.unread;
 
-  // Update badges AND the topbar bell dot with the UNREAD count only.
-  // Both start hidden in the template, so zero means zero everywhere.
+  // Sidebar pill (and every other .nav-badge in the shell).
   document.querySelectorAll('.nav-badge').forEach(badge => {
     badge.textContent = total > 9 ? "9+" : String(total);
     badge.style.display = total > 0 ? 'inline-block' : 'none';
   });
-  // The bell pill itself is painted by adminNotificationUI (count bubble);
-  // only fall back to the plain dot when that module hasn't run.
-  if (!window.__admissionBadgesLive) {
+  // Topbar bell pill + browser-tab counter — same number, one writer.
+  if (typeof window.__paintNotifBadges === "function") {
+    window.__paintNotifBadges(total);
+  } else if (!window.__admissionBadgesLive) {
     const bellDot = document.getElementById("topbar-notif-dot");
     if (bellDot) bellDot.style.display = total > 0 ? "" : "none";
   }
-  // Reading this page clears the tab counter too.
-  if (onNotifPage && document.title.indexOf(BASE_TITLE) !== -1) document.title = BASE_TITLE;
 
   if (announcements.length === 0 && !alertsBlock && !sys.html) {
     notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
@@ -158,13 +160,12 @@ const renderAnnouncementList = () => {
     return;
   }
 
-  // On the Notifications page everything is already acknowledged, so the list
-  // must keep showing its items (they are read, not deleted) and the
-  // hide-read toggle would be pure noise.
-  const visible = (showReadAdmin || onNotifPage)
+  // Read items are hidden — clicking a notification makes it disappear.
+  // The toggle below brings them back deliberately.
+  const visible = showReadAdmin
     ? announcements
     : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
-  const toggle = (readCount > 0 && !onNotifPage)
+  const toggle = readCount > 0
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";
 
@@ -202,7 +203,7 @@ const renderAnnouncementList = () => {
         : "";
 
       html += `
-        <div class="notif-item" data-notif-id="ann_${a.id}" title="Click to mark as read">
+        <div class="notif-item" data-notif-id="ann_${a.id}" title="Click to dismiss">
           <div class="notif-icon ${iconClass}">${iconHtml}</div>
           <div class="notif-content" style="flex: 1;">
             <div style="display:flex; justify-content:space-between;">

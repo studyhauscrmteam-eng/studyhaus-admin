@@ -1,7 +1,7 @@
-import { collection, addDoc, serverTimestamp, getDocs, getDoc, query, where, onSnapshot, doc, updateDoc, setDoc } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, getDocs, getDoc, query, where, onSnapshot, doc, updateDoc, setDoc, runTransaction } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { validateStudentData } from "./studentValidation.js";
-import { approveAdmission, rejectAdmission } from "./approvalService.js";
+import { approveAdmission, rejectAdmission, dismissAdmission } from "./approvalService.js";
 import { createPortalAccount } from "./authService.js";
 import { ensureStudentId } from "./studentIdService.js";
 import { getAuth } from "firebase/auth";
@@ -52,6 +52,41 @@ export const updateAdmissionPayment = async (admissionId, transactionId, payment
   } catch (error) {
     return { success: false, error: error.message };
   }
+};
+
+/**
+ * Write the students record AND the "one request per phone/email" claim in
+ * ONE transaction — both land or neither does. EVERY read is issued before
+ * the first write (Firestore rejects a tx.get() after a tx.set()).
+ *
+ * A second request for the same number throws here, before anything is
+ * created, with the friendly message the applicant sees. New prefixes
+ * (`req_adm_` / `req_admmail_`) keep this clear of the portal's own
+ * `phone_` / `email_` index claims.
+ *
+ * @returns {Promise<string>} the record id
+ */
+const createStudentWithClaim = async (ref, payload) => {
+  const phone = String(payload.phone || "").trim();
+  const email = String(payload.email || "").trim().toLowerCase();
+  const phoneClaimRef = phone ? doc(db, "uniqueness", `req_adm_${phone}`) : null;
+  const emailClaimRef = email ? doc(db, "uniqueness", `req_admmail_${email}`) : null;
+
+  await runTransaction(db, async (tx) => {
+    const pc = phoneClaimRef ? await tx.get(phoneClaimRef) : null;
+    const ec = emailClaimRef ? await tx.get(emailClaimRef) : null;
+    // `exists` is a METHOD on the web SDK's DocumentSnapshot.
+    if ((pc && pc.exists()) || (ec && ec.exists())) {
+      throw new Error(
+        `We already have a request from ${phone || email} — no second one can be filed. We'll call you.`
+      );
+    }
+    tx.set(ref, payload, { merge: true });
+    const stamp = { docPath: ref.path, uid: "", createdAt: serverTimestamp() };
+    if (phoneClaimRef) tx.set(phoneClaimRef, { kind: "phone-index", ...stamp });
+    if (emailClaimRef) tx.set(emailClaimRef, { kind: "email", ...stamp });
+  });
+  return ref.id;
 };
 
 /**
@@ -125,12 +160,11 @@ export const submitAdmission = async (formData, isStudent) => {
       formData.approvalStatus = "Pending";
       formData.status = "Pending";
       let admissionId = uid;
-      if (admissionId) {
-        await setDoc(doc(db, "students", admissionId), formData, { merge: true });
-      } else {
-        // Pure website form (no account at all) — auto-ID record.
-        const ref = await addDoc(collection(db, "students"), formData);
-        admissionId = ref.id;
+      {
+        const ref = admissionId
+          ? doc(db, "students", admissionId)
+          : doc(collection(db, "students"));
+        admissionId = await createStudentWithClaim(ref, formData);
       }
 
       // Notify the admin (in-app + email). Failures here must never block
@@ -173,14 +207,10 @@ export const submitAdmission = async (formData, isStudent) => {
         formData.authEmail = account.authEmail;
       }
 
-      let studentId;
-      if (uid) {
-        await setDoc(doc(db, "students", uid), formData);
-        studentId = uid;
-      } else {
-        const studentRef = await addDoc(collection(db, "students"), formData);
-        studentId = studentRef.id;
-      }
+      const studentId = await createStudentWithClaim(
+        uid ? doc(db, "students", uid) : doc(collection(db, "students")),
+        formData
+      );
       return { success: true, studentId, accountCreated: !!uid };
     }
     
@@ -196,6 +226,40 @@ export const submitAdmission = async (formData, isStudent) => {
  * students doc with approvalStatus == "Pending". The `admissions`
  * collection is retired as a data store (11 legacy history docs only).
  */
+/**
+ * 7 days: a request nobody has acted on leaves the queue by itself, so the
+ * approval page can never sit jammed for a fortnight. Fires once per record
+ * (guarded by `expiredThisSession`) and only while it is still Pending, so
+ * it is idempotent and can never write-loop or swallow a living claim.
+ * Records with no readable timestamp at all are skipped rather than nuked.
+ */
+const EXPIRE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const expiredThisSession = new Set();
+
+const recordTimeMs = (r) => {
+  const v = r.createdAt || r.updatedAt;
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
+
+const expireStaleRequests = (list) => {
+  const cutoff = Date.now() - EXPIRE_AFTER_MS;
+  list.forEach((r) => {
+    if (expiredThisSession.has(r.id)) return;
+    const t = recordTimeMs(r);
+    if (!t || t > cutoff) return;
+    expiredThisSession.add(r.id);
+    updateDoc(doc(db, "students", r.id), {
+      approvalStatus: "Expired",
+      status: "Expired",
+      expiredAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }).catch(() => { expiredThisSession.delete(r.id); });
+  });
+};
+
 export const listenToPendingAdmissions = (onUpdate, onError) => {
   const q = query(collection(db, "students"), where("approvalStatus", "==", "Pending"));
   
@@ -209,6 +273,7 @@ export const listenToPendingAdmissions = (onUpdate, onError) => {
       const tb = b.createdAt ? (typeof b.createdAt.toMillis === "function" ? b.createdAt.toMillis() : new Date(b.createdAt).getTime()) : 0;
       return (tb || 0) - (ta || 0);
     });
+    expireStaleRequests(list);
     onUpdate(list);
   }, onError);
 };
@@ -274,6 +339,38 @@ export const initAdmissionsUI = async () => {
           });
         }
         window.showToast("Admission Rejected.", "info");
+      }
+      else window.showToast("Error: " + res.error, "error");
+    }
+  };
+
+  /**
+   * Take the request out of the queue without approving or rejecting it.
+   * Nothing is deleted: the record keeps everything and simply stops being
+   * an open item (and stops holding the badge).
+   */
+  window.dismissStudent = async (id) => {
+    const confirmed = await window.showCustomConfirm(
+      "Dismiss Request",
+      "Remove this request from the approval queue? Nothing is deleted — the record stays in Students, it just stops waiting for a decision.",
+      "Dismiss",
+      false
+    );
+    if (confirmed) {
+      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
+      const res = await dismissAdmission(id);
+      if (res.success) {
+        if (typeof window.recordAdmissionDecision === "function") {
+          window.recordAdmissionDecision({
+            admissionId: id,
+            name: rec.name || "Admission",
+            phone: rec.phone || "",
+            planName: rec.planName || "",
+            seat: rec.seatAssigned || rec.seatNumber || "",
+            decision: "Dismissed",
+          });
+        }
+        window.showToast("Request dismissed — it is out of the queue.", "info");
       }
       else window.showToast("Error: " + res.error, "error");
     }
@@ -370,6 +467,11 @@ export const initAdmissionsUI = async () => {
         .btn-reject { background: rgba(244,63,94,.14); color: var(--accent-red); border: 1px solid rgba(244,63,94,.45); }
         .btn-approve:hover, .btn-reject:hover { filter: brightness(1.15); }
         .btn-approve:active, .btn-reject:active { transform: scale(.97); }
+        /* Tertiary action: clear the queue without deciding anything. */
+        .btn-dismiss { padding: 6px 13px; border-radius: 999px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .1s;
+          background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-dismiss:hover { filter: brightness(1.1); }
+        .btn-dismiss:active { transform: scale(.97); }
       `;
       document.head.appendChild(st);
     }
@@ -479,6 +581,7 @@ export const initAdmissionsUI = async () => {
               <div class="approval-actions">
                 <button class="btn btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
                 <button class="btn btn-reject" onclick="window.rejectStudent('${r.id}')">Reject</button>
+                <button class="btn btn-dismiss" title="Take it out of the queue without deciding — nothing is deleted" onclick="window.dismissStudent('${r.id}')">Dismiss</button>
                 <button class="btn btn-ghost" title="Open full student card" onclick="window.openStudentProfileById('${r.id}')">Open</button>
                 <button class="btn btn-ghost" title="View uploaded documents" onclick="window.viewStudentDocuments('${r.id}')">Docs</button>
               </div>

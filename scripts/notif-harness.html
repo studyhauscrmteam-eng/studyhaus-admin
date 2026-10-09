@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Studyhaus — Reading Space CRM</title>
+  <!--
+    Notification harness.
+
+    Loads the REAL announcementAdminUI.js + adminNotificationUI.js +
+    notificationReadState.js against the real style.css, with only the four
+    Firestore-backed data services swapped for stubs (see scripts/stubs/notif-*).
+    The DOM below is copied from index.html so the selectors the code looks up
+    (.nav-badge, #topbar-notif-dot, #page-notifications .notif-list) are the
+    same ones a signed-in admin has.
+  -->
+  <script type="importmap">
+    {
+      "imports": {
+        "firebase/firestore": "/scripts/stubs/notif-firestore.js",
+        "firebase/app": "/scripts/stubs/notif-firebase.js",
+        "firebase/auth": "/scripts/stubs/notif-firebase.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <nav class="sidebar" id="sidebar">
+    <a class="nav-item" data-page="notifications">
+      <span data-i18n="menu.notifications">Notifications</span>
+      <span class="nav-badge" style="display:none;">0</span>
+    </a>
+  </nav>
+
+  <header class="topbar">
+    <button class="btn btn-ghost" id="bell-btn" title="Notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      <span id="topbar-notif-dot"
+        style="position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background-color: #ef4444; border-radius: 50%; display: none;"></span>
+    </button>
+  </header>
+
+  <main class="main">
+    <div class="page" id="page-notifications" style="display:block;">
+      <div class="page-header">
+        <div>
+          <h1>Notifications</h1>
+          <p class="page-subtitle">Announcements &amp; Alerts</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="notif-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    // Role + user id so notificationReadState keys the read store like the
+    // real admin session does.
+    localStorage.setItem("userRole", "Owner/Admin");
+    localStorage.setItem("userId", "harness-admin");
+    localStorage.setItem("userName", "Harness");
+
+    window.showToast = (msg, type) => {
+      const el = document.createElement("div");
+      el.className = "toast " + (type || "info");
+      el.dataset.testid = "toast";
+      el.textContent = msg;
+      document.body.appendChild(el);
+    };
+
+    // adminNotificationUI first: it publishes window.__renderAdmissionAlerts
+    // and window.__paintNotifBadges, which the announcement renderer calls
+    // during its very first pass.
+    const notif = await import("/services/adminNotificationUI.js");
+    const ann = await import("/services/announcementAdminUI.js");
+
+    notif.initAdminNotificationUI();
+    ann.initAnnouncementAdminUI();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

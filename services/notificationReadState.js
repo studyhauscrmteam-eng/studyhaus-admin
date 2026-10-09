@@ -31,20 +31,8 @@ export const markNotifRead = (id) => {
 };
 
 /**
- * Auto-clear (owner's choice): opening the Notifications page acknowledges
- * everything on screen in one shot. Every id is written to the read store so
- * the badge cannot resurrect itself on refresh or when you navigate away —
- * there is no stored "unread" left to count.
+ * Counts the ids that have NOT been clicked yet — the badge number.
  */
-export const markAllNotifsRead = (ids) => {
-  if (!Array.isArray(ids) || ids.length === 0) return;
-  try {
-    const set = getReadIds();
-    for (const id of ids) if (id != null) set.add(String(id));
-    localStorage.setItem(storeKey(), JSON.stringify([...set].slice(-300)));
-  } catch (_) {}
-};
-
 export const countUnread = (ids) => {
   const read = getReadIds();
   return (ids || []).filter((id) => !read.has(String(id))).length;

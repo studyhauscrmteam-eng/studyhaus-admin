@@ -1,5 +1,6 @@
 import { listenToPendingAdmissions } from "./admissionService.js";
 import { listenToAdminNotifications } from "./notificationService.js";
+import { isNotifRead } from "./notificationReadState.js";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
@@ -36,18 +37,8 @@ const beep = () => {
   } catch (_) { /* autoplay blocked or no audio — skip */ }
 };
 
-/** True while the Notifications page is on screen. */
-const notifPageOpen = () => {
-  const p = document.getElementById("page-notifications");
-  return !!(p && p.getClientRects().length);
-};
-
 /** Turn the topbar dot into a WhatsApp-style count pill. */
 const paintBell = (unread) => {
-  // Auto-clear: being on the Notifications page always paints zero, no matter
-  // which listener asked — a live Firestore snapshot must not re-raise the
-  // badge while the owner is looking at the list.
-  if (notifPageOpen()) unread = 0;
   const dot = document.getElementById("topbar-notif-dot");
   if (!dot) return;
   if (unread > 0) {
@@ -74,16 +65,25 @@ const paintBell = (unread) => {
 
 /** Browser tab badge: "(3) Studyhaus — Reading Space CRM". */
 const paintTab = (unread) => {
-  if (notifPageOpen()) unread = 0;
   document.title = unread > 0 ? `(${unread > 9 ? "9+" : unread}) ${BASE_TITLE}` : BASE_TITLE;
 };
 
+/**
+ * Single entry point for the bell pill + tab title. announcementAdminUI owns
+ * the ONE unread total (announcements + activity + leads + admission alerts)
+ * and hands it here, so sidebar, bell and tab can never disagree.
+ */
+window.__paintNotifBadges = (n) => { paintBell(n); paintTab(n); };
+
 const fmtWhen = (r) => {
   try {
-    const t = r.createdAt && typeof r.createdAt.toMillis === "function"
-      ? r.createdAt.toMillis()
-      : (r.createdAt ? new Date(r.createdAt).getTime() : Date.now());
-    return new Date(t).toLocaleString();
+    const v = r.createdAt;
+    if (!v) return "Just now";
+    const t = typeof v.toMillis === "function" ? v.toMillis()
+      : typeof v.seconds === "number" ? v.seconds * 1000
+        : (typeof v === "string" || v instanceof Date ? new Date(v).getTime() : NaN);
+    // Never render "Invalid Date" — say so plainly instead.
+    return Number.isFinite(t) ? new Date(t).toLocaleString() : "Date unavailable";
   } catch (_) {
     return "Just now";
   }
@@ -135,10 +135,15 @@ const historyHtml = () => {
   const list = readDecisionHistory();
   if (list.length === 0) return "";
   const items = list.slice(0, 15).map((h) => {
-    const approved = h.decision === "Approved";
+    // Approved / Rejected / Dismissed / Expired — show what actually happened.
+    const decision = h.decision || "Rejected";
+    const approved = decision === "Approved";
+    const neutral = decision === "Dismissed" || decision === "Expired";
     const icon = approved
       ? `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`
-      : `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`;
+      : neutral
+        ? `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`
+        : `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`;
     const meta = [
       h.planName ? esc(h.planName) : "",
       h.seat ? `Seat ${esc(h.seat)}` : "",
@@ -146,11 +151,11 @@ const historyHtml = () => {
     ].filter(Boolean).join(" · ");
     return `
       <div class="notif-item">
-        <div class="notif-icon ${approved ? "green" : "red"}">
+        <div class="notif-icon ${approved ? "green" : neutral ? "amber" : "red"}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">${icon}</svg>
         </div>
         <div class="notif-content" style="flex:1;">
-          <div class="notif-title">${esc(h.name || "Admission")} — ${approved ? "Approved" : "Rejected"}</div>
+          <div class="notif-title">${esc(h.name || "Admission")} — ${esc(decision)}</div>
           <div class="notif-body">${meta || (h.phone ? esc(h.phone) : "Admission decision recorded")}</div>
           <div class="notif-time">${new Date(h.at).toLocaleString()}${h.by ? ` · ${esc(h.by)}` : ""}</div>
         </div>
@@ -170,21 +175,21 @@ const historyHtml = () => {
  * no two writers fighting over .notif-list.
  */
 const alertsHtml = () => {
-  const pending = window.__pendingAdmissions || [];
+  const all = window.__pendingAdmissions || [];
+  // Dismissed (clicked) alerts stay in the queue but leave the list, exactly
+  // like every other notification. The applicant is untouched.
+  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`));
   const decided = historyHtml();
   if (pending.length === 0) return decided;
-  const role = localStorage.getItem("userRole");
-  const canReview = role === "Owner/Admin" || role === "Manager";
+  // Plain cards like every other notification: no Review button, the whole
+  // card is the click target and it disappears when tapped.
   const items = pending.slice(0, 10).map((r) => `
-      <div class="notif-item unread">
+      <div class="notif-item unread" data-notif-id="adm_${r.id}" title="Click to dismiss">
         <div class="notif-icon red">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         </div>
         <div class="notif-content" style="flex:1;">
-          <div style="display:flex; justify-content:space-between; gap:.5rem; align-items:flex-start;">
-            <div class="notif-title">${esc(r.name || "New admission request")}</div>
-            ${canReview ? `<button class="btn btn-secondary btn-sm" style="padding:4px 10px; font-size:12px; white-space:nowrap;" onclick="window.reviewAdmissionAlert()">Review</button>` : ""}
-          </div>
+          <div class="notif-title">${esc(r.name || "New admission request")}</div>
           <div class="notif-body">${esc(r.phone || "")}${r.planName ? ` · ${esc(r.planName)}` : ""} — waiting for approval</div>
           <div class="notif-time">${esc(fmtWhen(r))}</div>
         </div>
@@ -196,13 +201,6 @@ const alertsHtml = () => {
     ${items}${decided}`;
 };
 
-window.reviewAdmissionAlert = () => {
-  if (typeof navigate === "function") navigate("admissions");
-  if (typeof window.switchAdmissionTab === "function") {
-    setTimeout(() => window.switchAdmissionTab("pending"), 150);
-  }
-};
-
 export const initAdminNotificationUI = () => {
   const list = document.querySelector("#page-notifications .notif-list");
   if (!list) return; // not on a dashboard with notifications
@@ -212,7 +210,6 @@ export const initAdminNotificationUI = () => {
   window.__renderAdmissionAlerts = alertsHtml;
   window.__admissionBadgesLive = true; // bell pill painted here; don't reset it
   window.__pendingAdmissions = [];
-  window.__admissionUnread = 0;
   paintTab(0);
 
   // The `notifications` collection (approval decisions + new admission
@@ -284,7 +281,6 @@ export const initAdminNotificationUI = () => {
   listenToPendingAdmissions(
     (records) => {
       window.__pendingAdmissions = records;
-      window.__admissionUnread = records.length;
 
       // New arrivals (skip the very first snapshot): toast + beep.
       if (!firstSnapshot) {
@@ -301,17 +297,13 @@ export const initAdminNotificationUI = () => {
       firstSnapshot = false;
       knownIds = new Set(records.map((r) => r.id));
 
-      paintBell(records.length);
-      paintTab(records.length);
-      // Re-render badges + list through the single announcements renderer
-      // so the sidebar badge never flaps between two writers.
+      // Re-render the list AND all three badges through the single renderer,
+      // which owns the one unread total (this module no longer paints the
+      // bell or the tab title itself — two writers made them disagree).
       if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
     },
     () => {
       window.__pendingAdmissions = [];
-      window.__admissionUnread = 0;
-      paintBell(0);
-      paintTab(0);
       if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
     }
   );

@@ -299,6 +299,65 @@ async function main() {
   });
   await signOut(auth);
 
+  /* ------------------------------------ 9. dismiss / expire / dup guard */
+  console.log("\ndismiss, auto-expire, one request per number");
+
+  // The website claims `uniqueness/req_lead_<phone>` inside the same
+  // transaction that writes the lead. Anonymous (signed in) must be able to
+  // create it — a denial here would break website submissions outright.
+  await signInAnonymously(auth);
+  await expectOk("anon can claim a website phone inside its lead tx", () =>
+    runTransaction(db, async (tx) => {
+      const claim = doc(db, "uniqueness", "req_lead_9876543210");
+      const snap = await tx.get(claim);          // reads BEFORE the writes
+      if (snap.exists()) throw new Error("already claimed");
+      const lead = doc(collection(db, "visitors"));
+      tx.set(claim, { kind: "phone-index", uid: "", visitorId: lead.id, docPath: lead.path, createdAt: serverTimestamp() });
+      tx.set(lead, { visitorName: "Dup", phone: "9876543210", leadStatus: "New", createdAt: serverTimestamp() });
+    }));
+  await expectOk("anon can READ that claim back (that is the block)", () =>
+    getDoc(doc(db, "uniqueness", "req_lead_9876543210")));
+  await expectDenied("anon can NOT re-point an existing phone claim", () =>
+    updateDoc(doc(db, "uniqueness", "req_lead_9876543210"), { visitorId: "someone-else" }));
+  await signOut(auth);
+
+  await signInWithEmailAndPassword(auth, "staff1@test.local", "password123");
+  await expectOk("staff can file a request WITH its phone claim in one tx", () =>
+    runTransaction(db, async (tx) => {
+      const claim = doc(db, "uniqueness", "req_adm_9811111111");
+      const snap = await tx.get(claim);          // reads BEFORE the writes
+      if (snap.exists()) throw new Error("already claimed");
+      const rec = doc(db, "students", "dupguard1");
+      tx.set(rec, {
+        uid: "", phone: "9811111111", name: "Dup Guard", role: "Student",
+        status: "Pending", approvalStatus: "Pending"
+      }, { merge: true });
+      tx.set(claim, { kind: "phone-index", uid: "", docPath: rec.path, createdAt: serverTimestamp() });
+    }));
+
+  // Leaving the queue without deciding — the record survives intact.
+  await expectOk("staff can DISMISS a pending request", () =>
+    updateDoc(doc(db, "students", "dupguard1"), {
+      approvalStatus: "Dismissed", status: "Dismissed",
+      dismissedAt: serverTimestamp(), dismissedBy: "Owner/Admin",
+      updatedAt: serverTimestamp()
+    }));
+  await expectOk("staff can seed a stale request", () =>
+    setDoc(doc(db, "students", "dupguard2"), {
+      uid: "", phone: "9822222222", name: "Stale", role: "Student",
+      status: "Pending", approvalStatus: "Pending"
+    }));
+  await expectOk("staff can AUTO-EXPIRE a stale request", () =>
+    updateDoc(doc(db, "students", "dupguard2"), {
+      approvalStatus: "Expired", status: "Expired",
+      expiredAt: serverTimestamp(), updatedAt: serverTimestamp()
+    }));
+  await signOut(auth);
+  await signInNew("applicant@test.local", "password123");
+  await expectDenied("an applicant can NOT dismiss themselves", () =>
+    updateDoc(doc(db, "students", "dupguard1"), { approvalStatus: "Dismissed" }));
+  await signOut(auth);
+
   /* ------------------------------------------------------------------ done */
   console.log(`\n=== ${pass} passed, ${failures.length} failed ===`);
   if (failures.length) {
