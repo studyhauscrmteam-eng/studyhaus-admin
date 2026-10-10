@@ -29,10 +29,6 @@ export const validateVisitor = (visitorData) => {
     throw new Error("Please enter a valid 10-digit phone number.");
   }
 
-  if (!data.purpose || data.purpose.trim() === "") {
-    throw new Error("Visit Purpose is required.");
-  }
-
   if (VALID_SOURCES.indexOf(source) === -1) {
     throw new Error('Source must be either "Website" or "Walk-in".');
   }

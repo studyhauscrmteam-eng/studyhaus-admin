@@ -237,7 +237,10 @@ const EXPIRE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const expiredThisSession = new Set();
 
 const recordTimeMs = (r) => {
-  const v = r.createdAt || r.updatedAt;
+  // The clock starts when the APPLICATION was filed, not when the portal
+  // account was created: a half-finished sign-up that finally completes months
+  // later must still get its full 7 days in the queue.
+  const v = r.submittedAt || r.createdAt || r.updatedAt;
   if (!v) return 0;
   if (typeof v.toMillis === "function") return v.toMillis();
   const t = new Date(v).getTime();
@@ -247,6 +250,10 @@ const recordTimeMs = (r) => {
 const expireStaleRequests = (list) => {
   const cutoff = Date.now() - EXPIRE_AFTER_MS;
   list.forEach((r) => {
+    // Not filed yet = not a request. Expiring one would flip approvalStatus
+    // to "Expired", and a student may not write approvalStatus back to
+    // "Pending" — so their finished application could never reach the queue.
+    if (r.applicationReady === false) return;
     if (expiredThisSession.has(r.id)) return;
     const t = recordTimeMs(r);
     if (!t || t > cutoff) return;
@@ -260,6 +267,21 @@ const expireStaleRequests = (list) => {
   });
 };
 
+/**
+ * Owner rule: "the admission alert MUST appear after the student fills the
+ * entire onboarding form — then and only then."
+ *
+ * The Student Portal writes `applicationReady: false` the moment the account
+ * is created (before a single form field is filled) and flips it to `true`
+ * only in `submitPaymentAndApplication`, i.e. once the whole onboarding form
+ * plus payment proof has been submitted. The queue — and therefore the bell,
+ * the tab badge and the admission alerts — filters on that flag.
+ *
+ * A record with NO flag predates this rule or was written by the website /
+ * staff (complete by definition), so it counts as ready.
+ */
+const isApplicationReady = (r) => !!r && r.applicationReady !== false;
+
 export const listenToPendingAdmissions = (onUpdate, onError) => {
   const q = query(collection(db, "students"), where("approvalStatus", "==", "Pending"));
   
@@ -268,13 +290,16 @@ export const listenToPendingAdmissions = (onUpdate, onError) => {
     snapshot.forEach(doc => {
       list.push({ id: doc.id, ...doc.data() });
     });
-    list.sort((a, b) => {
-      const ta = a.createdAt ? (typeof a.createdAt.toMillis === "function" ? a.createdAt.toMillis() : new Date(a.createdAt).getTime()) : 0;
-      const tb = b.createdAt ? (typeof b.createdAt.toMillis === "function" ? b.createdAt.toMillis() : new Date(b.createdAt).getTime()) : 0;
-      return (tb || 0) - (ta || 0);
-    });
+    const ageOf = (r) => {
+      const v = r.submittedAt || r.createdAt;
+      if (!v) return 0;
+      return typeof v.toMillis === "function" ? v.toMillis() : (new Date(v).getTime() || 0);
+    };
+    list.sort((a, b) => ageOf(b) - ageOf(a));
+    // Expiry runs over every FILED pending record; only COMPLETE applications
+    // are handed on to the table, the badge and the bell.
     expireStaleRequests(list);
-    onUpdate(list);
+    onUpdate(list.filter(isApplicationReady));
   }, onError);
 };
 
@@ -288,6 +313,33 @@ let availablePlansList = [];
 const escHtml = (v) => String(v == null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/**
+ * The "Pending approval" tab counter.
+ *
+ * BUG this replaces: the count used to be painted inside the table renderer,
+ * AFTER `if (!tbody) return;` — so whenever the pending table was not in the
+ * DOM (role-restricted markup, page not fully swapped in yet) the number was
+ * simply never written and the badge stayed frozen at whatever it had last
+ * shown. It also wrote its own inline `background`/`color`, which the tab
+ * switcher then overwrote, so the pill turned into invisible text.
+ *
+ * Now: one function, called unconditionally from the listener, styled by the
+ * `.adm-tab-count` / `.has-pending` classes that `switchAdmissionTab` never
+ * touches.
+ *
+ * @param {number} count
+ */
+const paintPendingTabBadge = (count) => {
+  const tab = document.getElementById("tab-pending-approval");
+  if (!tab) return;
+  const n = Number(count) || 0;
+  tab.innerHTML = n > 0
+    ? `Pending approval<span class="adm-tab-count">${n}</span>`
+    : `Pending approval`;
+  tab.classList.toggle("has-pending", n > 0);
+  tab.setAttribute("aria-label", n > 0 ? `Pending approval, ${n} waiting` : "Pending approval");
+};
 
 export const initAdmissionsUI = async () => {
   const container = document.getElementById("page-admissions");
@@ -449,40 +501,446 @@ export const initAdmissionsUI = async () => {
     }
   };
 
+  /**
+   * ── ONE "Details" panel for a pending applicant ─────────────────────────
+   * Replaces the old Open + Docs pair.
+   *
+   * Deliberately NOT a copy of the student profile card (owner: "don't copy
+   * the existing student card, make fresh"): an identity header, three small
+   * fact panels laid out on a grid, a document strip, then the decision row.
+   * Every uploaded file opens in a full-screen lightbox — the big
+   * full-bleed viewer with prev/next, a counter and keyboard control.
+   */
+  const admDocIndex = {};
+  let lbItems = [];
+  let lbIndex = 0;
+
+  const isPdfSrc = (s) => /^data:application\/(pdf|octet-stream)/i.test(String(s || ""))
+    || /\.pdf(\?|#|$)/i.test(String(s || ""));
+
+  const ensureLightbox = () => {
+    let dlg = document.getElementById("adm-lightbox");
+    if (dlg) return dlg;
+    dlg = document.createElement("dialog");
+    dlg.id = "adm-lightbox";
+    dlg.className = "adm-lightbox";
+    dlg.setAttribute("aria-label", "Document viewer");
+    dlg.innerHTML = `
+      <button type="button" class="lb-btn lb-close" aria-label="Close viewer">×</button>
+      <button type="button" class="lb-btn lb-prev" aria-label="Previous document">‹</button>
+      <div class="lb-stage">
+        <figure>
+          <img alt="" />
+          <figcaption></figcaption>
+        </figure>
+      </div>
+      <button type="button" class="lb-btn lb-next" aria-label="Next document">›</button>
+      <div class="lb-hint">← → to move · Esc to close</div>
+      <div class="lb-count"></div>`;
+    document.body.appendChild(dlg);
+
+    const paint = () => {
+      const item = lbItems[lbIndex];
+      if (!item) return;
+      const img = dlg.querySelector("img");
+      img.src = item.src;
+      img.alt = item.label;
+      dlg.querySelector("figcaption").textContent = item.label;
+      dlg.querySelector(".lb-count").textContent =
+        lbItems.length > 1 ? `${lbIndex + 1} / ${lbItems.length} · ${item.label}` : item.label;
+      const multi = lbItems.length > 1;
+      dlg.querySelector(".lb-prev").style.display = multi ? "flex" : "none";
+      dlg.querySelector(".lb-next").style.display = multi ? "flex" : "none";
+      dlg.querySelector(".lb-hint").style.display = multi ? "block" : "none";
+    };
+    const step = (delta) => {
+      if (lbItems.length < 2) return;
+      lbIndex = (lbIndex + delta + lbItems.length) % lbItems.length;
+      paint();
+    };
+    dlg._paint = paint;
+    dlg._step = step;
+
+    dlg.querySelector(".lb-close").onclick = () => dlg.close();
+    dlg.querySelector(".lb-prev").onclick = () => step(-1);
+    dlg.querySelector(".lb-next").onclick = () => step(1);
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg || (e.target.classList && e.target.classList.contains("lb-stage"))) dlg.close();
+    });
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); dlg.close(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+    });
+    return dlg;
+  };
+
+  const openLightbox = (items, index) => {
+    const dlg = ensureLightbox();
+    lbItems = items || [];
+    lbIndex = Math.max(0, index || 0);
+    dlg._paint();
+    if (!dlg.open) dlg.showModal();
+  };
+
+  const ensureDetailsDialog = () => {
+    let dlg = document.getElementById("adm-details-modal");
+    if (dlg) return dlg;
+    dlg = document.createElement("dialog");
+    dlg.id = "adm-details-modal";
+    dlg.className = "adm-details";
+    dlg.setAttribute("aria-label", "Applicant details");
+    document.body.appendChild(dlg);
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    return dlg;
+  };
+
+  // Close the panel FIRST so the Approve/Reject/Dismiss confirmation owns
+  // the screen instead of stacking underneath a modal dialog.
+  window.__admDecide = async (action, id) => {
+    const dlg = document.getElementById("adm-details-modal");
+    if (dlg && dlg.open) dlg.close();
+    if (action === "approve") await window.approveStudent(id);
+    else if (action === "reject") await window.rejectStudent(id);
+    else if (action === "dismiss") await window.dismissStudent(id);
+  };
+
+  window.__openAdmDoc = (sid, i) => {
+    const all = admDocIndex[sid] || [];
+    const item = all[i];
+    if (!item) return;
+    if (isPdfSrc(item.src)) { window.open(item.src, "_blank", "noopener"); return; }
+    const imgs = all.filter((e) => !isPdfSrc(e.src));
+    openLightbox(imgs, imgs.indexOf(item));
+  };
+
+  window.viewApplicantDetails = async (id) => {
+    const dlg = ensureDetailsDialog();
+    dlg.innerHTML = `<div class="ad-loading">Loading applicant…</div>`;
+    if (!dlg.open) dlg.showModal();
+
+    try {
+      let data = (window.__pendingAdmissions || []).find((r) => r.id === id) || null;
+      if (!data) {
+        const { doc: fdoc, getDoc: fget } = await import("firebase/firestore");
+        const { db: fdb } = await import("../firebase/firebase.js");
+        const s = await fget(fdoc(fdb, "students", id));
+        if (!s.exists()) throw new Error("This application is no longer in the queue.");
+        data = { id: s.id, ...s.data() };
+      }
+
+      let docs = null;
+      try {
+        const { loadStudentDocuments } = await import("./documentUploadService.js");
+        docs = await loadStudentDocuments(id);
+      } catch (_) { /* no documents store row — the panel just shows none */ }
+
+      // `firestore:<key>` markers mean "the value lives in studentDocuments".
+      const resolve = (v) => {
+        const s = v == null ? "" : String(v);
+        if (!s) return "";
+        if (s.startsWith("firestore:")) {
+          const key = s.split(":")[1];
+          return (docs && docs[key]) || "";
+        }
+        return s;
+      };
+
+      const entries = [];
+      const seen = new Set();
+      const pushDoc = (raw, label) => {
+        const v = resolve(raw);
+        if (!v || seen.has(v)) return;
+        seen.add(v);
+        entries.push({ src: v, label });
+      };
+      pushDoc(docs && docs.photo, "Photo");
+      pushDoc(docs && (docs.profilePhoto || docs.selfie), "Photo");
+      pushDoc(data.profilePhotoUrl || data.photoUrl || data.photo, "Photo");
+      pushDoc(docs && docs.aadhaarFront, "Aadhaar front");
+      pushDoc(docs && docs.aadhaarBack, "Aadhaar back");
+      pushDoc(docs && docs.paymentScreenshot, "Payment screenshot");
+      pushDoc(data.paymentScreenshotUrl, "Payment screenshot");
+      admDocIndex[id] = entries;
+
+      const esc = (v) => escHtml(v);
+      const val = (v) => (v == null || String(v).trim() === "" ? "" : String(v).trim());
+      const row = (label, inner) => (inner ? `<dt>${esc(label)}</dt><dd>${inner}</dd>` : "");
+      const plain = (label, v) => (val(v) ? row(label, esc(v)) : "");
+      const tel = (label, v) => (val(v) ? row(label, `<a href="tel:${esc(v)}">${esc(v)}</a>`) : "");
+      const mail = (label, v) => (val(v) ? row(label, `<a href="mailto:${esc(v)}">${esc(v)}</a>`) : "");
+
+      // Deterministic header tint — same idea as the students table avatar.
+      const pairs = [["#1d4ed8", "#dbeafe"], ["#0f766e", "#ccfbf1"], ["#b45309", "#fef3c7"],
+        ["#6d28d9", "#ede9fe"], ["#be123c", "#ffe4e6"], ["#0369a1", "#e0f2fe"],
+        ["#15803d", "#dcfce7"], ["#c2410c", "#ffedd5"]];
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+      const [fg, bg] = pairs[h % pairs.length];
+      const initials = val(data.name)
+        ? esc(String(data.name).trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase())
+        : "??";
+
+      // Submitted timestamp, rendered for humans in both shapes.
+      let submitted = "";
+      if (data.createdAt) {
+        const t = typeof data.createdAt.toMillis === "function"
+          ? new Date(data.createdAt.toMillis())
+          : new Date(data.createdAt);
+        if (!Number.isNaN(t.getTime())) {
+          submitted = `${t.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })} · ` +
+            t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+      }
+
+      const source = data.isStudentSubmission
+        ? (data.uid ? "Student portal" : "Website form")
+        : "Entered by staff";
+
+      const docStrip = entries.length
+        ? `<div class="ad-doc-grid">${entries.map((e, i) => `
+            <button type="button" class="ad-doc" onclick="window.__openAdmDoc('${id}', ${i})" title="Click to view full size">
+              ${isPdfSrc(e.src)
+                ? `<span class="thumb" style="font-size:30px;">📄</span>`
+                : `<span class="thumb"><img src="${esc(e.src)}" alt="${esc(e.label)}" loading="lazy" /></span>`}
+              <span class="cap">${esc(e.label)}</span>
+              <span class="zoom">${isPdfSrc(e.src) ? "Open PDF" : "Click to enlarge"}</span>
+            </button>`).join("")}</div>`
+        : `<div class="ad-none">No documents have been uploaded for this application yet.</div>`;
+
+      const remarks = val(data.remarks) || val(data.adminNotes) || "";
+
+      dlg.innerHTML = `
+        <div class="ad-head">
+          <div class="ad-av" style="background:${bg}; color:${fg};">${initials}</div>
+          <div class="ad-title">
+            <h2>${esc(data.name || "Unnamed applicant")}</h2>
+            <div class="ad-sub">
+              <b>${esc(data.studentId || data.admissionNo || id)}</b>
+              <span>${esc(source)}</span>
+              ${submitted ? `<span>Submitted ${esc(submitted)}</span>` : ""}
+            </div>
+          </div>
+          <button type="button" class="ad-x" aria-label="Close" onclick="document.getElementById('adm-details-modal').close()">×</button>
+        </div>
+
+        <div class="ad-body">
+          <section class="ad-panel">
+            <h3>Contact</h3>
+            <dl class="ad-grid">
+              ${tel("Mobile", data.phone)}
+              ${tel("Parent mobile", data.parentPhone)}
+              ${mail("Email", data.email)}
+              ${plain("Date of birth", data.dob)}
+              ${plain("Gender", data.gender)}
+              ${plain("College", data.college)}
+              ${plain("Course", data.course)}
+            </dl>
+          </section>
+
+          <section class="ad-panel">
+            <h3>Admission</h3>
+            <dl class="ad-grid">
+              ${plain("Application no.", data.studentId || data.admissionNo)}
+              ${plain("Plan", data.planName)}
+              ${val(data.seatAssigned || data.seatNumber)
+                ? row("Preferred seat", esc(data.seatAssigned || data.seatNumber)) : ""}
+              ${plain("Address", data.address)}
+              <dt>Status</dt><dd>${esc(data.approvalStatus || data.status || "Pending")}</dd>
+            </dl>
+          </section>
+
+          <section class="ad-panel">
+            <h3>Payment</h3>
+            <dl class="ad-grid">
+              ${plain("Method", data.paymentMethod)}
+              ${plain("Transaction id", data.transactionId)}
+              ${plain("Due date", data.paymentDueDate)}
+              ${entries.some((e) => /payment/i.test(e.label))
+                ? row("Screenshot", `<span style="color:var(--primary);">Uploaded — see below</span>`) : ""}
+              ${!val(data.paymentMethod) && !val(data.transactionId)
+                ? `<dt></dt><dd class="muted">No payment details yet</dd>` : ""}
+            </dl>
+          </section>
+
+          <section class="ad-panel ad-docs">
+            <h3>Documents <span>${entries.length ? `${entries.length} file${entries.length === 1 ? "" : "s"} · click to enlarge` : ""}</span></h3>
+            ${docStrip}
+          </section>
+
+          ${remarks ? `<section class="ad-panel ad-remarks"><h3>Notes</h3><p>${esc(remarks)}</p></section>` : ""}
+        </div>
+
+        <div class="ad-foot">
+          <button type="button" class="btn btn-approve" onclick="window.__admDecide('approve', '${id}')">Approve</button>
+          <button type="button" class="btn btn-reject" onclick="window.__admDecide('reject', '${id}')">Reject</button>
+          <button type="button" class="btn btn-dismiss" onclick="window.__admDecide('dismiss', '${id}')">Dismiss</button>
+          <span class="ad-spacer"></span>
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('adm-details-modal').close()">Close</button>
+        </div>`;
+    } catch (e) {
+      dlg.innerHTML = `<div class="ad-loading">${escHtml(e.message || "Could not load this application.")}</div>`;
+    }
+  };
+
   // Setup tabs if admin
   if (isAdminOrManager) {
-    // Theme-aware Approve / Reject buttons (dark default + light-mode).
+    // Theme-aware Admission UI (dark default + light-mode).
     // Injected once so both themes stay in sync — no hardcoded colors.
     if (!document.getElementById("admission-action-styles")) {
       const st = document.createElement("style");
       st.id = "admission-action-styles";
       st.textContent = `
-        /* Decision row: 2 primary actions over 2 secondary, never four buttons
-           jammed edge-to-edge in one line. Wraps cleanly on narrow screens. */
-        .approval-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; max-width: 240px; margin-left: auto; }
-        .approval-actions .btn { flex: 0 0 auto; min-height: 32px; padding: 7px 15px; font-size: 13px; font-weight: 700; line-height: 1.2; border-radius: 999px; letter-spacing: .01em; }
-        .approval-actions .btn-approve, .approval-actions .btn-reject { flex: 1 1 84px; }
-        .btn-approve, .btn-reject { padding: 7px 15px; border-radius: 999px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .1s; }
-        .btn-approve { background: rgba(16,185,129,.14); color: var(--accent-emerald); border: 1px solid rgba(16,185,129,.45); }
-        .btn-reject { background: rgba(244,63,94,.14); color: var(--accent-red); border: 1px solid rgba(244,63,94,.45); }
-        .btn-approve:hover, .btn-reject:hover { filter: brightness(1.15); }
-        .btn-approve:active, .btn-reject:active { transform: scale(.97); }
-        /* Tertiary action: clear the queue without deciding anything. */
-        .btn-dismiss { padding: 6px 13px; border-radius: 999px; font-weight: 700; cursor: pointer; transition: filter .15s, transform .1s;
-          background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--border); }
-        .btn-dismiss:hover { filter: brightness(1.1); }
-        .btn-dismiss:active { transform: scale(.97); }
+        /* ── Admissions / Pending-approval tab pills ───────────────────────
+           Class-driven on purpose. The old build wrote the active/inactive
+           look straight onto the element's inline style, which meant the
+           NEXT paint of the pending-count badge (or a later tab switch)
+           overwrote it and the badge appeared "stuck". */
+        .adm-tab { display: inline-block; border-radius: 999px; font-size: 13px; font-weight: 600; padding: 6px 16px;
+          border: none; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s, border-color .15s; }
+        .adm-tab.is-active { background: var(--bg-card); color: var(--text-primary);
+          border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,.05); font-weight: 600; }
+        .adm-tab:not(.is-active) { background: var(--bg-gray); color: var(--text-muted);
+          border: none; box-shadow: none; font-weight: 500; }
+        .adm-tab-count { display: inline-block; min-width: 17px; text-align: center;
+          background: var(--danger); color: #fff; font-size: 10px; font-weight: 800;
+          padding: 1px 5px; border-radius: 999px; margin-left: 7px; line-height: 1.55;
+          font-variant-numeric: tabular-nums; }
+        .adm-tab.has-pending { background: var(--danger); color: #fff; border-color: transparent; font-weight: 700; }
+        .adm-tab.has-pending .adm-tab-count { background: rgba(255,255,255,.28); color: #fff; }
+
+        /* ── Decision row ────────────────────────────────────────────────
+           Four evenly sized controls, generous hit area, no edge-to-edge
+           jam. Wrap onto two rows on narrow screens. */
+        .approval-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+          align-items: center; margin-left: auto; min-width: 216px; }
+        .approval-actions .btn { flex: 0 0 auto; min-height: 34px; padding: 7px 14px;
+          font-size: 12.5px; font-weight: 700; line-height: 1.2; border-radius: 8px;
+          letter-spacing: .01em; white-space: nowrap; justify-content: center; }
+        .approval-actions .btn-approve, .approval-actions .btn-reject { flex: 1 1 86px; }
+        .btn-approve, .btn-reject, .btn-dismiss, .btn-info {
+          cursor: pointer; transition: filter .15s, transform .1s, box-shadow .15s; }
+        .btn-approve { background: rgba(16,185,129,.15); color: var(--accent-emerald); border: 1px solid rgba(16,185,129,.45); }
+        .btn-reject { background: rgba(244,63,94,.15); color: var(--accent-red); border: 1px solid rgba(244,63,94,.45); }
+        .btn-info { background: rgba(14,165,233,.15); color: var(--primary); border: 1px solid rgba(14,165,233,.45); }
+        .btn-dismiss { background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-approve:hover, .btn-reject:hover, .btn-info:hover, .btn-dismiss:hover {
+          filter: brightness(1.12); box-shadow: 0 2px 8px rgba(0,0,0,.18); }
+        .btn-approve:active, .btn-reject:active, .btn-info:active, .btn-dismiss:active { transform: scale(.97); }
+        .btn-approve:focus-visible, .btn-reject:focus-visible,
+        .btn-info:focus-visible, .btn-dismiss:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+        /* ── Applicant details panel (FRESH — not the student profile card) ── */
+        dialog.adm-details { border: none; padding: 0; border-radius: 16px; width: min(920px, 94vw);
+          max-width: none; background: var(--bg-card); color: var(--text-primary);
+          box-shadow: 0 24px 70px rgba(0,0,0,.55); overflow: hidden; display: none; }
+        dialog.adm-details[open] { display: flex; flex-direction: column; max-height: 92vh; }
+        dialog.adm-details::backdrop { background: rgba(2,6,16,.72); backdrop-filter: blur(2px); }
+        .ad-head { display: flex; align-items: flex-start; gap: 14px; padding: 20px 22px 16px;
+          border-bottom: 1px solid var(--border); background:
+          linear-gradient(180deg, rgba(14,165,233,.10), transparent); }
+        .ad-av { width: 52px; height: 52px; border-radius: 14px; flex: 0 0 52px; display: flex;
+          align-items: center; justify-content: center; font-weight: 800; font-size: 18px; letter-spacing: .02em; }
+        .ad-title { flex: 1 1 auto; min-width: 0; }
+        .ad-title h2 { margin: 0 0 3px; font-size: 1.15rem; line-height: 1.25; overflow-wrap: anywhere; }
+        .ad-sub { font-size: 12px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 4px 10px; }
+        .ad-sub b { color: var(--primary); font-weight: 700; }
+        .ad-x { background: var(--bg-hover); border: 1px solid var(--border); color: var(--text-secondary);
+          width: 32px; height: 32px; border-radius: 9px; font-size: 17px; line-height: 1; cursor: pointer; flex: 0 0 32px; }
+        .ad-x:hover { filter: brightness(1.15); }
+        .ad-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 14px; padding: 18px 22px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+        .ad-panel { background: var(--bg-hover); border: 1px solid var(--border);
+          border-radius: 12px; padding: 13px 15px; }
+        .ad-panel h3 { margin: 0 0 10px; font-size: 10.5px; font-weight: 800; letter-spacing: .09em;
+          text-transform: uppercase; color: var(--text-muted); display: flex; justify-content: space-between;
+          align-items: baseline; gap: 8px; }
+        .ad-panel h3 span { font-weight: 600; letter-spacing: 0; text-transform: none; font-size: 11px; }
+        .ad-grid { display: grid; grid-template-columns: auto 1fr; gap: 7px 12px; font-size: 13px; align-items: baseline; }
+        .ad-grid dt { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+        .ad-grid dd { margin: 0; color: var(--text-primary); font-weight: 600; overflow-wrap: anywhere; }
+        .ad-grid dd a { color: var(--primary); text-decoration: none; }
+        .ad-grid dd a:hover { text-decoration: underline; }
+        .ad-grid dd.muted { color: var(--text-muted); font-weight: 500; }
+        .ad-wide { grid-column: 1 / -1; }
+        .ad-docs { grid-column: 1 / -1; }
+        .ad-doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+        .ad-doc { background: var(--bg-card); border: 1px solid var(--border); border-radius: 11px;
+          padding: 8px; cursor: zoom-in; text-align: center; transition: transform .14s, border-color .14s, box-shadow .14s; }
+        .ad-doc:hover { transform: translateY(-3px); border-color: var(--primary);
+          box-shadow: 0 8px 20px rgba(0,0,0,.25); }
+        .ad-doc .thumb { width: 100%; aspect-ratio: 4 / 3; border-radius: 7px; overflow: hidden;
+          background: var(--bg-base); display: flex; align-items: center; justify-content: center; }
+        .ad-doc .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .ad-doc .cap { display: block; margin-top: 7px; font-size: 11px; font-weight: 600;
+          color: var(--text-secondary); line-height: 1.3; overflow-wrap: anywhere; }
+        .ad-doc .zoom { display: block; font-size: 10px; color: var(--primary); font-weight: 700; margin-top: 2px; }
+        .ad-none { font-size: 13px; color: var(--text-muted); font-style: italic; }
+        .ad-remarks { grid-column: 1 / -1; }
+        .ad-remarks p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary);
+          white-space: pre-wrap; overflow-wrap: anywhere; }
+        .ad-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+          padding: 14px 22px; border-top: 1px solid var(--border); background: var(--bg-hover); }
+        .ad-foot .ad-spacer { flex: 1 1 auto; }
+        .ad-foot .btn { min-height: 36px; padding: 8px 18px; font-size: 13px; font-weight: 700; border-radius: 9px; }
+        .ad-loading { padding: 3rem 2rem; text-align: center; color: var(--text-muted); font-size: 13px; }
+
+        /* ── Lightbox: big, full-bleed media viewer ───────────────────── */
+        dialog.adm-lightbox { border: none; padding: 0; margin: 0; width: 100vw; max-width: none;
+          height: 100vh; max-height: none; background: rgba(3,7,15,.96); color: #f8fafc;
+          display: none; overflow: hidden; }
+        dialog.adm-lightbox[open] { display: flex; align-items: center; justify-content: center; }
+        dialog.adm-lightbox::backdrop { background: rgba(2,6,16,.94); }
+        .lb-stage { display: flex; align-items: center; justify-content: center; gap: 4px;
+          width: 100%; height: 100%; padding: 46px 8px 60px; }
+        .lb-stage figure { margin: 0; max-width: min(1100px, 82vw); display: flex; flex-direction: column;
+          align-items: center; gap: 12px; }
+        .lb-stage img { max-width: 100%; max-height: calc(100vh - 170px); object-fit: contain;
+          border-radius: 8px; background: #0b1220; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+        .lb-stage figcaption { font-size: 13px; color: #cbd5e1; text-align: center; letter-spacing: .01em; }
+        .lb-btn { position: absolute; z-index: 2; background: rgba(255,255,255,.10);
+          border: 1px solid rgba(255,255,255,.22); color: #f8fafc; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; transition: background .15s, transform .1s; }
+        .lb-btn:hover { background: rgba(255,255,255,.2); }
+        .lb-btn:active { transform: scale(.94); }
+        .lb-close { top: 16px; right: 18px; width: 42px; height: 42px; border-radius: 12px; font-size: 24px; line-height: 1; }
+        .lb-prev, .lb-next { top: 50%; margin-top: -26px; width: 52px; height: 52px; border-radius: 50%; font-size: 30px; }
+        .lb-prev { left: 16px; }
+        .lb-next { right: 16px; }
+        .lb-count { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center;
+          font-size: 12px; color: #94a3b8; letter-spacing: .12em; text-transform: uppercase; }
+        .lb-hint { position: absolute; left: 0; right: 0; bottom: 40px; text-align: center;
+          font-size: 11px; color: #64748b; letter-spacing: .04em; }
+        @media (max-width: 640px) {
+          .lb-prev, .lb-next { width: 42px; height: 42px; font-size: 24px; }
+          .lb-stage figure { max-width: 94vw; }
+          .approval-actions { min-width: 0; justify-content: flex-start; margin-left: 0; }
+        }
       `;
       document.head.appendChild(st);
     }
-    const pendingTab = document.getElementById("tab-pending-approval");
-    if (pendingTab) pendingTab.style.display = "inline-block";
+
+    // Tab pills are class-driven (see .adm-tab): clear the hardcoded inline
+    // look the HTML ships with so a tab switch can never clobber the badge.
+    ["tab-new-admission", "tab-pending-approval"].forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add("adm-tab");
+      el.classList.toggle("is-active", i === 0);
+      // Wipe every inline look the HTML ships with — including the old
+      // `display` hack. .adm-tab now owns the display, so NOTHING on these
+      // two buttons is written per-tab; a switch can only toggle classes and
+      // can never bury the badge count again (owner item 4).
+      el.style.cssText = "";
+    });
 
     // Listen to queue (new-arrival toast + beep live in adminNotificationUI —
     // single alert path, no duplicate toasts).
     listenToPendingAdmissions((records) => {
-      const tbody = document.getElementById("pending-admissions-body");
-      if (!tbody) return;
+      // Badge FIRST, and unconditionally. It must never depend on the pending
+      // table being present in the DOM — that coupling is exactly how the
+      // count used to freeze.
+      paintPendingTabBadge(records.length);
 
       // Self-heal: records created before admission numbers existed (or
       // written directly by the website without one) get a unique SH- number
@@ -502,20 +960,7 @@ export const initAdmissionsUI = async () => {
           } catch (_) { /* one failure never blocks the list */ }
         });
 
-      // Update tab badge with count
-      const pendingTab = document.getElementById("tab-pending-approval");
-      if (pendingTab && records.length > 0) {
-        pendingTab.innerHTML = `Pending approval <span style="background:var(--danger); color:white; font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; margin-left:6px;">${records.length}</span>`;
-        pendingTab.style.background = "var(--danger)";
-        pendingTab.style.color = "white";
-        pendingTab.style.border = "none";
-      } else if (pendingTab) {
-        pendingTab.innerHTML = "Pending approval";
-        pendingTab.style.background = "var(--bg-gray)";
-        pendingTab.style.color = "var(--text-muted)";
-        pendingTab.style.border = "none";
-      }
-      
+      const tbody = document.getElementById("pending-admissions-body");
       if (!tbody) return;
       if (records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">No pending admissions.</td></tr>';
@@ -569,21 +1014,23 @@ export const initAdmissionsUI = async () => {
 
         html += `
           <tr>
-            <td>
-              <div style="font-weight:600; color:var(--text-primary);">${escHtml(r.name)}</div>
-              <div style="font-size:11px; color:var(--text-muted);">${escHtml(r.email || "")}</div>
-              <div style="font-size:10px; color:var(--text-muted);">${escHtml(r.studentId || r.admissionNo || r.id)}</div>
+            <td style="vertical-align: middle;">
+              <div style="font-weight:700; color:var(--text-primary); font-size:13.5px; line-height:1.3; overflow-wrap:anywhere;">${escHtml(r.name)}</div>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px; overflow-wrap:anywhere;">${escHtml(r.email || "—")}</div>
+              <div style="font-size:11px; color:var(--text-muted); margin-top:3px; font-variant-numeric:tabular-nums;">${escHtml(r.studentId || r.admissionNo || r.id)}</div>
             </td>
-            <td>${escHtml(r.phone)}${paymentLine}</td>
-            <td>${escHtml(r.planName || "")}${seatInfo}</td>
-            <td>${d}</td>
-            <td style="text-align:right;">
+            <td style="vertical-align: middle;">
+              <div style="font-weight:600; color:var(--text-primary); font-size:13.5px; font-variant-numeric:tabular-nums;">${escHtml(r.phone)}</div>
+              ${paymentLine}
+            </td>
+            <td style="vertical-align: middle;">${escHtml(r.planName || "")}${seatInfo}</td>
+            <td style="vertical-align: middle; white-space: nowrap;">${d}</td>
+            <td style="vertical-align: middle; text-align:right; min-width: 300px;">
               <div class="approval-actions">
-                <button class="btn btn-approve" onclick="window.approveStudent('${r.id}')">Approve</button>
-                <button class="btn btn-reject" onclick="window.rejectStudent('${r.id}')">Reject</button>
+                <button class="btn btn-approve" title="Approve this applicant and activate them" onclick="window.approveStudent('${r.id}')">Approve</button>
+                <button class="btn btn-reject" title="Reject this applicant — their record and documents are removed" onclick="window.rejectStudent('${r.id}')">Reject</button>
+                <button class="btn btn-info" title="Everything about this applicant, plus their uploaded documents" onclick="window.viewApplicantDetails('${r.id}')">Details</button>
                 <button class="btn btn-dismiss" title="Take it out of the queue without deciding — nothing is deleted" onclick="window.dismissStudent('${r.id}')">Dismiss</button>
-                <button class="btn btn-ghost" title="Open full student card" onclick="window.openStudentProfileById('${r.id}')">Open</button>
-                <button class="btn btn-ghost" title="View uploaded documents" onclick="window.viewStudentDocuments('${r.id}')">Docs</button>
               </div>
             </td>
           </tr>
@@ -650,36 +1097,19 @@ export const initAdmissionsUI = async () => {
   }
 
   // Tab switcher logic
+  // Class-driven ONLY. The previous version wrote background/color/border
+  // straight onto the buttons as inline styles, which silently clobbered the
+  // pending-count badge every time the operator flipped tabs.
   window.switchAdmissionTab = (tab) => {
     const isNew = tab === 'new';
-    
+
     document.getElementById("view-new-admission").style.display = isNew ? "flex" : "none";
     document.getElementById("view-pending-approval").style.display = isNew ? "none" : "block";
-    
+
     const newBtn = document.getElementById("tab-new-admission");
     const pendBtn = document.getElementById("tab-pending-approval");
-    
-    if (isNew) {
-      newBtn.style.background = "var(--bg-card)";
-      newBtn.style.color = "var(--text-primary)";
-      newBtn.style.border = "1px solid var(--border)";
-      newBtn.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
-      
-      pendBtn.style.background = "var(--bg-hover)";
-      pendBtn.style.color = "var(--text-secondary)";
-      pendBtn.style.border = "none";
-      pendBtn.style.boxShadow = "none";
-    } else {
-      pendBtn.style.background = "var(--bg-card)";
-      pendBtn.style.color = "var(--text-primary)";
-      pendBtn.style.border = "1px solid var(--border)";
-      pendBtn.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
-      
-      newBtn.style.background = "var(--bg-hover)";
-      newBtn.style.color = "var(--text-secondary)";
-      newBtn.style.border = "none";
-      newBtn.style.boxShadow = "none";
-    }
+    if (newBtn) newBtn.classList.toggle("is-active", isNew);
+    if (pendBtn) pendBtn.classList.toggle("is-active", !isNew);
   };
 
   window.updateSummary = () => {

@@ -19,25 +19,18 @@ export const calculateVisitorAnalytics = (visitors) => {
   let monthlyCount = 0;
   let totalCount = visitors.length;
 
-  const purposeCounts = {};
-
   visitors.forEach(v => {
     // Basic counts (website leads / legacy rows may miss visitDate)
     const vd = typeof v.visitDate === "string" ? v.visitDate : "";
     if (vd && vd === todayStr) todayCount++;
     if (vd && vd >= weekAgoStr) weeklyCount++;
     if (vd && vd.startsWith(currentMonthStr)) monthlyCount++;
-
-    // Purpose aggregation
-    const p = v.purpose || "Unknown";
-    purposeCounts[p] = (purposeCounts[p] || 0) + 1;
   });
 
   return {
     todayCount,
     weeklyCount,
     monthlyCount,
-    totalCount,
-    purposeCounts
+    totalCount
   };
 };

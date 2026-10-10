@@ -13,6 +13,10 @@ const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
 // gone; the badge counts only unread items.
 let lastAnnouncements = [];
 let showReadAdmin = false;
+// Set by the announcements listener's error callback. Kept separate from the
+// list so a failing feed can show WHY while the rest of the page keeps
+// rendering (it used to replace the whole list and freeze every badge).
+let annError = null;
 
 /** Ids of every admission alert currently in the live pending queue. */
 const admissionIds = () =>
@@ -45,6 +49,58 @@ const tsMs = (v) => {
   return null;
 };
 
+/**
+ * Clicking a notification must TAKE YOU THERE (owner: "if an admission alert
+ * comes I click on it so it takes me to the Pending approval") and then the
+ * item disappears.
+ *
+ * Each kind maps to the page that actually owns it:
+ *   new admission request / admission alert -> Admissions → Pending approval,
+ *        with that applicant's Details panel already open,
+ *   website enquiry                        -> Visitors,
+ *   approved student                       -> Students,
+ *   rejected applicant                     -> nothing left to open (the record
+ *        is purged); its entry lives in the decision log right here,
+ *   announcement                           -> nothing to open; it just clears.
+ */
+const gotoPage = (page) => {
+  if (typeof window.navigate === "function") window.navigate(page);
+};
+
+const openPendingApplicant = (id) => {
+  gotoPage("admissions");
+  // navigate() mounts synchronously, but the admissions page is lazily
+  // initialised — give it a frame before driving its tab switcher.
+  const run = () => {
+    try {
+      if (typeof window.switchAdmissionTab === "function") window.switchAdmissionTab("pending");
+      if (id && typeof window.viewApplicantDetails === "function") window.viewApplicantDetails(id);
+      const view = document.getElementById("view-pending-approval");
+      if (view) view.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (_) { /* navigation already succeeded */ }
+  };
+  requestAnimationFrame(() => setTimeout(run, 60));
+};
+
+const routeNotification = (key) => {
+  try {
+    const n = systemNotifs().find((x) => `sys_${x.id}` === key);
+    if (n) {
+      const t = n.type || "";
+      if (t === "new-lead") return gotoPage("visitors");
+      if (t === "new-admission") return openPendingApplicant(n.admissionId || n.studentId || "");
+      if (t === "admission-approved") return gotoPage("students");
+      if (t === "admission-rejected") return null; // record is gone; log stays here
+      return null;
+    }
+    if (key.indexOf("adm_") === 0) return openPendingApplicant(key.slice(4));
+    if (key.indexOf("lead_") === 0) return gotoPage("visitors");
+    return null; // announcements and the decision log have no target page
+  } catch (_) {
+    return null;
+  }
+};
+
 const renderSystemNotifs = () => {
   const items = systemNotifs();
   // Clicked = read = GONE from the list (the owner's rule: click it and it
@@ -63,7 +119,7 @@ const renderSystemNotifs = () => {
       // that made a page of old entries look like they all just fired.
       const when = ms ? new Date(ms).toLocaleString() : "Date unavailable";
       return `
-        <div class="notif-item" data-notif-id="${key}" title="Click to dismiss">
+        <div class="notif-item" data-notif-id="${key}" title="Click to open">
           <div class="notif-icon ${n.type === "new-admission" || n.type === "new-lead" ? "amber" : "green"}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           </div>
@@ -88,31 +144,34 @@ export const initAnnouncementAdminUI = () => {
   notifList.innerHTML = `<div style="text-align:center; padding: 2rem;">Loading announcements...</div>`;
 
   // One delegated click handler: clicking a notification (not its buttons)
-  // marks it read so it disappears; Delete still deletes permanently.
+  // marks it read so it disappears, THEN takes you to the page that owns it.
   if (!notifList.dataset.wired) {
     notifList.dataset.wired = "1";
     notifList.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
       const item = e.target.closest("[data-notif-id]");
       if (!item) return;
-      markNotifRead(item.dataset.notifId);
+      const key = item.dataset.notifId;
+      markNotifRead(key);
       renderAnnouncementList();
+      routeNotification(key);
     });
   }
 
   listenToAnnouncements(
     (announcements) => {
+      annError = null;
       lastAnnouncements = Array.isArray(announcements) ? announcements : [];
       renderAnnouncementList();
     },
     (error) => {
       lastAnnouncements = [];
-      const list = document.querySelector("#page-notifications .notif-list");
-      if (list) {
-        list.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--danger);">
-          Announcements could not load (${error?.code || "permission denied"}). Check Firestore rules or the composite index.
-        </div>`;
-      }
+      // The announcement feed failing must NOT freeze the page. The other
+      // sources (activity, website leads, admission alerts) and every badge
+      // still have to render — so record the message and keep going.
+      annError = `Announcements could not load (${error?.code || "permission denied"}). ` +
+        `Check Firestore rules or the composite index. Everything else below is live.`;
+      renderAnnouncementList();
     }
   );
 };
@@ -154,8 +213,15 @@ const renderAnnouncementList = () => {
     if (bellDot) bellDot.style.display = total > 0 ? "" : "none";
   }
 
+  // A broken announcements feed is reported ABOVE the list, never instead of
+  // it — activity, leads, admission alerts and every badge stay live.
+  const errBlock = annError
+    ? `<div style="margin:0 0 .8rem; padding:.7rem .9rem; border:1px solid var(--danger); border-radius:9px; background:rgba(244,63,94,.08); color:var(--danger); font-size:12.5px; line-height:1.5;">` +
+      `${String(annError).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</div>`
+    : "";
+
   if (announcements.length === 0 && !alertsBlock && !sys.html) {
-    notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
+    notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
     renderDashboardBanner([]);
     return;
   }
@@ -170,7 +236,7 @@ const renderAnnouncementList = () => {
     : "";
 
   if (visible.length === 0 && !alertsBlock && !sys.html) {
-    notifList.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">All caught up — no unread announcements.</div>` + toggle;
+    notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">All caught up — no unread announcements.</div>` + toggle;
     return;
   }
 
@@ -216,7 +282,7 @@ const renderAnnouncementList = () => {
         </div>
       `;
     });
-    notifList.innerHTML = alertsBlock + sys.html + html + toggle;
+    notifList.innerHTML = errBlock + alertsBlock + sys.html + html + toggle;
   renderDashboardBanner(announcements);
 };
 

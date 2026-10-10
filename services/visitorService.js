@@ -1,44 +1,10 @@
-import { collection, addDoc, updateDoc, deleteDoc, doc, query, onSnapshot, serverTimestamp, getDocs } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { validateVisitor } from "./visitorValidation.js";
 
-// ===============================================
-// VISITOR PURPOSES (Seeding and Listening)
-// ===============================================
-
-const DEFAULT_PURPOSES = [
-  "Admission Inquiry",
-  "Fee Inquiry",
-  "Student Meeting",
-  "Complaint",
-  "Delivery",
-  "Maintenance",
-  "Parent Visit",
-  "Other"
-];
-
-export const seedInitialPurposes = async () => {
-  const purposesRef = collection(db, "visitorPurposes");
-  const snap = await getDocs(purposesRef);
-  
-  if (snap.empty) {
-    console.log("Seeding default visitor purposes...");
-    for (const p of DEFAULT_PURPOSES) {
-      await addDoc(purposesRef, { name: p });
-    }
-  }
-};
-
-export const listenToVisitorPurposes = (onUpdate) => {
-  const q = query(collection(db, "visitorPurposes"));
-  return onSnapshot(q, (snapshot) => {
-    const purposes = [];
-    snapshot.forEach(doc => purposes.push({ id: doc.id, ...doc.data() }));
-    // Sort alphabetically
-    purposes.sort((a, b) => a.name.localeCompare(b.name));
-    onUpdate(purposes);
-  });
-};
+// NOTE: the old "visitor purposes" feature is gone on request. There is no
+// `visitorPurposes` collection, no purpose field and no purpose filter any
+// more — every purpose used to be a hardcoded single value anyway.
 
 // ===============================================
 // VISITORS CRUD & LISTENERS
@@ -96,7 +62,6 @@ export const addVisitor = async (visitorData, authorId) => {
       phone: visitorData.phone.trim(),
       email: String(visitorData.email || "").trim(),
       message: String(visitorData.message || "").trim(),
-      purpose: visitorData.purpose,
       employeeName: String(visitorData.employeeName || "").trim(),
       employeeId: authorId || "",
       visitDate: dateStr,

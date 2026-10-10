@@ -25,6 +25,18 @@
   --accent-amber: #f59e0b;
   --accent-blue: #3b82f6;
 
+  /* Data table chrome (students, payments, ... ) */
+  --table-head: #0b1220;
+  --table-stripe: rgba(148, 163, 184, 0.045);
+  --table-row-hover: #16213a;
+
+  /* Plain-text status colours — a dot + text, never a pill. */
+  --st-active: #34d399;
+  --st-pending: #fbbf24;
+  --st-inactive: #94a3b8;
+  --st-expired: #fb7185;
+  --st-rejected: #fb7185;
+
   --sidebar-w: 240px;
 }
 
@@ -38,9 +50,27 @@ body.light-mode {
   --border-bright: #cbd5e1;
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b;
 
   --primary: #1e3a8a;
+
+  /* Day theme: the header needs to separate from the white card body, and
+     the striping has to be a real tint instead of dark-mode alpha. */
+  --table-head: #eef2f7;
+  --table-stripe: #f8fafc;
+  --table-row-hover: #e8eef7;
+
+  /* Same hues, darkened so 13px text keeps AA contrast on white. */
+  --st-active: #047857;
+  --st-pending: #b45309;
+  --st-inactive: #64748b;
+  --st-expired: #be123c;
+  --st-rejected: #be123c;
+
+  /* --danger / --warning are used as TEXT almost everywhere, so the dark
+     defaults (#f43f5e / #f59e0b) fall below AA on a white card. */
+  --danger: #e11d48;
+  --warning: #b45309;
 }
 
 /* Base utility classes for themes */
@@ -960,12 +990,17 @@ body.light-mode .theme-toggle {
   font-size: 13px;
 }
 
+.data-table thead th {
+  background: var(--table-head);
+  border-bottom: 1px solid var(--border-bright);
+}
+
 .data-table th {
   text-align: left;
   padding: 0.625rem 0.75rem;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
@@ -978,12 +1013,18 @@ body.light-mode .theme-toggle {
   vertical-align: middle;
 }
 
+/* Zebra striping — the day theme needs the guide lines, the night theme
+   barely shows them. Declared BEFORE the hover rule so hover still wins. */
+.data-table tbody tr:nth-child(even) td {
+  background: var(--table-stripe);
+}
+
 .data-table tr:last-child td {
   border-bottom: none;
 }
 
-.data-table tr:hover td {
-  background: var(--bg-hover);
+.data-table tbody tr:hover td {
+  background: var(--table-row-hover);
 }
 
 .student-cell {
@@ -993,17 +1034,49 @@ body.light-mode .theme-toggle {
 }
 
 .avatar-sm {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
   color: var(--text-primary);
   flex-shrink: 0;
 }
+
+/* Default (photo-less) avatar: an explicit tint pair, so the fill and the
+   initials stay readable in BOTH themes. Never theme vars — light-mode
+   --primary is dark navy and --text-primary is near-black, i.e. invisible. */
+.avatar-tint {
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.07);
+}
+
+/* Plain-text status: a dot + coloured text. Explicitly NOT a badge pill. */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.st-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.st-active { color: var(--st-active); }
+.st-pending { color: var(--st-pending); }
+.st-inactive { color: var(--st-inactive); }
+.st-expired { color: var(--st-expired); }
+.st-rejected { color: var(--st-rejected); }
+.st-dismissed { color: var(--st-inactive); }
 
 .name {
   font-weight: 600;

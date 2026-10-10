@@ -1,20 +1,126 @@
-import { listenToVisitors, addVisitor, updateVisitorStatus, setVisitorLeadStatus, deleteVisitor, seedInitialPurposes, listenToVisitorPurposes } from "./visitorService.js";
+import { listenToVisitors, addVisitor, updateVisitorStatus, setVisitorLeadStatus, deleteVisitor } from "./visitorService.js";
 import { calculateVisitorAnalytics } from "./visitorAnalytics.js";
 
 let allVisitors = [];
-let allPurposes = [];
-let unsubPurposes = null;
 let unsubVisitors = null;
-
-// The table always renders 10 columns; the Actions column only exists for
-// staff who may edit. Used for the empty/loading rows' colspan.
-const COLS = (canEdit) => (canEdit ? 11 : 10);
 
 const esc = (v) => String(v == null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 const normaliseSource = (v) => (v && v.source === "Website" ? "Website" : "Walk-in");
+
+/** Normalise a Firestore Timestamp / ISO string / {seconds|value} into epoch ms. */
+const tsMs = (v) => {
+  if (v == null) return null;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  if (typeof v.seconds === "number") return v.seconds * 1000;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "string") { const t = Date.parse(v); return Number.isNaN(t) ? null : t; }
+  if (typeof v.value === "string") { const t = Date.parse(v.value); return Number.isNaN(t) ? null : t; }
+  return null;
+};
+
+/**
+ * "08 Oct 2026 · 15:01" — never "Invalid Date" and never an empty cell.
+ * Website leads carry visitDate/visitTime written in the browser; anything
+ * older or imported falls back to createdAt.
+ */
+const fmtWhen = (v) => {
+  if (v && typeof v.visitDate === "string" && v.visitDate) {
+    const d = new Date(`${v.visitDate}T${v.visitTime || "00:00"}`);
+    if (!Number.isNaN(d.getTime())) {
+      const date = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+      const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return `${date} · ${time}`;
+    }
+  }
+  const ms = tsMs(v && v.createdAt);
+  if (ms) {
+    const d = new Date(ms);
+    return `${d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })} · ` +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return "Date unavailable";
+};
+
+const initials = (name) => {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "??";
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+/** Deterministic, theme-safe tint so cards never look like the same person. */
+const tintFor = (id) => {
+  const palettes = [
+    ["#0ea5e9", "#e0f2fe"], ["#10b981", "#d1fae5"], ["#f59e0b", "#fef3c7"],
+    ["#8b5cf6", "#ede9fe"], ["#f43f5e", "#ffe4e6"], ["#14b8a6", "#ccfbf1"],
+  ];
+  let h = 0;
+  const s = String(id || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return palettes[h % palettes.length];
+};
+
+const ensureStyles = () => {
+  if (document.getElementById("visitor-card-styles")) return;
+  const st = document.createElement("style");
+  st.id = "visitor-card-styles";
+  st.textContent = `
+    .vis-toolbar { display:flex; flex-wrap:wrap; gap:.75rem; align-items:flex-end; margin-bottom:1.25rem; }
+    .vis-fld { display:flex; flex-direction:column; gap:.3rem; }
+    .vis-fld > span { font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--text-muted); }
+    .vis-fld .input-field, .vis-fld input { min-width:170px; }
+    .vis-search { flex:1 1 260px; }
+    .vis-search input { width:100%; }
+
+    .vis-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:1rem; }
+    .vis-card { background:var(--bg-card); border:1px solid var(--border); border-radius:14px;
+      padding:1.1rem 1.15rem; display:flex; flex-direction:column; gap:.7rem;
+      transition:border-color .15s, transform .15s, box-shadow .15s; }
+    .vis-card:hover { border-color:var(--border-bright); transform:translateY(-2px);
+      box-shadow:0 8px 22px rgba(0,0,0,.14); }
+    .vis-card.is-done { opacity:.72; }
+    .vis-top { display:flex; gap:.85rem; align-items:flex-start; }
+    .vis-av { width:44px; height:44px; border-radius:12px; flex:0 0 44px;
+      display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; }
+    .vis-id { flex:1 1 auto; min-width:0; }
+    .vis-name { font-size:15px; font-weight:700; color:var(--text-primary); line-height:1.25;
+      overflow-wrap:anywhere; }
+    .vis-contact { font-size:13px; color:var(--text-secondary); margin-top:.2rem;
+      display:flex; flex-wrap:wrap; gap:.35rem .6rem; overflow-wrap:anywhere; }
+    .vis-contact a { color:var(--primary); text-decoration:none; }
+    .vis-contact a:hover { text-decoration:underline; }
+    .vis-tags { display:flex; flex-wrap:wrap; gap:.35rem; justify-content:flex-end; flex:0 0 auto; }
+    .vis-tag { font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+      padding:3px 8px; border-radius:6px; border:1px solid transparent; white-space:nowrap; }
+    .vis-tag.src-web { background:rgba(59,130,246,.15); color:#3b82f6; border-color:rgba(59,130,246,.35); }
+    .vis-tag.src-walk { background:var(--bg-hover); color:var(--text-secondary); border-color:var(--border); }
+    .vis-tag.lead-new { background:rgba(245,158,11,.15); color:#d97706; border-color:rgba(245,158,11,.4); }
+    .vis-tag.lead-win { background:rgba(16,185,129,.15); color:#059669; border-color:rgba(16,185,129,.4); }
+    .vis-tag.lead-closed { background:var(--bg-hover); color:var(--text-muted); border-color:var(--border-bright); }
+    .vis-tag.st-active { background:rgba(59,130,246,.12); color:#2563eb; border-color:rgba(59,130,246,.3); }
+    .vis-tag.st-done { background:var(--bg-hover); color:var(--text-muted); border-color:var(--border); }
+
+    .vis-meta { display:flex; flex-wrap:wrap; gap:.35rem 1.1rem; font-size:12.5px; color:var(--text-muted); }
+    .vis-meta b { color:var(--text-secondary); font-weight:600; }
+    .vis-note { font-size:13px; color:var(--text-secondary); background:var(--bg-hover);
+      border-left:3px solid var(--border-bright); border-radius:0 8px 8px 0; padding:.5rem .7rem; margin:0;
+      overflow-wrap:anywhere; white-space:pre-wrap; }
+    .vis-actions { display:flex; flex-wrap:wrap; gap:.45rem; padding-top:.15rem;
+      border-top:1px solid var(--border); margin-top:.1rem; }
+    .vis-actions .btn { min-height:32px; padding:6px 13px; font-size:12.5px; font-weight:700;
+      border-radius:8px; }
+    .vis-empty { text-align:center; padding:3rem 1rem; color:var(--text-muted);
+      border:1px dashed var(--border-bright); border-radius:14px; }
+    @media (max-width:520px){
+      .vis-list { grid-template-columns:1fr; }
+      .vis-top { flex-wrap:wrap; }
+      .vis-tags { justify-content:flex-start; }
+    }`;
+  document.head.appendChild(st);
+};
 
 export const initVisitorAdminUI = async () => {
   const container = document.getElementById("page-visitors");
@@ -26,14 +132,13 @@ export const initVisitorAdminUI = async () => {
   const canEdit = (role === "Owner/Admin" || role === "Manager");
   const canDelete = (role === "Owner/Admin");
 
-  // Seed default purposes
-  await seedInitialPurposes();
+  ensureStyles();
 
   container.innerHTML = `
-    <div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+    <div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
       <div>
         <h1>Visitor Management</h1>
-        <p class="page-subtitle">Track walk-ins, website leads, inquiries, and analytics</p>
+        <p class="page-subtitle">Walk-ins and website enquiries — every record in one place</p>
       </div>
       <div>
         <button class="btn btn-primary" id="btn-add-visitor">+ Add Visitor</button>
@@ -74,65 +179,43 @@ export const initVisitorAdminUI = async () => {
       </div>
     </div>
 
-    <!-- Visitor List Tab -->
-    <div class="card" style="margin-bottom: 2rem;">
-      <div class="toolbar" style="flex-wrap:wrap; gap:1rem;">
-        <div class="search-box">
-          <input type="text" id="vis-search" placeholder="Search by name, phone, email..." />
+    <div class="card" style="margin-bottom: 1.25rem;">
+      <div class="vis-toolbar">
+        <div class="vis-fld vis-search">
+          <span>Search</span>
+          <input type="text" id="vis-search" class="input-field" placeholder="Search by name, phone, email, plan…" />
         </div>
-        <div>
-          <select id="vis-filter-purpose" class="input-field" style="width:150px;">
-            <option value="All">All Purposes</option>
-          </select>
-        </div>
-        <div>
-          <select id="vis-filter-source" class="input-field" style="width:140px;">
-            <option value="All">All Sources</option>
+        <label class="vis-fld">
+          <span>Source</span>
+          <select id="vis-filter-source" class="input-field">
+            <option value="All">All sources</option>
             <option value="Website">Website</option>
             <option value="Walk-in">Walk-in</option>
           </select>
-        </div>
-        <div>
-          <select id="vis-filter-lead" class="input-field" style="width:150px;">
-            <option value="All">All Lead Statuses</option>
+        </label>
+        <label class="vis-fld">
+          <span>Enquiry</span>
+          <select id="vis-filter-lead" class="input-field">
+            <option value="All">All enquiries</option>
             <option value="New">New</option>
             <option value="Converted">Converted</option>
             <option value="Closed">Closed</option>
           </select>
-        </div>
-        <div>
-          <select id="vis-filter-status" class="input-field" style="width:150px;">
-            <option value="All">All Statuses</option>
-            <option value="Active">Active</option>
+        </label>
+        <label class="vis-fld">
+          <span>Status</span>
+          <select id="vis-filter-status" class="input-field">
+            <option value="All">All statuses</option>
+            <option value="Active">In building</option>
             <option value="Completed">Completed</option>
           </select>
-        </div>
+        </label>
       </div>
+      <div id="vis-count" style="font-size:12.5px; color:var(--text-muted);"></div>
     </div>
 
-    <div class="card">
-      <div class="table-responsive">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Date/Time</th>
-              <th>Visitor Name</th>
-              <th>Email</th>
-              <th data-i18n="table.phone">\${window.t ? window.t("table.phone") : "Phone"}</th>
-              <th>Purpose</th>
-              <th>Plan</th>
-              <th>Handled By</th>
-              <th>Source</th>
-              <th>Lead Status</th>
-              <th data-i18n="table.status">\${window.t ? window.t("table.status") : "Status"}</th>
-              ${canEdit ? `<th>Actions</th>` : ""}
-            </tr>
-          </thead>
-          <tbody id="visitor-tbody">
-            <tr><td colspan="${COLS(canEdit)}" style="text-align:center; padding: 2rem;">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
+    <div id="vis-list" class="vis-list">
+      <div class="vis-empty" style="grid-column:1/-1;">Loading visitors…</div>
     </div>
 
     <!-- Add Visitor Modal -->
@@ -149,17 +232,11 @@ export const initVisitorAdminUI = async () => {
           </div>
           <div class="form-group" style="margin-bottom: 1rem;">
             <label style="display:block; margin-bottom:0.25rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Phone Number</label>
-            <input type="tel" id="add-vis-phone" required placeholder="10-digit phone number" pattern="[0-9]{10}" class="input-field" style="width: 100%; box-sizing: border-box;" />
+            <input type="tel" id="add-vis-phone" required placeholder="10-digit phone number" pattern="[0-9]{10}" title="10-digit phone number" class="input-field" style="width: 100%; box-sizing: border-box;" />
           </div>
           <div class="form-group" style="margin-bottom: 1rem;">
             <label style="display:block; margin-bottom:0.25rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Email (Optional)</label>
             <input type="email" id="add-vis-email" placeholder="visitor@example.com" class="input-field" style="width: 100%; box-sizing: border-box;" />
-          </div>
-          <div class="form-group" style="margin-bottom: 1rem;">
-            <label style="display:block; margin-bottom:0.25rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Purpose</label>
-            <select id="add-vis-purpose" required class="input-field" style="width: 100%; box-sizing: border-box;">
-              <!-- Populated dynamically -->
-            </select>
           </div>
           <div class="form-group" style="margin-bottom: 1rem;">
             <label style="display:block; margin-bottom:0.25rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Handled By</label>
@@ -181,7 +258,6 @@ export const initVisitorAdminUI = async () => {
   // Attach Filter Listeners
   const renderVis = () => renderVisitors(canEdit, canDelete);
   document.getElementById("vis-search").addEventListener("input", renderVis);
-  document.getElementById("vis-filter-purpose").addEventListener("change", renderVis);
   document.getElementById("vis-filter-source").addEventListener("change", renderVis);
   document.getElementById("vis-filter-lead").addEventListener("change", renderVis);
   document.getElementById("vis-filter-status").addEventListener("change", renderVis);
@@ -189,32 +265,12 @@ export const initVisitorAdminUI = async () => {
   // Add Button
   document.getElementById("btn-add-visitor").addEventListener("click", () => handleAddVisitor());
 
-  // Listeners
-  if (unsubPurposes) unsubPurposes();
-  unsubPurposes = listenToVisitorPurposes((purposes) => {
-    allPurposes = purposes;
-    populatePurposeDropdown();
-  });
-
   if (unsubVisitors) unsubVisitors();
   unsubVisitors = listenToVisitors((records) => {
     allVisitors = records;
     updateAnalyticsUI();
     renderVis();
   });
-};
-
-const populatePurposeDropdown = () => {
-  const filterSelect = document.getElementById("vis-filter-purpose");
-  if (!filterSelect) return;
-  const currentVal = filterSelect.value;
-  
-  let html = `<option value="All">All Purposes</option>`;
-  allPurposes.forEach(p => {
-    html += `<option value="${p.name}">${p.name}</option>`;
-  });
-  filterSelect.innerHTML = html;
-  filterSelect.value = currentVal;
 };
 
 const updateAnalyticsUI = () => {
@@ -229,8 +285,7 @@ const updateAnalyticsUI = () => {
 
 const getFilteredVisitors = () => {
   let filtered = [...allVisitors];
-  const search = document.getElementById("vis-search").value.toLowerCase();
-  const purpose = document.getElementById("vis-filter-purpose").value;
+  const search = document.getElementById("vis-search").value.toLowerCase().trim();
   const source = document.getElementById("vis-filter-source").value;
   const lead = document.getElementById("vis-filter-lead").value;
   const status = document.getElementById("vis-filter-status").value;
@@ -241,10 +296,11 @@ const getFilteredVisitors = () => {
       (v.phone || "").includes(search) ||
       (v.email || "").toLowerCase().includes(search) ||
       (v.planName || "").toLowerCase().includes(search) ||
-      (v.employeeName && v.employeeName.toLowerCase().includes(search))
+      (v.employeeName && v.employeeName.toLowerCase().includes(search)) ||
+      (v.message || "").toLowerCase().includes(search) ||
+      (v.remarks || "").toLowerCase().includes(search)
     );
   }
-  if (purpose !== "All") filtered = filtered.filter(v => v.purpose === purpose);
   if (source !== "All") filtered = filtered.filter(v => normaliseSource(v) === source);
   // Website leads always carry an explicit leadStatus; rows without one are
   // plain walk-ins and only match when the filter is set to "All".
@@ -255,13 +311,21 @@ const getFilteredVisitors = () => {
 };
 
 const renderVisitors = (canEdit, canDelete) => {
-  const tbody = document.getElementById("visitor-tbody");
-  if (!tbody) return;
+  const list = document.getElementById("vis-list");
+  if (!list) return;
 
   const filtered = getFilteredVisitors();
+  const countEl = document.getElementById("vis-count");
+  if (countEl) {
+    countEl.textContent = filtered.length === allVisitors.length
+      ? `${filtered.length} record${filtered.length === 1 ? "" : "s"}`
+      : `${filtered.length} of ${allVisitors.length} records`;
+  }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="${COLS(canEdit)}" style="text-align:center;">No visitors found.</td></tr>`;
+    list.innerHTML = `<div class="vis-empty" style="grid-column:1/-1;">${
+      allVisitors.length === 0 ? "No visitors yet." : "No visitors match these filters."
+    }</div>`;
     return;
   }
 
@@ -282,78 +346,76 @@ const renderVisitors = (canEdit, canDelete) => {
     }
   };
 
-  let html = "";
-  filtered.forEach(v => {
+  const html = filtered.map(v => {
     const isCompleted = v.status === "Completed";
-    const badgeClass = isCompleted ? "badge-paid" : "badge-pending";
     const isWebsite = normaliseSource(v) === "Website";
     const leadStatus = v.leadStatus || "";
+    const [fg, bg] = tintFor(v.id);
+
+    const srcTag = isWebsite
+      ? `<span class="vis-tag src-web">Website</span>`
+      : `<span class="vis-tag src-walk">Walk-in</span>`;
+
+    let leadTag = "";
+    if (leadStatus === "New") leadTag = `<span class="vis-tag lead-new">New enquiry</span>`;
+    else if (leadStatus === "Converted") leadTag = `<span class="vis-tag lead-win">Converted</span>`;
+    else if (leadStatus === "Closed") leadTag = `<span class="vis-tag lead-closed">Closed</span>`;
+
+    const statusTag = isCompleted
+      ? `<span class="vis-tag st-done">Completed</span>`
+      : `<span class="vis-tag st-active">In building</span>`;
 
     let actions = "";
     if (canEdit) {
       if (!isCompleted) {
-        actions += `<button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="window.handleCompleteVisit('${v.id}')">Mark Completed</button> `;
+        actions += `<button class="btn btn-secondary" onclick="window.handleCompleteVisit('${v.id}')">Mark completed</button>`;
       }
-      // Website leads move through New -> Converted / Closed.
       if (isWebsite) {
         if (leadStatus !== "Converted") {
-          actions += `<button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--accent-emerald);" onclick="window.handleLeadStatus('${v.id}', 'Converted')">Mark Converted</button> `;
+          actions += `<button class="btn btn-secondary" onclick="window.handleLeadStatus('${v.id}', 'Converted')">Mark converted</button>`;
         }
         if (leadStatus !== "Closed") {
-          actions += `<button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--text-muted);" onclick="window.handleLeadStatus('${v.id}', 'Closed')">Close</button> `;
+          actions += `<button class="btn btn-secondary" onclick="window.handleLeadStatus('${v.id}', 'Closed')">Close enquiry</button>`;
         }
       }
       if (canDelete) {
-        actions += `<button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--danger);" onclick="window.handleDeleteVisitor('${v.id}')" data-i18n="btn.delete">${window.t ? window.t("btn.delete") : "Delete"}</button>`;
+        actions += `<button class="btn btn-secondary" style="color:var(--danger);" onclick="window.handleDeleteVisitor('${v.id}')">Delete</button>`;
       }
     }
 
-    const sourceBadge = isWebsite
-      ? `<span class="badge badge-info">Website</span>`
-      : `<span class="badge" style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border);">Walk-in</span>`;
+    const contact = [
+      v.phone ? `<a href="tel:${esc(v.phone)}">${esc(v.phone)}</a>` : "",
+      v.email ? `<a href="mailto:${esc(v.email)}">${esc(v.email)}</a>` : `<span style="color:var(--text-muted)">No email</span>`,
+    ].filter(Boolean).join(`<span style="color:var(--border-bright)">·</span>`);
 
-    let leadBadge = `<span style="color:var(--text-muted);">—</span>`;
-    if (leadStatus === "New") leadBadge = `<span class="badge badge-pending">New</span>`;
-    else if (leadStatus === "Converted") leadBadge = `<span class="badge badge-paid">Converted</span>`;
-    else if (leadStatus === "Closed") leadBadge = `<span class="badge badge-overdue">Closed</span>`;
+    const meta = [
+      `<span><b>When</b> ${esc(fmtWhen(v))}</span>`,
+      v.planName ? `<span><b>Plan</b> ${esc(v.planName)}</span>` : "",
+      `<span><b>Handled by</b> ${v.employeeName ? esc(v.employeeName) : "—"}</span>`,
+    ].join("");
 
-    const planCell = v.planName
-      ? `<span style="white-space:normal;">${esc(v.planName)}</span>`
-      : `<span style="color:var(--text-muted);">—</span>`;
+    const note = [v.remarks, isWebsite ? v.message : ""].filter(Boolean).join("\n");
 
-    const note = [v.remarks, isWebsite ? v.message : ""].filter(Boolean).map(esc).join("<br>");
+    return `
+      <article class="vis-card ${isCompleted ? "is-done" : ""}">
+        <div class="vis-top">
+          <div class="vis-av" style="background:${bg}; color:${fg};">${esc(initials(v.visitorName))}</div>
+          <div class="vis-id">
+            <div class="vis-name">${esc(v.visitorName || "Unnamed visitor")}</div>
+            <div class="vis-contact">${contact}</div>
+          </div>
+          <div class="vis-tags">${srcTag}${leadTag}${statusTag}</div>
+        </div>
+        <div class="vis-meta">${meta}</div>
+        ${note ? `<p class="vis-note">${esc(note)}</p>` : ""}
+        ${actions ? `<div class="vis-actions">${actions}</div>` : ""}
+      </article>`;
+  }).join("");
 
-    html += `
-      <tr style="opacity: ${isCompleted ? '0.7' : '1'}">
-        <td>${v.visitDate || ""}<br><small style="color:var(--text-muted)">${v.visitTime || ""}</small></td>
-        <td style="font-weight:600;">${esc(v.visitorName)}${note ? `<br><small style="font-weight:400; color:var(--text-muted)">${note}</small>` : ""}</td>
-        <td style="font-size:0.85rem; word-break:break-word;">${v.email ? esc(v.email) : `<span style="color:var(--text-muted);">—</span>`}</td>
-        <td>${esc(v.phone)}</td>
-        <td>${esc(v.purpose)}</td>
-        <td style="font-size:0.85rem;">${planCell}</td>
-        <td style="font-size:0.8rem; color:var(--text-muted);">${v.employeeName ? esc(v.employeeName) : "—"}</td>
-        <td>${sourceBadge}</td>
-        <td>${leadBadge}</td>
-        <td><span class="badge ${badgeClass}">${v.status || "Active"}</span></td>
-        ${canEdit ? `<td style="white-space:nowrap;">${actions}</td>` : ""}
-      </tr>
-    `;
-  });
-
-  tbody.innerHTML = html;
+  list.innerHTML = html;
 };
 
-const handleAddVisitor = async () => {
-  if (allPurposes.length === 0) {
-    return window.showToast(window.t ? window.t('No purposes available.') || "No purposes available." : "No purposes available.", "warning");
-  }
-
-  // Populate purposes dropdown
-  const purposeSelect = document.getElementById("add-vis-purpose");
-  if (purposeSelect) {
-    purposeSelect.innerHTML = allPurposes.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
-  }
-
+const handleAddVisitor = () => {
   // Set default employee name
   const currentUser = localStorage.getItem("userName") || "Admin";
   document.getElementById("add-vis-employee").value = currentUser;
@@ -371,12 +433,11 @@ window.submitVisitorForm = async () => {
   const name = document.getElementById("add-vis-name").value.trim();
   const phone = document.getElementById("add-vis-phone").value.trim();
   const email = document.getElementById("add-vis-email") ? document.getElementById("add-vis-email").value.trim() : "";
-  const purpose = document.getElementById("add-vis-purpose").value;
   const employeeName = document.getElementById("add-vis-employee").value.trim();
   const remarks = document.getElementById("add-vis-remarks").value.trim();
 
-  if (!name || !phone || !purpose || !employeeName) {
-    window.showToast(window.t ? window.t('Please fill in all required fields.') || "Please fill in all required fields." : "Please fill in all required fields.", "warning");
+  if (!name || !phone || !employeeName) {
+    window.showToast("Please fill in name, phone and who handled the visit.", "warning");
     return;
   }
 
@@ -389,7 +450,6 @@ window.submitVisitorForm = async () => {
     visitorName: name,
     phone,
     email,
-    purpose,
     employeeName,
     remarks,
     // Manual entries are always walk-ins; website leads are written by the
@@ -400,14 +460,14 @@ window.submitVisitorForm = async () => {
 
   const authorId = localStorage.getItem("userId") || "admin";
   const res = await addVisitor(data, authorId);
-  
+
   btn.innerText = originalText;
   btn.disabled = false;
 
   if (!res.success) {
-    window.showToast(((window.t && window.t('Error: ')) || "Error: ") + res.error, "error");
+    window.showToast("Error: " + res.error, "error");
   } else {
     document.getElementById("add-visitor-modal").close();
-    if(typeof showToast === 'function') showToast("Visitor added successfully!");
+    if (typeof showToast === "function") showToast("Visitor added successfully!");
   }
 };

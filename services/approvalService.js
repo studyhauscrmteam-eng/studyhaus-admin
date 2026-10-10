@@ -107,16 +107,21 @@ const syncUserStatus = async (id, status) => {
 
 /** In-app notification + approval email (both best-effort). */
 const announceDecision = async (id, data, decision, extra = {}) => {
-  try {
-    const { notifyAdmins } = await import("./notificationService.js");
-    await notifyAdmins({
-      type: decision === "Approved" ? "admission-approved" : "admission-rejected",
-      title: decision === "Approved" ? "Admission approved" : "Admission rejected",
-      body: `${data.name || "A student"}${data.phone ? ` (${data.phone})` : ""} — ${decision}${extra.reason ? ` · ${extra.reason}` : ""}.`,
-      admissionId: id,
-      studentId: id,
-    });
-  } catch (_) { /* notifications are best-effort */ }
+  // Rejections deliberately skip the in-app notification: the record is about
+  // to be purged, so an alert pointing at it would be a dead link the moment
+  // it landed. The applicant still gets the email below.
+  if (!extra.skipNotify) {
+    try {
+      const { notifyAdmins } = await import("./notificationService.js");
+      await notifyAdmins({
+        type: decision === "Approved" ? "admission-approved" : "admission-rejected",
+        title: decision === "Approved" ? "Admission approved" : "Admission rejected",
+        body: `${data.name || "A student"}${data.phone ? ` (${data.phone})` : ""} — ${decision}${extra.reason ? ` · ${extra.reason}` : ""}.`,
+        admissionId: id,
+        studentId: id,
+      });
+    } catch (_) { /* notifications are best-effort */ }
+  }
 
   try {
     const { sendAdmissionApprovedMail, sendAdmissionRejectedMail } = await import("./emailService.js");
@@ -304,8 +309,25 @@ const approveLegacyAdmission = async (admissionId) => {
 
 /**
  * Reject an admission (students doc OR legacy admissions doc).
- * Releases a seat reserved for this applicant, records the reason and
- * flips the lifecycle fields — never deletes anything.
+ *
+ * Owner request: "rejected — complete delete every single data attached to
+ * that student." So this no longer just flips a flag. The order matters:
+ *
+ *   1. release the seat that was Reserved for this applicant,
+ *   2. write the decision (the queue empties at once and the local decision
+ *      log has something to point at),
+ *   3. tell the applicant by email,
+ *   4. PURGE — server route `POST /api/students/purge`, which is the only
+ *      place that can kill the Firebase Auth credential, then every document,
+ *      history row, seat hold and uniqueness claim (`phone_`, `email_`,
+ *      `req_adm_`, `req_admmail_`, `txn_`) that named this person.
+ *
+ * If step 4 cannot reach the server, nothing is left half-deleted: the record
+ * survives flagged `Rejected`, and `isAdmitted()` keeps it out of the students
+ * list while the queue no longer shows it either. The failure is reported to
+ * the caller so the operator knows the applicant still exists.
+ *
+ * @returns {Promise<{success: boolean, error?: string, purged?: boolean}>}
  */
 export const rejectAdmission = async (admissionId, reason) => {
   try {
@@ -343,9 +365,29 @@ export const rejectAdmission = async (admissionId, reason) => {
     });
 
     await syncUserStatus(admissionId, "Rejected");
-    await announceDecision(admissionId, data, "Rejected", { reason: reason || "" });
+    await announceDecision(admissionId, data, "Rejected", { reason: reason || "", skipNotify: true });
 
-    return { success: true };
+    // 4. Purge everything attached to this applicant.
+    let purged = false;
+    if (studentSnap.exists()) {
+      const { permanentlyDeleteStudent } = await import("./studentService.js");
+      const res = await permanentlyDeleteStudent(admissionId, { wipeHistory: true });
+      purged = !!(res && res.success);
+      if (!purged) {
+        console.warn("Rejected applicant was NOT purged:", res && res.error);
+        return {
+          success: true,
+          purged: false,
+          error: `Rejected, but nothing could be deleted: ${res && res.error ? res.error : "unknown error"}`,
+        };
+      }
+    } else {
+      // Legacy `admissions/{id}` — no Auth account, no student doc.
+      try { await deleteDoc(targetRef); purged = true; }
+      catch (e) { console.warn("Legacy admission not removed:", e?.message || e); }
+    }
+
+    return { success: true, purged };
   } catch (error) {
     return { success: false, error: error.message };
   }

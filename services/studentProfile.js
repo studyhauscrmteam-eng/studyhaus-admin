@@ -34,7 +34,79 @@ export const isOldStatus = (s) => {
   return st === "Old" || st === "Old Student";
 };
 
+/**
+ * Only a person we actually ADMITTED — or is still being decided — belongs in
+ * the main student list.
+ *
+ * Owner report: "why do rejected students show up here? no admission, no
+ * approval, still seen." — this is the gate that answers it.
+ *
+ * A record is LISTED when it carries an admission decision that is not a
+ * refusal (Approved, Pending, Changes Requested, Dismissed), or — for legacy
+ * rows and records added straight from the admin portal that never went
+ * through the approval flow — when its lifecycle `status` is one of the
+ * admitted states. Anything else (no decision AND no admitted status) is not a
+ * student and is never shown.
+ *
+ * NOTE: Rejected rows are also purged server-side (see approvalService), so
+ * this filter is the belt to that pair of braces — a purge that failed must
+ * never put a rejected person back in front of staff. `Dismissed` deliberately
+ * stays listed: dismiss preserves the record so it remains searchable here.
+ */
+const LISTED_APPROVAL = ["Approved", "Pending", "Changes Requested", "Dismissed"];
+const LISTED_STATUS = ["Active", "Inactive", "Pending", "Expired", "Dismissed", "Changes Requested"];
+
+export const isAdmitted = (s) => {
+  // A portal sign-up that has not been filed yet is not a student at all:
+  // no form, no documents, no payment, nothing for staff to act on (owner:
+  // "no admission, no approval, still seen"). The record is untouched in
+  // Firestore and appears the moment the student finishes the wizard.
+  if (s && s.applicationReady === false) return false;
+  const a = s && s.approvalStatus;
+  if (a) return LISTED_APPROVAL.indexOf(a) !== -1;
+  const st = s && s.status;
+  if (!st) return false;
+  return LISTED_STATUS.indexOf(st) !== -1;
+};
+
+/** Statuses with a colour token; anything else renders muted grey. */
+const STATUS_TONE = {
+  active: "active", pending: "pending", inactive: "inactive",
+  expired: "expired", rejected: "rejected", dismissed: "dismissed",
+};
+
 export const escAttr = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
+
+const esc = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/**
+ * Default-avatar colour.
+ *
+ * The old rule was `background: var(--primary); color: var(--text-primary)`,
+ * which in the day theme is dark-navy text on dark-navy fill — unreadable.
+ * These pairs are explicit (never theme vars) so the contrast is identical in
+ * both themes, and the tint is derived from the record id so a student always
+ * keeps the same colour.
+ */
+const AVATAR_TINTS = [
+  ["#1d4ed8", "#dbeafe"],
+  ["#0f766e", "#ccfbf1"],
+  ["#b45309", "#fef3c7"],
+  ["#6d28d9", "#ede9fe"],
+  ["#be123c", "#ffe4e6"],
+  ["#0369a1", "#e0f2fe"],
+  ["#15803d", "#dcfce7"],
+  ["#c2410c", "#ffedd5"],
+];
+
+const avatarTint = (key) => {
+  let h = 0;
+  const s = String(key || "");
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_TINTS[h % AVATAR_TINTS.length];
+};
 
 /** The surviving record of a merge (`students/xyz` → `xyz`). */
 export const mergedTargetId = (s) => {
@@ -81,9 +153,10 @@ export const initStudentManagementUI = async () => {
   tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Loading students...</td></tr>`;
   
   listenToAllStudents((data) => {
-    // Exclude Old students. Older builds wrote "Old Student" — treat both
-    // as old so they never leak into the active grid.
-    allStudents = data.filter(s => !isOldStatus(s));
+    // Exclude Old students (older builds wrote "Old Student") AND anyone who
+    // was never actually admitted — a rejected applicant or a record with no
+    // admission decision at all is not a student and must not be listed.
+    allStudents = data.filter(s => !isOldStatus(s) && isAdmitted(s));
     renderTable();
   }, (err) => {
     console.error("Student listener failed:", err);
@@ -233,8 +306,9 @@ const renderTable = () => {
   if (!tableBody) return;
 
   // 0. Exclude Old students entirely from Active Management
-  // (both "Old" and the legacy "Old Student" value).
-  let activeOnly = allStudents.filter(s => !isOldStatus(s));
+  // (both "Old" and the legacy "Old Student" value) and anyone who was never
+  // admitted — the rejected-record leak the owner reported.
+  let activeOnly = allStudents.filter(s => !isOldStatus(s) && isAdmitted(s));
 
   // 1. Search
   let processed = searchStudents(activeOnly, currentQuery);
@@ -265,11 +339,17 @@ const renderTable = () => {
   today.setHours(0,0,0,0);
 
   processed.forEach(s => {
-    const initials = s.name ? s.name.substring(0, 2).toUpperCase() : "??";
-    // Status as plain text — no coloured pill (owner does not want badges).
-    const statusText = s.status === "Active" ? "Active"
+    const initials = s.name ? esc(String(s.name).trim().substring(0, 2).toUpperCase()) : "??";
+    const [avFg, avBg] = avatarTint(s.id);
+    // Status as plain text with a dot — NO coloured pill (owner does not want badges).
+    const statusKey = s.status === "Active" ? "Active"
                      : (s.status === "Pending" || s.approvalStatus === "Pending") ? "Pending"
-                     : (s.status || "—");
+                     : (s.status || "");
+    const statusText = statusKey || "—";
+    const tone = STATUS_TONE[String(statusKey).toLowerCase()] || "";
+    const statusHtml = statusKey
+      ? `<span class="st${tone ? ` st-${tone}` : ""}"${tone ? "" : ` style="color:var(--text-muted);"`}><i class="st-dot"></i>${esc(statusText)}</span>`
+      : `<span style="color:var(--text-muted);">—</span>`;
 
     let planHtml = `<span style="white-space: normal;">${s.planName || "None"}</span>`;
     const priceMatch = s.planName ? s.planName.match(/(.*?)( - | · | )₹(\d+.*)/) : null;
@@ -304,8 +384,8 @@ const renderTable = () => {
         <td style="vertical-align: top; padding-top: 1rem; max-width: 220px; white-space: normal; word-wrap: break-word;">
           <div class="student-cell" style="align-items: flex-start;">
             ${(() => { const _ph = getStudentPhotoUrl(s); return _ph
-              ? `<div class="avatar-sm" style="margin-top: 2px; overflow:hidden; padding:0;"><img src="${_ph}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" /></div>`
-              : `<div class="avatar-sm" style="background:var(--primary); margin-top: 2px;">${initials}</div>`; })()}
+              ? `<div class="avatar-sm" style="margin-top: 2px; overflow:hidden; padding:0; background:var(--bg-hover);"><img src="${_ph}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" /></div>`
+              : `<div class="avatar-sm avatar-tint" style="background:${avBg}; color:${avFg}; margin-top: 2px;">${initials}</div>`; })()}
             <div>
               ${nameHtml}
               <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}</div>
@@ -317,7 +397,7 @@ const renderTable = () => {
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.createdAt?.toDate ? new Date(s.createdAt.toDate()).toLocaleDateString() : 'N/A'}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.paymentDueDate || "N/A"}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; max-width: 130px;">${leavingDateHtml}</td>
-        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusText}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusHtml}</td>
       </tr>
     `;
   });
