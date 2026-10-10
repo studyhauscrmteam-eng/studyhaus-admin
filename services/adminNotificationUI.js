@@ -164,7 +164,6 @@ const historyHtml = () => {
   return `
     <div style="font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--text-muted); padding:.75rem .25rem .5rem;">
       RECENT DECISIONS · ${list.length} (last 50 kept on this device)
-      <button class="btn btn-ghost" style="padding:1px 8px; font-size:11px; margin-left:8px; color:var(--text-muted);" onclick="window.clearAdmissionDecisionHistory()">Clear</button>
     </div>
     ${items}`;
 };
@@ -177,8 +176,13 @@ const historyHtml = () => {
 const alertsHtml = () => {
   const all = window.__pendingAdmissions || [];
   // Dismissed (clicked) alerts stay in the queue but leave the list, exactly
-  // like every other notification. The applicant is untouched.
-  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`));
+  // like every other notification. Items acknowledged by merely opening the
+  // Notifications page stay visible for that visit (session) so they can
+  // still be tapped through to Pending approval. The applicant is untouched.
+  const session = new Set(
+    Array.isArray(window.__notifSession) ? window.__notifSession.map(String) : []
+  );
+  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`) || session.has(`adm_${r.id}`));
   const decided = historyHtml();
   if (pending.length === 0) return decided;
   // Plain cards like every other notification: no Review button, the whole

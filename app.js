@@ -72,6 +72,23 @@ function navigate(page) {
     window.__renderAnalytics();
   }
 
+  // Visit-to-clear notifications: entering the Notifications page
+  // acknowledges everything on sight (bell, sidebar and tab badges drop —
+  // the renderer does the ack), leaving it ends that visit's session so the
+  // next visit shows only what arrived since. No buttons involved.
+  try {
+    if (page === 'notifications') {
+      if (typeof window.__refreshNotifBadges === 'function') {
+        setTimeout(() => { try { window.__refreshNotifBadges(); } catch (_) {} }, 0);
+      }
+    } else if (Array.isArray(window.__notifSession) && window.__notifSession.length) {
+      window.__notifSession = [];
+      if (typeof window.__refreshNotifBadges === 'function') {
+        setTimeout(() => { try { window.__refreshNotifBadges(); } catch (_) {} }, 0);
+      }
+    }
+  } catch (_) {}
+
   // On mobile, close sidebar after navigation
   if (window.innerWidth <= 768) {
     document.getElementById('sidebar').classList.remove('mobile-open');

@@ -38,18 +38,17 @@ export const isOldStatus = (s) => {
 };
 
 /**
- * Only a person we actually ADMITTED — or is still being decided — belongs in
- * the main student list.
+ * Only a person we actually ADMITTED belongs in the main student list.
  *
- * Owner report: "why do rejected students show up here? no admission, no
- * approval, still seen." — this is the gate that answers it.
+ * Owner report: "why is a new student shown even though I never approved
+ * them?" — unapproved (Pending) applications live ONLY in the
+ * Admissions → Pending approval queue until an admin approves them.
  *
- * A record is LISTED when it carries an admission decision that is not a
- * refusal (Approved, Pending, Changes Requested, Dismissed), or — for legacy
- * rows and records added straight from the admin portal that never went
- * through the approval flow — when its lifecycle `status` is one of the
- * admitted states. Anything else (no decision AND no admitted status) is not a
- * student and is never shown.
+ * A record is LISTED when it carries an admission decision of Approved
+ * (or — for legacy rows and records added straight from the admin portal
+ * that never went through the approval flow — when its lifecycle `status`
+ * is one of the admitted states). Anything else (Pending, no decision,
+ * refusal, retired record) is not a student and is never shown here.
  *
  * NOTE: Rejected rows are also purged server-side (see approvalService), so
  * this filter is the belt to that pair of braces — a purge that failed must
@@ -57,8 +56,8 @@ export const isOldStatus = (s) => {
  * stays listed: dismiss preserves the record so it remains searchable here.
  */
 // Lowercase — every comparison below runs on normalised values.
-const LISTED_APPROVAL = ["approved", "pending", "changes requested", "dismissed"];
-const LISTED_STATUS = ["active", "inactive", "pending", "expired", "dismissed", "changes requested"];
+const LISTED_APPROVAL = ["approved", "changes requested", "dismissed"];
+const LISTED_STATUS = ["active", "inactive", "expired", "dismissed", "changes requested"];
 // Explicit refusal / retired record wins in EITHER field: a purge or a field
 // write that blanks `approvalStatus` must never re-admit a rejected person.
 const DENIED_STATE = ["rejected", "old", "old student"];

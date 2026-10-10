@@ -1,5 +1,6 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
-import { isNotifRead, markNotifRead, countUnread } from "./notificationReadState.js";
+import { markAllNotificationsRead, markNotificationRead } from "./notificationService.js";
+import { isNotifRead, markNotifRead, markNotifsRead, countUnread } from "./notificationReadState.js";
 
 // OWN copy of the tab title. This used to reference BASE_TITLE from
 // adminNotificationUI.js — a module-scoped const that is NOT in scope here —
@@ -24,6 +25,61 @@ const admissionIds = () =>
     .map((r) => `adm_${r.id}`);
 
 /**
+ * Visit-to-clear session. Opening the Notifications page acknowledges
+ * everything on sight (bell pill, sidebar pill and browser-tab counter all
+ * drop to zero — no clicking, no Clear button), BUT the items stay on screen
+ * for this visit so each one is still clickable: tapping one navigates to
+ * its page (or pops its details) and it is gone afterwards. Leaving the
+ * page ends the session — the next visit shows only what arrived since.
+ */
+const getSession = () => new Set(
+  Array.isArray(window.__notifSession) ? window.__notifSession.map(String) : []
+);
+const inSession = (key) => getSession().has(String(key));
+
+/** Every known notification id across all four sources. */
+const allKnownIds = () => {
+  const ids = (lastAnnouncements || []).map((a) => `ann_${a.id}`);
+  for (const n of systemNotifs()) ids.push(`sys_${n.id}`);
+  for (const k of admissionIds()) ids.push(k);
+  return ids;
+};
+
+/**
+ * Acknowledge the whole page at once. Called automatically while the
+ * Notifications page is open (see renderAnnouncementList) — never wired to
+ * any button. Persists two ways so "gone" survives sign-in and reopen:
+ * device-local read-state (announcements, alerts, leads) plus the
+ * server-side `read` flag for system notifications (all devices).
+ */
+window.__ackNotificationsPage = () => {
+  try {
+    const ids = allKnownIds();
+    if (ids.length === 0) return;
+    markNotifsRead(ids);
+    const s = getSession();
+    for (const id of ids) s.add(String(id));
+    window.__notifSession = [...s].slice(-150);
+  } catch (_) { /* storage blocked — badges just stay until clicked */ }
+  // Server flag is best-effort and never blocks the instant local clear.
+  // Filtered out of systemNotifs() once read, so the echo from the
+  // listener below can never resurrect the badge (no ack loop).
+  try {
+    const p = markAllNotificationsRead();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (_) {}
+};
+
+const isNotifPageActive = () => {
+  try {
+    const el = document.getElementById("page-notifications");
+    return !!(el && el.classList.contains("active"));
+  } catch (_) {
+    return false;
+  }
+};
+
+/**
  * System notifications (approval decisions, new admission requests) are written
  * to the `notifications` collection by notifyAdmins(), but nothing ever
  * subscribed to that collection — so those events produced no visible message.
@@ -33,10 +89,12 @@ const admissionIds = () =>
 const systemNotifs = () => {
   const a = Array.isArray(window.__systemNotifs) ? window.__systemNotifs : [];
   const b = Array.isArray(window.__leadNotifs) ? window.__leadNotifs : [];
-  if (b.length === 0) return a;
-  return [...a, ...b].sort(
+  const all = b.length === 0 ? a : [...a, ...b].sort(
     (x, y) => (y.createdAt?.seconds || 0) - (x.createdAt?.seconds || 0)
   );
+  // Server-acknowledged items stay gone on every device and every sign-in —
+  // the listener keeps delivering them (latest-20 query), so drop them here.
+  return all.filter((n) => n && n.read !== true);
 };
 
 /** Normalise a Firestore Timestamp / ISO string / {value} into epoch ms. */
@@ -104,8 +162,9 @@ const routeNotification = (key) => {
 const renderSystemNotifs = () => {
   const items = systemNotifs();
   // Clicked = read = GONE from the list (the owner's rule: click it and it
-  // disappears). Only unread items are rendered.
-  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`));
+  // disappears). Items acknowledged by merely opening the page stay visible
+  // for that visit (session) so they can still be tapped through.
+  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`) || inSession(`sys_${n.id}`));
   if (live.length === 0) return { html: "", unread: 0 };
 
   let unread = 0;
@@ -153,6 +212,21 @@ export const initAnnouncementAdminUI = () => {
       if (!item) return;
       const key = item.dataset.notifId;
       markNotifRead(key);
+      // System items also flip the server `read` flag so the tap stays
+      // gone on other devices and after re-login. (In-memory lead pings
+      // have no server doc — local state is their only home.)
+      try {
+        if (key.indexOf("sys_") === 0 && key.indexOf("sys_lead_") !== 0) {
+          const p = markNotificationRead(key.slice(4));
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        }
+      } catch (_) {}
+      // Out of this visit's session too — clicked means gone, immediately,
+      // whether it navigates away or just clears in place. No save, no Clear.
+      try {
+        window.__notifSession = (Array.isArray(window.__notifSession) ? window.__notifSession : [])
+          .filter((id) => String(id) !== String(key));
+      } catch (_) {}
       renderAnnouncementList();
       routeNotification(key);
     });
@@ -180,6 +254,17 @@ const renderAnnouncementList = () => {
   const notifList = document.querySelector("#page-notifications .notif-list");
   if (!notifList) return;
 
+  // Visit-to-clear: while the Notifications page is open, everything on
+  // sight is acknowledged at once — bell pill, sidebar pill and tab counter
+  // drop to zero with no clicking and no buttons. Items stay on screen for
+  // this visit (session) so each can still be tapped through to its page.
+  if (isNotifPageActive()) {
+    try {
+      const ids = allKnownIds();
+      if (countUnread(ids) > 0) window.__ackNotificationsPage();
+    } catch (_) {}
+  }
+
   const announcements = lastAnnouncements;
   const unreadIds = announcements.map(a => `ann_${a.id}`);
   const unread = countUnread(unreadIds);
@@ -196,8 +281,9 @@ const renderAnnouncementList = () => {
   const admissionUnread = countUnread(admissionIds());
 
   // ── ONE number for every surface. ────────────────────────────────────────
-  // Opening this page acknowledges NOTHING. The badge only drops when the
-  // owner actually clicks a notification (or decides an admission).
+  // Visiting this page acknowledges everything on sight (auto-ack above),
+  // and tapping any item clears that item and takes you to its page.
+  // No Save, no Clear button, nothing else to press — ever.
   const total = unread + admissionUnread + sys.unread;
 
   // Sidebar pill (and every other .nav-badge in the shell).
@@ -226,11 +312,13 @@ const renderAnnouncementList = () => {
     return;
   }
 
-  // Read items are hidden — clicking a notification makes it disappear.
-  // The toggle below brings them back deliberately.
+  // Read items are hidden — tapping a notification makes it disappear.
+  // Items acknowledged by the page visit stay for this visit (session) so
+  // they remain tappable; leaving the page ends the session.
+  // The toggle below brings read items back deliberately.
   const visible = showReadAdmin
     ? announcements
-    : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
+    : announcements.filter(a => !isNotifRead(`ann_${a.id}`) || inSession(`ann_${a.id}`));
   const toggle = readCount > 0
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";

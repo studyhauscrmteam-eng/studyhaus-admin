@@ -65,9 +65,12 @@ export const initDashboardListeners = () => {
     
     snapshot.forEach(doc => {
       const data = doc.data();
-      if (data.status === "Active" || data.status === "Pending") activeStudents++;
+      // Unapproved (Pending) applications are NOT students — they live only
+      // in the Pending approval queue. Counting them here inflated the
+      // active-student and seat metrics for every new applicant.
+      if (data.status === "Active" && String(data.approvalStatus || "Approved") === "Approved") activeStudents++;
       if (data.status === "Old") oldStudents++;
-      if (data.seatNumber && data.status !== "Old") occupiedSeats++;
+      if (data.seatNumber && data.status === "Active" && String(data.approvalStatus || "Approved") === "Approved") occupiedSeats++;
     });
 
     updateElement("metric-active-students", `${activeStudents} <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted); display: block; margin-top: 0.2rem;">${oldStudents} Old Students</span>`);

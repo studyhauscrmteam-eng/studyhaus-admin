@@ -330,16 +330,47 @@ const escHtml = (v) => String(v == null ? "" : v)
  *
  * @param {number} count
  */
-const paintPendingTabBadge = (count) => {
+const paintPendingTabBadge = (records) => {
   const tab = document.getElementById("tab-pending-approval");
   if (!tab) return;
-  const n = Number(count) || 0;
+  // Visit-to-clear: the pill counts only applications the operator has NOT
+  // seen yet. Opening the Pending approval tab marks the whole queue seen
+  // (see switchAdmissionTab) so the badge drops with no clicking, no
+  // buttons — a brand-new application lights it again. Deciding (approve /
+  // reject / dismiss) removes the record from the queue entirely.
+  const list = Array.isArray(records) ? records : [];
+  const seen = getPendingSeen();
+  const n = list.filter((r) => r && !seen.has(String(r.id))).length;
   tab.innerHTML = n > 0
     ? `Pending approval<span class="adm-tab-count">${n}</span>`
     : `Pending approval`;
   tab.classList.toggle("has-pending", n > 0);
   tab.setAttribute("aria-label", n > 0 ? `Pending approval, ${n} waiting` : "Pending approval");
 };
+
+/** Ids of pending applications already seen (visit-to-clear state). */
+const PENDING_SEEN_KEY = "sh_pending_seen_v1";
+const getPendingSeen = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_SEEN_KEY) || "[]");
+    return new Set(Array.isArray(raw) ? raw.map(String) : []);
+  } catch (_) {
+    return new Set();
+  }
+};
+/** Mark every id in the current queue as seen; badge drops to zero. */
+const markPendingSeen = (records) => {
+  try {
+    const list = Array.isArray(records) ? records : [];
+    const s = getPendingSeen();
+    for (const r of list) {
+      if (r && r.id != null) s.add(String(r.id));
+    }
+    localStorage.setItem(PENDING_SEEN_KEY, JSON.stringify([...s].slice(-300)));
+  } catch (_) { /* storage blocked — badge just keeps counting */ }
+};
+/** Latest queue snapshot (both listeners write here; the tab switcher reads). */
+let lastPendingRecords = [];
 
 export const initAdmissionsUI = async () => {
   const container = document.getElementById("page-admissions");
@@ -940,7 +971,8 @@ export const initAdmissionsUI = async () => {
       // Badge FIRST, and unconditionally. It must never depend on the pending
       // table being present in the DOM — that coupling is exactly how the
       // count used to freeze.
-      paintPendingTabBadge(records.length);
+      lastPendingRecords = Array.isArray(records) ? records : [];
+      paintPendingTabBadge(lastPendingRecords);
 
       // Self-heal: records created before admission numbers existed (or
       // written directly by the website without one) get a unique SH- number
@@ -1110,6 +1142,14 @@ export const initAdmissionsUI = async () => {
     const pendBtn = document.getElementById("tab-pending-approval");
     if (newBtn) newBtn.classList.toggle("is-active", isNew);
     if (pendBtn) pendBtn.classList.toggle("is-active", !isNew);
+
+    // Visit-to-clear: opening the Pending approval tab means the operator
+    // has seen the queue — badge drops immediately, no buttons. Anything
+    // arriving afterwards lights it again.
+    if (!isNew) {
+      markPendingSeen(lastPendingRecords);
+      paintPendingTabBadge(lastPendingRecords);
+    }
   };
 
   window.updateSummary = () => {
