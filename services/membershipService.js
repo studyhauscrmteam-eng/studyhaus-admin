@@ -3,40 +3,64 @@ import { db } from "../firebase/firebase.js";
 import { validatePlan } from "./planValidation.js";
 import { canEditPlans, canViewManualPlans, enforcePlanUIPermissions } from "./planPermissions.js";
 
-const DEFAULT_PLANS = [
+// Live data backing the plan cards. The HTML shells ship only a loading
+// placeholder — every card is rendered from Firestore here, so the page
+// can never show hardcoded demo plans.
+let latestPlans = null;
+let plansListening = false;
+
+const LOADING_HTML = `<div style="grid-column: 1 / -1; padding: 2rem; text-align: center; color: var(--text-muted);">Loading membership plans…</div>`;
+
+const CANONICAL_PLANS = [
   {
-    planName: "Regular Fixed Seat",
-    price: 1000,
-    duration: "1 Month",
-    seatType: "Fixed",
-    seatPreference: true,
-    isManual: false,
-    status: "Active",
-    createdAt: new Date().toISOString()
-  },
-  {
-    planName: "Rotational Seat",
-    price: 800,
-    duration: "1 Month",
-    seatType: "Rotational",
-    capacity: 30,
-    seatPreference: false,
-    isManual: false,
-    status: "Active",
-    createdAt: new Date().toISOString()
-  },
-  {
-    planName: "Night Study",
+    planName: "Half Day Plan",
+    nameGu: "હાફ ડે પ્લાન",
     price: 700,
-    duration: "1 Month",
-    allowedStartTime: "19:00",
-    allowedEndTime: "07:00",
+    duration: "6–8 hours daily",
+    taglineGu: "રોજના ૬-૮ કલાક",
+    seatType: "Fixed",
+    featured: false,
     seatPreference: false,
-    isManual: false,
+    badge: "",
+    badgeGu: "",
     status: "Active",
+    benefits: [
+      "Choice of morning / evening shift",
+      "Personal desk allocation",
+      "AC + High-Speed Wi-Fi + charging",
+      "Personal locker access",
+      "Purified RO drinking water",
+      "Weekend access included"
+    ],
+    createdAt: new Date().toISOString()
+  },
+  {
+    planName: "Full Day Plan",
+    nameGu: "ફુલ ડે પ્લાન",
+    price: 1000,
+    duration: "17 hours daily (6 AM – 11 PM)",
+    taglineGu: "રોજના ૧૭ કલાક (સવારે ૬ થી રાત્રે ૧૧)",
+    seatType: "Fixed",
+    featured: true,
+    seatPreference: true,
+    badge: "Recommended",
+    badgeGu: "સૌથી વધુ પસંદગી",
+    status: "Active",
+    benefits: [
+      "Full 17-hour access: 6:00 AM – 11:00 PM",
+      "100% Guaranteed fixed reserved seat",
+      "Personal dedicated locker facility",
+      "AC + High-Speed Wi-Fi + switchboard",
+      "Open terrace refreshment lounge access",
+      "Purified chilled RO drinking water",
+      "Open all 7 days including public holidays"
+    ],
     createdAt: new Date().toISOString()
   }
 ];
+
+// Kept for backwards-compat: same canonical set under the old name.
+const DEFAULT_PLANS = CANONICAL_PLANS;
 
 /**
  * Initializes the membership plans module
@@ -44,6 +68,11 @@ const DEFAULT_PLANS = [
 export const initMembershipPlans = async () => {
   const grid = document.getElementById("membership-plans-grid");
   if (!grid) return; // Not on the memberships page
+
+  // Replace the shell placeholder immediately — real cards arrive via the
+  // Firestore listener below. Guarded so a hypothetical re-init can't blank
+  // cards that already rendered (the snapshot only fires on data changes).
+  if (latestPlans === null) grid.innerHTML = LOADING_HTML;
 
   if (!document.getElementById("add-plan-modal")) {
     const modalDiv = document.createElement("div");
@@ -100,26 +129,47 @@ export const initMembershipPlans = async () => {
   // 3. Ensure Default Plans exist
   await seedDefaultPlans();
 
-  // 4. Start real-time listener for the UI
-  listenToPlans();
+  // 4. Start the real-time listener for the UI. Guarded: initPageModule
+  // normally runs this once, but a second call must not stack duplicate
+  // listeners.
+  if (!plansListening) {
+    plansListening = true;
+    listenToPlans();
+  }
 };
 
 /**
- * DEPRECATED — no-op.
- * `membershipPlans` is seeded by exactly ONE seeder now:
- * `websiteAdminUI.seedInitialPlans()`. Two seeders both writing an empty
- * collection produced two competing sets of default plans, so this one was
- * retired. The export is kept because other code may still call it — it
- * only logs a warning and writes nothing.
+ * Idempotent seeder — the SINGLE source of truth for default plans.
+ * Writes the canonical Half-Day / Full-Day set ONLY when
+ * `membershipPlans` is currently empty. Safe to call from any page,
+ * guarded against concurrent double-fire (two tabs / two listeners).
  */
-const seedDefaultPlans = async () => {
-  console.warn(
-    "[membershipService] seedDefaultPlans() is a no-op — default plans are seeded by websiteAdminUI.seedInitialPlans(). Nothing was written."
-  );
+let __seedInFlight = false;
+export const seedDefaultPlans = async () => {
+  if (__seedInFlight) return;
+  __seedInFlight = true;
+  try {
+    const snap = await getDocs(collection(db, "membershipPlans"));
+    if (!snap.empty) return; // already seeded (or user data exists) — touch nothing
+    for (const p of CANONICAL_PLANS) {
+      const withMirror = { ...p, benefitsEn: [...p.benefits], createdAt: new Date().toISOString() };
+      await addDoc(collection(db, "membershipPlans"), withMirror);
+    }
+    console.info("[membershipService] Seeded 2 canonical membership plans.");
+  } catch (e) {
+    // Permission errors here mean the signed-in user lacks Manager+ role
+    // (see firestore.rules membershipPlans write). Surface the real code
+    // so it never again looks like a mystery Write/channel 400.
+    console.error("[membershipService] seedDefaultPlans failed:", e?.code || "", e?.message || e);
+    throw e;
+  } finally {
+    __seedInFlight = false;
+  }
 };
 
 /**
- * Real-time listener that injects HTML into the grid
+ * Real-time listener — stores the latest snapshot and hands rendering to
+ * renderPlans() so plan changes and student-count changes can both repaint.
  */
 const listenToPlans = () => {
   const grid = document.getElementById("membership-plans-grid");
@@ -128,68 +178,89 @@ const listenToPlans = () => {
   const plansRef = collection(db, "membershipPlans");
 
   onSnapshot(plansRef, (snapshot) => {
-    if (snapshot.empty) {
-      grid.innerHTML = `<div style="padding: 2rem; color: var(--text-muted);">No plans available.</div>`;
-      return;
-    }
-
-    const showManual = canViewManualPlans();
-    const canEdit = canEditPlans();
-    let html = "";
-
+    const plans = [];
     snapshot.forEach(docSnap => {
-      const plan = docSnap.data();
-      const id = docSnap.id;
+      plans.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    latestPlans = plans;
+    renderPlans();
+  }, (error) => {
+    console.error("Error listening to plans:", error?.code || "", error?.message || error);
+    latestPlans = null;
+    grid.innerHTML = `<div style="color: var(--danger); padding: 1rem;">Failed to load plans (${error?.code || "network error"}). Check login & connection, then reopen.</div>`;
+  });
+};
 
-      // Filter out manual plans if user is not Owner
-      if (plan.isManual && !showManual) return;
+/**
+ * Renders the plan cards from the latest Firestore data. Every card shows
+ * the same fields stored on its plan document (benefits, badge, seat info),
+ * and the popular badge mirrors the plan's own featured flag — truth only,
+ * no fallback: no flag, no badge.
+ */
+const renderPlans = () => {
+  const grid = document.getElementById("membership-plans-grid");
+  if (!grid || latestPlans === null) return;
 
-      // Build features list
-      let featuresHtml = `<div class="plan-feature">✓ ${plan.duration || 'N/A'}</div>`;
-      if (plan.seatType) featuresHtml += `<div class="plan-feature">✓ ${plan.seatType} seat</div>`;
-      if (plan.capacity) featuresHtml += `<div class="plan-feature">✓ Max Capacity: ${plan.capacity}</div>`;
-      if (plan.seatPreference === true) featuresHtml += `<div class="plan-feature">✓ Seat selection allowed</div>`;
-      if (plan.allowedStartTime) featuresHtml += `<div class="plan-feature">✓ Timings: ${plan.allowedStartTime} to ${plan.allowedEndTime}</div>`;
-      if (plan.notes) featuresHtml += `<div class="plan-feature muted">${plan.notes}</div>`;
+  const showManual = canViewManualPlans();
+  const canEdit = canEditPlans();
 
-      // Build Action Buttons for Owner
-      let actionsHtml = "";
-      if (canEdit) {
-        actionsHtml = `
-          <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; gap: 1rem; font-size: 0.85rem;">
-            <a href="#" onclick="window.editPlan('${id}', '${plan.planName}', '${plan.price}'); return false;" style="color: var(--primary); text-decoration: none;" data-i18n="btn.edit">${window.t ? window.t("btn.edit") : "Edit"}</a>
-            <a href="#" onclick="window.deletePlan('${id}', '${plan.planName}'); return false;" style="color: var(--danger); text-decoration: none;" data-i18n="btn.delete">${window.t ? window.t("btn.delete") : "Delete"}</a>
-          </div>
-        `;
-      }
+  const visible = latestPlans.filter(plan => !(plan.isManual && !showManual));
+  if (visible.length === 0) {
+    grid.innerHTML = `<div style="grid-column: 1 / -1; padding: 2rem; text-align: center; color: var(--text-muted);">No membership plans yet.${canEdit ? " Use “+ New Plan” to create one." : ""}</div>`;
+    return;
+  }
 
-      // "Most Popular" comes from the plan itself (Featured toggle / badge in
-      // Website-manager), with the legacy Rotational Seat fallback — so the
-      // Membership card always matches what the website shows.
-      const isPopular = plan.featured === true || plan.planName === "Rotational Seat";
-      const cardClass = isPopular ? "plan-card featured" : "plan-card";
-      const badgeHtml = isPopular ? `<div class="plan-badge">${plan.badge || "Popular"}</div>` : "";
+  let html = "";
 
-      html += `
-        <div class="${cardClass}">
-          ${badgeHtml}
-          <div class="plan-top">
-            <div class="plan-name">${plan.planName} ${plan.isManual ? ' <span style="font-size:0.7em; color:var(--text-muted);">(Manual)</span>' : ''}</div>
-            <div class="plan-price">₹${plan.price}<span>/${plan.duration != null ? (typeof plan.duration === 'number' ? plan.duration + ' days' : String(plan.duration).toLowerCase()) : 'custom'}</span></div>
-          </div>
-          <div class="plan-features">
-            ${featuresHtml}
-          </div>
-          ${actionsHtml}
+  visible.forEach(plan => {
+    const id = plan.id;
+
+    // Benefits are what the website shows — normalized the same way the
+    // Website-manager does (older plans may only carry benefitsEn).
+    const benefits = Array.isArray(plan.benefits)
+      ? plan.benefits
+      : (Array.isArray(plan.benefitsEn) ? plan.benefitsEn : []);
+    let featuresHtml = benefits.map(b => `<div class="plan-feature">✓ ${b}</div>`).join("");
+    featuresHtml += `<div class="plan-feature">✓ ${plan.duration || 'N/A'}</div>`;
+    if (plan.seatType) featuresHtml += `<div class="plan-feature">✓ ${plan.seatType} seat</div>`;
+    if (plan.capacity) featuresHtml += `<div class="plan-feature">✓ Max Capacity: ${plan.capacity}</div>`;
+    if (plan.seatPreference === true) featuresHtml += `<div class="plan-feature">✓ Seat selection allowed</div>`;
+    if (plan.allowedStartTime) featuresHtml += `<div class="plan-feature">✓ Timings: ${plan.allowedStartTime} to ${plan.allowedEndTime}</div>`;
+    if (plan.notes) featuresHtml += `<div class="plan-feature muted">${plan.notes}</div>`;
+
+    // Build Action Buttons for Owner
+    let actionsHtml = "";
+    if (canEdit) {
+      actionsHtml = `
+        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; gap: 1rem; font-size: 0.85rem;">
+          <a href="#" onclick="window.editPlan('${id}', '${plan.planName}', '${plan.price}'); return false;" style="color: var(--primary); text-decoration: none;" data-i18n="btn.edit">${window.t ? window.t("btn.edit") : "Edit"}</a>
+          <a href="#" onclick="window.deletePlan('${id}', '${plan.planName}'); return false;" style="color: var(--danger); text-decoration: none;" data-i18n="btn.delete">${window.t ? window.t("btn.delete") : "Delete"}</a>
         </div>
       `;
-    });
+    }
 
-    grid.innerHTML = html;
-  }, (error) => {
-    console.error("Error listening to plans:", error);
-    if (grid) grid.innerHTML = `<div style="color: var(--danger); padding: 1rem;">Failed to load plans.</div>`;
+    // "Most Popular" mirrors the plan's own featured flag (set in the
+    // Website-manager). Flagged → badge, unflagged → none: truth only.
+    const isPopular = plan.featured === true;
+    const cardClass = isPopular ? "plan-card featured" : "plan-card";
+    const badgeHtml = isPopular ? `<div class="plan-badge">${plan.badge || "Popular"}</div>` : "";
+
+    html += `
+      <div class="${cardClass}">
+        ${badgeHtml}
+        <div class="plan-top">
+          <div class="plan-name">${plan.planName} ${plan.isManual ? ' <span style="font-size:0.7em; color:var(--text-muted);">(Manual)</span>' : ''}</div>
+          <div class="plan-price">₹${plan.price}<span>/${plan.duration != null ? (typeof plan.duration === 'number' ? plan.duration + ' days' : String(plan.duration).toLowerCase()) : 'custom'}</span></div>
+        </div>
+        <div class="plan-features">
+          ${featuresHtml}
+        </div>
+        ${actionsHtml}
+      </div>
+    `;
   });
+
+  grid.innerHTML = html;
 };
 
 /**

@@ -1,6 +1,9 @@
 import { collection, doc, updateDoc, onSnapshot, getDocs, query, where, serverTimestamp, getDoc, addDoc, setDoc, deleteDoc, deleteField } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
+import { initializeApp, deleteApp } from "firebase/app";
 import { db } from "../firebase/firebase.js";
+import { firebaseConfig } from "../config/firebaseConfig.js";
+import { phoneToAuthEmail } from "./phoneUtils.js";
 
 // Vercel backend (same host as the public website). CORS is open there, so
 // the portal passes the caller's own ID token for authorisation.
@@ -205,6 +208,61 @@ export const clearPortalCredentials = async (studentId) => {
     uid: deleteField(),
     authEmail: deleteField(),
     loginRevoked: deleteField()
+  });
+};
+
+/**
+ * Change a student's portal password WITHOUT ever displaying the old one.
+ *
+ * The STORED old password authenticates a sign-in on a SECONDARY Firebase app
+ * instance (same trick `createPortalAccount` uses — the signed-in admin
+ * session is never touched), `updatePassword` applies the new password while
+ * that fresh sign-in satisfies Firebase's recent-login requirement, and only
+ * then are the stored copies on the student doc rewritten to match.
+ *
+ * @param {string} studentId - students doc id (auto-id or uid)
+ * @param {string} newPassword - at least 6 characters
+ * @returns {Promise<void>}
+ */
+export const resetPortalPassword = async (studentId, newPassword) => {
+  const pass = String(newPassword || "").trim();
+  if (!pass || pass.length < 6) throw new Error("Portal password must be at least 6 characters.");
+
+  const snap = await getDoc(doc(db, "students", studentId));
+  if (!snap.exists()) throw new Error("Student record not found.");
+  const data = snap.data();
+
+  const rawCred = data.loginCredentials ? String(data.loginCredentials) : "";
+  const slashIdx = rawCred.indexOf("/");
+  const loginId = String(data.loginId || (slashIdx !== -1 ? rawCred.slice(0, slashIdx) : "")).trim();
+  const oldPass = String(data.loginPassword || (slashIdx !== -1 ? rawCred.slice(slashIdx + 1) : "")).trim();
+  if (!loginId || !oldPass) {
+    throw new Error("No stored password to change — use \"Clear login\", then create a fresh login instead.");
+  }
+
+  const isPhone = /^[\d\s\-\+\(\)]{10,}$/.test(loginId);
+  const authEmail = isPhone ? phoneToAuthEmail(loginId) : loginId.toLowerCase();
+
+  const secondaryApp = initializeApp(firebaseConfig, `reset-pass-${Date.now()}`);
+  try {
+    const secondaryAuth = getAuth(secondaryApp);
+    const cred = await signInWithEmailAndPassword(secondaryAuth, authEmail, oldPass);
+    await updatePassword(cred.user, pass);
+    await signOut(secondaryAuth).catch(() => {});
+  } catch (error) {
+    const code = error?.code || "";
+    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
+      throw new Error("The stored password no longer matches the account — use \"Clear login\", then create a fresh login with the new password.");
+    }
+    throw new Error(error?.message || "Could not update the password.");
+  } finally {
+    await deleteApp(secondaryApp).catch(() => {});
+  }
+
+  await updateDoc(doc(db, "students", studentId), {
+    loginPassword: pass,
+    loginCredentials: `${loginId} / ${pass}`,
+    updatedAt: serverTimestamp()
   });
 };
 

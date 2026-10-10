@@ -2,6 +2,7 @@ import { listenToAllStudents } from "./studentService.js";
 import { listenToPendingPayments } from "./paymentService.js";
 import { listenToReminderOverrides, markReminderCompleted, rescheduleReminder } from "./reminderService.js";
 import { generateReminders } from "./reminderEngine.js";
+import { isAdmitted, isOldStatus } from "./studentProfile.js";
 
 let allStudents = [];
 let pendingPayments = [];
@@ -38,9 +39,12 @@ export const initDashboardReminders = () => {
     }
   };
 
-  // Start combined listeners
+  // Start combined listeners. Rejected / never-admitted records never reach
+  // the engine — a surviving rejected applicant must not generate birthday
+  // or renewal reminders (with name + phone) on the dashboard. Old students
+  // stay: their follow-up reminders are intentional.
   listenToAllStudents(students => {
-    allStudents = students;
+    allStudents = students.filter(s => isAdmitted(s) || isOldStatus(s));
     triggerRender();
   });
 

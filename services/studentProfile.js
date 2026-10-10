@@ -1,4 +1,4 @@
-import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials } from "./studentService.js";
+import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials, resetPortalPassword } from "./studentService.js";
 import { searchStudents, filterStudents, sortStudents, paginateStudents } from "./studentDataProcessing.js";
 import { fetchPlansForDropdown } from "./admissionService.js";
 import { convertToOldStudent } from "./oldStudentService.js";
@@ -9,6 +9,9 @@ let currentProfileStudentId = null;
 // Tracks a portal account created during this session (old doc id -> new uid)
 // so a retried save doesn't attempt to create the account twice.
 let portalCreated = { oldId: null, uid: null };
+// Password chosen through the hidden "Set password" prompt for a login that
+// does not exist yet — never rendered, only consumed by Save Changes.
+let pendingPortalPassword = null;
 let currentQuery = "";
 let currentFilters = { status: "All", plan: "All" };
 let currentSort = { by: "name", order: "asc" };
@@ -53,8 +56,14 @@ export const isOldStatus = (s) => {
  * never put a rejected person back in front of staff. `Dismissed` deliberately
  * stays listed: dismiss preserves the record so it remains searchable here.
  */
-const LISTED_APPROVAL = ["Approved", "Pending", "Changes Requested", "Dismissed"];
-const LISTED_STATUS = ["Active", "Inactive", "Pending", "Expired", "Dismissed", "Changes Requested"];
+// Lowercase — every comparison below runs on normalised values.
+const LISTED_APPROVAL = ["approved", "pending", "changes requested", "dismissed"];
+const LISTED_STATUS = ["active", "inactive", "pending", "expired", "dismissed", "changes requested"];
+// Explicit refusal / retired record wins in EITHER field: a purge or a field
+// write that blanks `approvalStatus` must never re-admit a rejected person.
+const DENIED_STATE = ["rejected", "old", "old student"];
+
+const normState = (v) => String(v == null ? "" : v).trim().toLowerCase();
 
 export const isAdmitted = (s) => {
   // A portal sign-up that has not been filed yet is not a student at all:
@@ -62,9 +71,10 @@ export const isAdmitted = (s) => {
   // "no admission, no approval, still seen"). The record is untouched in
   // Firestore and appears the moment the student finishes the wizard.
   if (s && s.applicationReady === false) return false;
-  const a = s && s.approvalStatus;
+  const a = normState(s && s.approvalStatus);
+  const st = normState(s && s.status);
+  if (DENIED_STATE.indexOf(a) !== -1 || DENIED_STATE.indexOf(st) !== -1) return false;
   if (a) return LISTED_APPROVAL.indexOf(a) !== -1;
-  const st = s && s.status;
   if (!st) return false;
   return LISTED_STATUS.indexOf(st) !== -1;
 };
@@ -228,9 +238,17 @@ export const initStudentManagementUI = async () => {
    */
   window.openStudentProfileById = async (id) => {
     if (!id) return;
+    // Explicit refusals can still be opened by id (merged-record links, queue
+    // history) — but never silently: staff get told this is not a student.
+    const warnIfRejected = (stu) => {
+      if (normState(stu.approvalStatus) === "rejected" || normState(stu.status) === "rejected") {
+        if (window.showToast) window.showToast("This applicant was rejected — not on the students list.", "warning");
+      }
+    };
     const currentRole = localStorage.getItem("userRole");
     const cached = allStudents.find(s => s.id === id);
     if (cached) {
+      warnIfRejected(cached);
       renderProfileModal(cached, currentRole);
       return;
     }
@@ -239,12 +257,16 @@ export const initStudentManagementUI = async () => {
       const { db: fsDb } = await import("../firebase/firebase.js");
       const snap = await getDoc(fsDoc(fsDb, "students", id));
       if (snap.exists()) {
-        renderProfileModal({ id: snap.id, ...snap.data() }, currentRole);
+        const stu = { id: snap.id, ...snap.data() };
+        warnIfRejected(stu);
+        renderProfileModal(stu, currentRole);
         return;
       }
       const legacy = await getDoc(fsDoc(fsDb, "admissions", id));
       if (legacy.exists()) {
-        renderProfileModal({ id: legacy.id, ...legacy.data() }, currentRole);
+        const stu = { id: legacy.id, ...legacy.data() };
+        warnIfRejected(stu);
+        renderProfileModal(stu, currentRole);
         return;
       }
       if (window.showToast) window.showToast("Student record not found.", "warning");
@@ -253,23 +275,9 @@ export const initStudentManagementUI = async () => {
     }
   };
 
-  // Defined once (modal re-renders every open): SVG eye toggle + copy.
-  // Read-only helpers — no Firestore writes.
-  if (!window.togglePortalPass) {
-    window.togglePortalPass = (btn) => {
-      const input = document.getElementById("view-login-pass");
-      if (!input) return;
-      const show = input.type === "password";
-      input.type = show ? "text" : "password";
-      btn.innerHTML = show
-        ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
-        : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-      btn.setAttribute("aria-pressed", String(show));
-      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
-      btn.title = show ? "Hide password" : "Show password";
-    };
-  }
-
+  // Defined once (modal re-renders every open): copy-to-clipboard helper.
+  // Read-only — no Firestore writes. (The old password eye-toggle was removed
+  // with the password field: the card never displays a password any more.)
   if (!window.copyPortalField) {
     window.copyPortalField = async (inputId, btn) => {
       const el = document.getElementById(inputId);
@@ -441,6 +449,8 @@ const renderProfileModal = (s, role) => {
   const modal = document.getElementById("student-profile-modal");
   if (!modal) return;
   currentProfileStudentId = s.id;
+  // Every open starts clean — a password staged earlier is never carried over.
+  pendingPortalPassword = null;
 
   const isOwner = role === "Owner/Admin";
   const isManager = role === "Manager";
@@ -508,9 +518,8 @@ const renderProfileModal = (s, role) => {
         transform: translateY(-2px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.08);
       }
-      /* Credential hints must never look like filled data */
-      #view-login-id::placeholder,
-      #view-login-pass::placeholder {
+      /* Credential hint must never look like filled data */
+      #view-login-id::placeholder {
         color: var(--text-muted);
         opacity: 0.55;
         font-style: italic;
@@ -635,36 +644,22 @@ const renderProfileModal = (s, role) => {
               </div>
                 <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">10-digit phone (e.g. 9876543210) or an email (e.g. name@gmail.com)</small>
             </div>
-            <div class="form-group">
-              <label>Login Password</label>
-              <div style="position: relative;">
-                <input type="text" id="view-login-pass"
-                  value="${escAttr(portalPass)}"
-                  placeholder="••••••••"
-                  autocapitalize="none" autocorrect="off" spellcheck="false"
-                  ${hasPortalAccount
-                    ? `readonly data-locked="1" onfocus="this.select()" title="Password — eye icon toggles visibility" style="background: var(--bg-hover); color: var(--text-primary); cursor: text; font-size:13px; font-family:inherit; padding-right:64px; width:100%; user-select:text;"`
-                    : `style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); cursor: text; font-size:13px; font-family:inherit; padding-right:64px; width:100%; -webkit-text-fill-color: var(--text-primary); -webkit-box-shadow: 0 0 0 30px var(--bg-card) inset !important; -moz-box-shadow: 0 0 0 30px var(--bg-card) inset !important; box-shadow: 0 0 0 30px var(--bg-card) inset !important;"`}
-                   />
-                <button type="button" id="btn-eye-pass" title="Hide password" aria-label="Hide password" aria-pressed="true"
-                  onclick="window.togglePortalPass(this)"
-                  style="position:absolute; right:33px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button>
-                ${hasPortalAccount
-                  ? `<button type="button" title="Copy password" aria-label="Copy password" onclick="window.copyPortalField('view-login-pass', this)"
-                      style="position:absolute; right:3px; top:50%; transform:translateY(-50%); z-index:2; width:28px; height:28px; background:none; border:none; cursor:pointer; color:var(--text-muted); padding:0; display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>`
-                  : ``}
-              </div>
-                <small style="font-size:10.5px; color:var(--text-muted); line-height:1.4;">Minimum 6 characters.</small>
-            </div>
             <div class="form-group" style="grid-column: span 2;">
-              <div style="display:flex; gap:10px; align-items:center;">
-                ${hasPortalAccount
-                  ? `<small style="font-size:11.5px; color:#166534; font-weight:600;">🟢 Login active</small>`
-                  : `<small style="font-size:11.5px; color:#b91c1c; font-weight:600;">🔴 Login not created — fill both &amp; Save</small>`}
-                ${hasPortalAccount || portalId || portalPass || s.uid || s.authEmail
-                  ? `<button type="button" id="btn-clear-login" class="btn btn-ghost" title="Remove only the stored Login ID / Password — nothing else"
-                      style="margin-left:auto; padding:5px 12px; font-size:11.5px; font-weight:600; border-radius:8px;">Clear login</button>`
-                  : ""}
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px 12px; flex-wrap:wrap; padding:10px 12px; border:1px solid var(--border, #e2e8f0); border-radius:10px; background:var(--bg-hover, #f1f5f9);">
+                <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
+                  <small id="login-status-text" style="font-size:12px; font-weight:700; letter-spacing:0.2px; ${hasPortalAccount ? "color:#166534;" : "color:#b91c1c;"}">${hasPortalAccount ? "🟢 Login active" : "🔴 Login not created"}</small>
+                  <small id="login-status-hint" style="font-size:10.5px; font-weight:500; color:var(--text-muted); line-height:1.4;">${hasPortalAccount
+                    ? "Student signs in with the Login ID above — the password is never shown here."
+                    : "Enter a Login ID → Set password → Save Changes."}</small>
+                </div>
+                <div style="display:flex; gap:8px; flex-shrink:0; margin-left:auto;">
+                  <button type="button" id="btn-set-pass" class="btn ${hasPortalAccount ? "btn-secondary" : "btn-primary"}" title="Portal passwords are never displayed on this card — choose a new one instead"
+                    style="padding:6px 14px; font-size:11.5px; font-weight:600; border-radius:8px; white-space:nowrap;">${hasPortalAccount ? "Set new password" : "Set password"}</button>
+                  ${hasPortalAccount || portalId || portalPass || s.uid || s.authEmail
+                    ? `<button type="button" id="btn-clear-login" class="btn btn-ghost" title="Remove only the stored Login ID / Password — nothing else"
+                        style="padding:6px 14px; font-size:11.5px; font-weight:600; border-radius:8px; white-space:nowrap;">Clear login</button>`
+                    : ""}
+                </div>
               </div>
             </div>
             ` : ''}
@@ -732,6 +727,40 @@ const renderProfileModal = (s, role) => {
   `;
   modal.showModal();
 
+  // "Set password" — the card never shows a stored password. An existing
+  // login is reset immediately (the stored old password authenticates the
+  // change behind the scenes and is never displayed); for a login that does
+  // not exist yet the choice is staged and consumed by Save Changes.
+  const setPassBtn = document.getElementById("btn-set-pass");
+  if (setPassBtn) {
+    setPassBtn.addEventListener("click", async () => {
+      const np = await window.promptPortalPassword(hasPortalAccount ? "Set New Portal Password" : "Set Portal Password");
+      if (!np) return;
+      if (!hasPortalAccount) {
+        pendingPortalPassword = np;
+        const statusEl = document.getElementById("login-status-text");
+        const hintEl = document.getElementById("login-status-hint");
+        if (statusEl) {
+          statusEl.textContent = "🟠 Password set";
+          statusEl.style.color = "#b45309";
+        }
+        if (hintEl) hintEl.textContent = "Press Save Changes to create the portal login.";
+        if (window.showToast) window.showToast("Password set — fill the Login ID and press Save Changes to create the portal login.", "success");
+        return;
+      }
+      setPassBtn.disabled = true;
+      try {
+        await resetPortalPassword(s.id, np);
+        pendingPortalPassword = null;
+        if (window.showToast) window.showToast(`Password updated — student signs in with: ${portalId}`, "success");
+      } catch (e) {
+        if (window.showToast) window.showToast(e.message || "Could not update the password.", "error");
+      } finally {
+        setPassBtn.disabled = false;
+      }
+    });
+  }
+
   // "Clear login" — removes ONLY the credential fields from the student doc.
   const clearBtn = document.getElementById("btn-clear-login");
   if (clearBtn) {
@@ -757,15 +786,14 @@ const renderProfileModal = (s, role) => {
 
   if (isOwner && s.uid && (!portalId || !portalPass)) {
     // Rare: uid-keyed doc without stored credentials — check the auth profile.
+    // Only the Login ID is filled in; passwords are never written to the card.
     import("./firestoreService.js").then(({ getDocument }) => {
       getDocument("users", s.uid).then(userDoc => {
         if (userDoc && userDoc.loginCredentials) {
           const rawCred = String(userDoc.loginCredentials);
           const sIdx = rawCred.indexOf("/");
           const idEl = document.getElementById("view-login-id");
-          const passEl = document.getElementById("view-login-pass");
           if (idEl && sIdx !== -1) idEl.value = rawCred.slice(0, sIdx).trim();
-          if (passEl && sIdx !== -1) passEl.value = rawCred.slice(sIdx + 1).trim();
         }
       }).catch(() => {});
     }).catch(() => {});
@@ -801,6 +829,53 @@ const renderProfileModal = (s, role) => {
     }
   }).catch(err => console.error("Failed to load photo", err));
 };
+
+/**
+ * Hidden password prompt for the student card — two masked fields (new +
+ * confirm, min 6 chars). The value is either staged for Save Changes (creating
+ * a first login) or applied immediately (reset); it is never rendered back
+ * into the card.
+ * @returns {Promise<string|null>} the chosen password, or null on cancel.
+ */
+window.promptPortalPassword = (title) => new Promise((resolve) => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "card smooth-modal";
+  dialog.style.cssText = "border:none; border-radius:12px; padding:0; box-shadow:0 10px 30px rgba(0,0,0,0.5); background: var(--bg-card, #fff); color: var(--text-primary, #0f172a); max-width: 400px; margin: auto;";
+  let result = null;
+  dialog.innerHTML = `
+    <div style="padding: 1.5rem;">
+      <h3 style="margin-bottom: 0.5rem; font-size: 1.25rem; text-align: center;">${title}</h3>
+      <p style="color: var(--text-secondary, #475569); margin-bottom: 1rem; font-size: 0.95rem; text-align: center;">Passwords are never shown on the card. Minimum 6 characters.</p>
+      <div class="form-group" style="margin-bottom: 0.75rem;">
+        <label style="font-size: 12px; color: var(--text-muted);">New password</label>
+        <input type="password" id="pp-new" autocomplete="new-password" class="input-field" style="width: 100%; box-sizing: border-box; padding: 0.5rem; border:1px solid var(--border, #e2e8f0); border-radius:6px;" autofocus />
+      </div>
+      <div class="form-group" style="margin-bottom: 0.75rem;">
+        <label style="font-size: 12px; color: var(--text-muted);">Confirm password</label>
+        <input type="password" id="pp-confirm" autocomplete="new-password" class="input-field" style="width: 100%; box-sizing: border-box; padding: 0.5rem; border:1px solid var(--border, #e2e8f0); border-radius:6px;" />
+      </div>
+      <small id="pp-error" style="display:none; color:#b91c1c; font-size:12px;"></small>
+      <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 1rem;">
+        <button class="btn btn-ghost" id="pp-cancel" style="flex: 1; border: 1px solid var(--border, #e2e8f0); border-radius: 999px;">Cancel</button>
+        <button class="btn btn-primary" id="pp-ok" style="flex: 1; border: none; border-radius: 999px; color: #fff; background: #0f172a;">Save password</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  dialog.addEventListener("close", () => { dialog.remove(); resolve(result); });
+  const err = dialog.querySelector("#pp-error");
+  const fail = (msg) => { err.textContent = msg; err.style.display = "block"; };
+  dialog.querySelector("#pp-cancel").onclick = () => dialog.close();
+  dialog.querySelector("#pp-ok").onclick = () => {
+    const v1 = dialog.querySelector("#pp-new").value;
+    const v2 = dialog.querySelector("#pp-confirm").value;
+    if (!v1 || v1.length < 6) return fail("Password must be at least 6 characters.");
+    if (v1 !== v2) return fail("Passwords do not match.");
+    result = v1;
+    dialog.close();
+  };
+  dialog.showModal();
+});
 
 window.submitStudentEdit = async (id) => {
   const btn = document.getElementById("btn-save-edit");
@@ -839,29 +914,30 @@ window.submitStudentEdit = async (id) => {
     if (txnEl && !txnEl.disabled) updates.transactionId = txnEl.value.trim();
     if (dueEl && !dueEl.disabled) updates.paymentDueDate = dueEl.value;
 
-    // ── Owner: create the Student Portal login from the two Login fields ──
+    // ── Owner: create the Student Portal login. The password is never typed
+    // into this card — it comes from the hidden "Set password" prompt only.
     let targetId = id;
     let portalMsg = "";
     const idInput = document.getElementById("view-login-id");
-    const passInput = document.getElementById("view-login-pass");
     if (portalCreated.oldId === id) {
       // Account was already created earlier in this modal session (retry after
       // a failed save) — just target the migrated document.
       targetId = portalCreated.uid;
     } else if (idInput && !idInput.disabled && !idInput.hasAttribute("data-locked")) {
       const loginId = (idInput.value || "").trim();
-      const loginPassword = (passInput ? passInput.value : "").trim();
-      if (!loginId && !loginPassword) {
-        // Both fields cleared — drop any stored (not yet activated) credentials
+      const loginPassword = pendingPortalPassword || "";
+      if (!loginId) {
+        // Login ID cleared — drop any stored (not yet activated) credentials
         updates.loginCredentials = "";
         updates.loginId = "";
         updates.loginPassword = "";
-      } else if (!loginId || !loginPassword) {
-        // Incomplete — keep the draft so it isn't lost on reload
+      } else if (!loginPassword) {
+        // Keep the ID draft so it isn't lost on reload; supply the password
+        // through the hidden prompt before saving.
         updates.loginId = loginId;
-        updates.loginPassword = loginPassword;
-        updates.loginCredentials = loginId && loginPassword ? `${loginId} / ${loginPassword}` : "";
-        window.showToast("Fill BOTH Login ID and Login Password to enable portal login — or clear both fields.", "warning");
+        updates.loginPassword = "";
+        updates.loginCredentials = "";
+        window.showToast("Choose 'Set password', then Save Changes to create the portal login.", "warning");
       } else {
         // ── Same rules the account system enforces — check BEFORE creating
         // so the toast tells you exactly what to fix.
@@ -885,6 +961,7 @@ window.submitStudentEdit = async (id) => {
         try {
           const acc = await createPortalLoginForStudent(id, loginId, loginPassword);
           portalCreated = { oldId: id, uid: acc.uid };
+          pendingPortalPassword = null;
           targetId = acc.uid; // student doc now lives at students/{uid}
           updates.uid = acc.uid;
           updates.authEmail = acc.authEmail;

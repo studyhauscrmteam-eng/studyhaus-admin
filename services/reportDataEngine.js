@@ -1,5 +1,6 @@
 import { collection, query, getDocs, orderBy, where } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
+import { isAdmitted, isOldStatus } from "./studentProfile.js";
 
 /**
  * Report Data Engine
@@ -37,6 +38,10 @@ export const generateReportData = async (reportType, dateRange) => {
 
         snap.forEach(doc => {
           const s = doc.data();
+          // Rejected / never-admitted records are not students and must never
+          // appear as rows in the students report. Old students stay (the
+          // report counts them deliberately).
+          if (!(isAdmitted(s) || isOldStatus(s))) return;
           data.rows.push({
             "Student ID": s.studentId || "-",
             "Name": s.name,

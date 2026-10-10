@@ -2,6 +2,7 @@ import { db } from "../firebase/firebase.js";
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   collection,
   onSnapshot,
@@ -364,6 +365,9 @@ export const websiteAdminUI = {
             this.renderPlans();
             return;
           }
+          // Guard: one seed attempt per page-load + no concurrent double-fire
+          // (two tabs seeing empty at once would otherwise write 2x sets).
+          if (this._seedAttempted || this._seedInFlight) return;
           this.seedInitialPlans();
           return;
         }
@@ -382,7 +386,7 @@ export const websiteAdminUI = {
         this.plans = loaded;
         this.renderPlans();
       }, (err) => {
-        console.error("Error listening to plans in Website module:", err);
+        console.error("Error listening to plans in Website module:", err?.code || "", err?.message || err);
       });
     } catch (err) {
       console.error("Failed to setup plans listener:", err);
@@ -390,7 +394,17 @@ export const websiteAdminUI = {
   },
 
   async seedInitialPlans() {
+    // One attempt per page-load; concurrent callers wait on the same flag.
+    if (this._seedAttempted || this._seedInFlight) return;
+    this._seedAttempted = true;
+    this._seedInFlight = true;
     try {
+      // Re-check via a direct read: the empty snapshot may have raced a
+      // parallel seeder (memberships page / second tab). Never write blind.
+      try {
+        const recheck = await getDocs(collection(db, "membershipPlans"));
+        if (!recheck.empty) return;
+      } catch (_) { /* fall through and try the seed anyway */ }
       const defaultPlans = [
         {
           planName: "Half Day Plan",
@@ -441,10 +455,13 @@ export const websiteAdminUI = {
 
       const plansRef = collection(db, "membershipPlans");
       for (const p of defaultPlans) {
-        await addDoc(plansRef, p);
+        await addDoc(plansRef, { ...p, benefitsEn: [...p.benefits], createdAt: new Date().toISOString() });
       }
+      console.info("[websiteAdminUI] Seeded 2 canonical membership plans.");
     } catch (e) {
-      console.error("Error seeding initial plans:", e);
+      console.error("Error seeding initial plans:", e?.code || "", e?.message || e);
+    } finally {
+      this._seedInFlight = false;
     }
   },
 
@@ -596,7 +613,11 @@ export const websiteAdminUI = {
     const file = event.target.files[0];
     if (file) {
       try {
-        const compressedBase64 = await compressImage(file, 1200, 0.82);
+        // Web-light: 640px / q0.72 keeps the single website_content doc
+        // safely under Firestore's 1MB limit. The old 1200px/q0.82 output
+        // bloated the doc past the limit, and every save then failed with
+        // INVALID_ARGUMENT, surfaced in the console as Write/channel 400.
+        const compressedBase64 = await compressImage(file, 640, 0.72);
         this.updateService(index, "image", compressedBase64);
 
         // Instant visual thumbnail update
@@ -840,7 +861,7 @@ export const websiteAdminUI = {
               ${plan.featured ? `
                 <span style="background:linear-gradient(135deg, #f59e0b, #d97706); color:white; font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                  FEATURED
+                  FEATURED${plan.badge ? `: ${escapeHtml(plan.badge)}` : ": Popular"}
                 </span>` : ""}
               ${plan.seatPreference ? `
                 <span style="background:rgba(16,185,129,.14); color:var(--accent-emerald); border:1px solid rgba(16,185,129,.45); font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:4px;">
@@ -892,6 +913,18 @@ export const websiteAdminUI = {
               <label class="facility-label">Highlight Ribbon Badge</label>
               <input type="text" class="form-control" id="plan-badge-${plan.id}" value="${safeBadge}" placeholder="e.g. Recommended, Popular" />
             </div>
+            <div>
+              <label class="facility-label">Max Capacity (optional)</label>
+              <input type="number" class="form-control" id="plan-capacity-${plan.id}" value="${plan.capacity != null ? plan.capacity : ""}" min="0" placeholder="e.g. 30" />
+            </div>
+            <div>
+              <label class="facility-label">Allowed Start Time (optional)</label>
+              <input type="time" class="form-control" id="plan-starttime-${plan.id}" value="${plan.allowedStartTime || ""}" />
+            </div>
+            <div>
+              <label class="facility-label">Allowed End Time (optional)</label>
+              <input type="time" class="form-control" id="plan-endtime-${plan.id}" value="${plan.allowedEndTime || ""}" />
+            </div>
           </div>
 
           <!-- Featured Toggle -->
@@ -908,6 +941,12 @@ export const websiteAdminUI = {
               <input type="checkbox" id="plan-seatpref-${plan.id}" ${plan.seatPreference ? "checked" : ""} onchange="websiteAdminUI.togglePlanFlag('${plan.id}', 'seatPreference', this.checked)" style="width:16px; height:16px; cursor:pointer;" />
               <span style="font-weight:600; color:var(--text-primary);">Seat Preference — students on this plan can pick their seat on the website map</span>
             </label>
+          </div>
+
+          <!-- Plan Notes (shown on the Memberships card) -->
+          <div style="margin-bottom:1rem;">
+            <label class="facility-label">Notes (optional)</label>
+            <textarea class="form-control" id="plan-notes-${plan.id}" rows="2" placeholder="Extra info for staff, shown on the Memberships card...">${escapeHtml(plan.notes || "")}</textarea>
           </div>
 
           <!-- Benefits List -->
@@ -992,16 +1031,54 @@ export const websiteAdminUI = {
     this.syncPlanBenefits(plan);
   },
 
-  removePlanBenefit(planId, bIdx) {
+  async removePlanBenefit(planId, bIdx) {
     const plan = this.plans.find((p) => p.id === planId);
     if (!plan) return;
     const list = this.getPlanBenefits(plan);
     if (bIdx < 0 || bIdx >= list.length) return;
-    list.splice(bIdx, 1);
+    const [removed] = list.splice(bIdx, 1);
     // Keep both arrays in sync so a discarded tag does not reappear
     // via the legacy `benefitsEn` fallback on re-render / save.
     this.syncPlanBenefits(plan);
     this.renderPlans();
+    // Persist immediately. Removal used to live only in memory until Save,
+    // so any Firestore snapshot landing in between resurrected the point
+    // and the next Save wrote it straight back. Now × means gone — in the
+    // database and on every surface reading it. Writes are chained per plan
+    // so rapid clicks cannot land out of order.
+    this._benefitWrites = this._benefitWrites || {};
+    this._benefitWrites[planId] = (this._benefitWrites[planId] || Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        const live = this.plans.find((p) => p.id === planId);
+        const current = live ? this.getPlanBenefits(live) : [];
+        await updateDoc(doc(db, "membershipPlans", planId), {
+          benefits: [...current],
+          benefitsEn: [...current],
+          updatedAt: new Date().toISOString()
+        });
+      })
+      .then(() => {
+        if (typeof window.showToast === "function") {
+          window.showToast("Benefit removed.", "success");
+        }
+      })
+      .catch((e) => {
+        console.error("Error removing benefit:", e);
+        const live = this.plans.find((p) => p.id === planId);
+        if (live && removed !== undefined) {
+          const liveList = this.getPlanBenefits(live);
+          if (!liveList.includes(removed)) {
+            liveList.splice(Math.min(bIdx, liveList.length), 0, removed);
+          }
+          this.syncPlanBenefits(live);
+          this.renderPlans();
+        }
+        if (typeof window.showToast === "function") {
+          window.showToast("Could not remove. Please try again.", "error");
+        }
+      });
+    await this._benefitWrites[planId];
   },
 
   addPlanBenefitFromInput(planId) {
@@ -1071,6 +1148,19 @@ export const websiteAdminUI = {
     const seatPrefInput = document.getElementById(`plan-seatpref-${planId}`);
     const seatPreference = seatPrefInput ? seatPrefInput.checked : (!!plan.seatPreference);
 
+    const capacityInput = document.getElementById(`plan-capacity-${planId}`);
+    const capacityRaw = capacityInput ? capacityInput.value.trim() : "";
+    const capacity = capacityRaw === "" ? null : (Number(capacityRaw) || 0);
+
+    const startInput = document.getElementById(`plan-starttime-${planId}`);
+    const allowedStartTime = startInput ? startInput.value : (plan.allowedStartTime || "");
+
+    const endInput = document.getElementById(`plan-endtime-${planId}`);
+    const allowedEndTime = endInput ? endInput.value : (plan.allowedEndTime || "");
+
+    const notesInput = document.getElementById(`plan-notes-${planId}`);
+    const notes = notesInput ? notesInput.value.trim() : (plan.notes || "");
+
     // Allow an empty list — discarding all tags must persist as [].
     // Old code fell back to benefitsEn when benefits was empty, so
     // deleted tags instantly reappeared after re-render / save.
@@ -1086,6 +1176,10 @@ export const websiteAdminUI = {
       duration: duration,
       taglineEn: duration,
       seatType: seatType,
+      capacity: capacity,
+      allowedStartTime: allowedStartTime,
+      allowedEndTime: allowedEndTime,
+      notes: notes,
       badge: badge,
       badgeEn: badge,
       featured: featured,
@@ -1097,6 +1191,10 @@ export const websiteAdminUI = {
     // Keep local state in sync so re-renders don't resurrect old tags.
     plan.featured = featured;
     plan.seatPreference = seatPreference;
+    plan.capacity = capacity;
+    plan.allowedStartTime = allowedStartTime;
+    plan.allowedEndTime = allowedEndTime;
+    plan.notes = notes;
     plan.benefits = [...currentBenefits];
     plan.benefitsEn = [...currentBenefits];
 
@@ -1163,6 +1261,21 @@ export const websiteAdminUI = {
       });
 
       const docRef = doc(db, "settings", "website_content");
+      // Firestore caps a document at ~1,048,576 bytes. Base64 photos live
+      // inside this single doc, so estimate first: a doomed oversized write
+      // comes back as INVALID_ARGUMENT, which the console shows as a
+      // Write/channel 400. Fail fast with a human message instead.
+      const approxBytes = JSON.stringify({
+        services: this.data.services,
+        features: this.data.features
+      }).length;
+      if (approxBytes > 900000) {
+        const msg = `Website content is ~${Math.round(approxBytes / 1024)}KB — over Firestore's ~1MB per-document limit. Remove or Reset some photos, then save again. Nothing was written.`;
+        console.error("[websiteAdminUI] " + msg);
+        if (typeof window.showToast === "function") window.showToast(msg, "error");
+        else alert(msg);
+        return;
+      }
       await setDoc(docRef, {
         services: this.data.services,
         features: this.data.features,
@@ -1182,8 +1295,8 @@ export const websiteAdminUI = {
         alert("Website content saved successfully! Changes are live on the website.");
       }
     } catch (error) {
-      console.error("Error saving website content:", error);
-      alert("Failed to save website content. " + error.message);
+      console.error("Error saving website content:", error?.code || "", error?.message || error);
+      alert("Failed to save website content. " + (error?.code ? `[${error.code}] ` : "") + error.message);
     } finally {
       saveBtns.forEach((btn) => {
         btn.disabled = false;

@@ -17,9 +17,13 @@ export const searchStudents = (students, query) => {
  */
 export const filterStudents = (students, filters) => {
   return students.filter(s => {
-    // Basic Active/Pending/Inactive status matching based on the filter tab
+    // Basic Active/Pending/Inactive status matching based on the filter tab.
+    // ONE effective status decides the tab (lifecycle `status` first, admission
+    // decision as fallback) — the old `status OR approvalStatus` match let a
+    // single row appear under two tabs whenever the two fields disagreed.
     if (filters.status && filters.status !== "All") {
-      if (s.status !== filters.status && s.approvalStatus !== filters.status) {
+      const effective = String(s.status || s.approvalStatus || "").trim().toLowerCase();
+      if (effective !== String(filters.status).trim().toLowerCase()) {
         return false;
       }
     }

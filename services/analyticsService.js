@@ -14,6 +14,7 @@
  */
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
+import { isAdmitted } from "./studentProfile.js";
 
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July",
   "August", "September", "October", "November", "December"];
@@ -178,7 +179,10 @@ function sumApprovedIn(payments, from, to) {
 }
 
 function computeMetrics(data, b) {
-  const active = (data.students || []).filter(s => s.status !== "Old" && s.status !== "Inactive");
+  // Only people who are actually admitted count as active students — a
+  // surviving Rejected / never-admitted doc (or a legacy "Old Student") must
+  // not inflate new-student counts, attendance rate or the plan split.
+  const active = (data.students || []).filter(s => isAdmitted(s) && s.status !== "Inactive");
 
   // Revenue
   const revenue = sumApprovedIn(data.payments, b.start, b.end);
