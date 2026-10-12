@@ -1,8 +1,39 @@
-import { listenToVisitors, addVisitor, updateVisitorStatus, setVisitorLeadStatus, deleteVisitor } from "./visitorService.js";
+import { listenToVisitors, addVisitor, setVisitorLeadStatus, deleteVisitor } from "./visitorService.js";
 import { calculateVisitorAnalytics } from "./visitorAnalytics.js";
+import { listenToAllStudents } from "./studentService.js";
+import { isAdmitted, isOldStatus } from "./studentProfile.js";
 
 let allVisitors = [];
 let unsubVisitors = null;
+
+// MAIN student list mirror (approved students only — same filter as the
+// students table). "Mark converted" may be offered ONLY when the visitor's
+// person already exists there; nobody in the DB => no convert button.
+let studentPhones = new Set();
+let studentEmails = new Set();
+let unsubStudents = null;
+
+const digits = (v) => String(v == null ? "" : v).replace(/\D/g, "");
+
+/** Does this visitor match someone on the main student list (phone or email)? */
+const isOnMainStudentList = (v) => {
+  const p = digits(v.phone).slice(-10);
+  const e = String(v.email || "").trim().toLowerCase();
+  return (!!p && studentPhones.has(p)) || (!!e && studentEmails.has(e));
+};
+
+/**
+ * What the card may actually treat this lead as. A "Converted" flag whose
+ * person is NOT on the main student list is stale (set before the gate
+ * existed, or the student was later removed) — it must not show as
+ * Converted anywhere: badge, filter or buttons. If the student really does
+ * get admitted later, the flag starts applying again on its own.
+ */
+const effectiveLeadStatus = (v) => {
+  const ls = v.leadStatus || "";
+  if (ls === "Converted" && !isOnMainStudentList(v)) return "";
+  return ls;
+};
 
 const esc = (v) => String(v == null ? "" : v)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -75,49 +106,55 @@ const ensureStyles = () => {
     .vis-search { flex:1 1 260px; }
     .vis-search input { width:100%; }
 
-    .vis-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:1rem; }
+    .vis-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap:.85rem; }
     .vis-card { background:var(--bg-card); border:1px solid var(--border); border-radius:14px;
-      padding:1.1rem 1.15rem; display:flex; flex-direction:column; gap:.7rem;
-      transition:border-color .15s, transform .15s, box-shadow .15s; }
+      padding:.8rem .95rem; display:flex; flex-direction:column; gap:.42rem;
+      transition:border-color .15s, transform .15s, box-shadow .15s; min-width:0; }
     .vis-card:hover { border-color:var(--border-bright); transform:translateY(-2px);
       box-shadow:0 8px 22px rgba(0,0,0,.14); }
-    .vis-card.is-done { opacity:.72; }
-    .vis-top { display:flex; gap:.85rem; align-items:flex-start; }
-    .vis-av { width:44px; height:44px; border-radius:12px; flex:0 0 44px;
-      display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; }
+    .vis-top { display:flex; gap:.7rem; align-items:center; flex-wrap:wrap; }
+    .vis-av { width:40px; height:40px; border-radius:11px; flex:0 0 40px;
+      display:flex; align-items:center; justify-content:center; font-weight:800; font-size:14px; }
     .vis-id { flex:1 1 auto; min-width:0; }
-    .vis-name { font-size:15px; font-weight:700; color:var(--text-primary); line-height:1.25;
+    .vis-name { font-size:14.5px; font-weight:700; color:var(--text-primary); line-height:1.25;
       overflow-wrap:anywhere; }
-    .vis-contact { font-size:13px; color:var(--text-secondary); margin-top:.2rem;
-      display:flex; flex-wrap:wrap; gap:.35rem .6rem; overflow-wrap:anywhere; }
-    .vis-contact a { color:var(--primary); text-decoration:none; }
+    /* Phone · email on ONE line as its own full-width row under the header:
+       looks like the original, but no badges share the row, so the address
+       never gets squeezed. nowrap => a long email wraps to line 2 WHOLE. */
+    .vis-contact { display:flex; flex-wrap:wrap; align-items:center; gap:.2rem .55rem;
+      font-size:12.5px; color:var(--text-secondary); min-width:0; }
+    .vis-contact a { color:var(--primary); text-decoration:none; white-space:nowrap; }
     .vis-contact a:hover { text-decoration:underline; }
-    .vis-tags { display:flex; flex-wrap:wrap; gap:.35rem; justify-content:flex-end; flex:0 0 auto; }
+    .vis-sep { color:var(--border-bright); }
+    /* Badges stay on the TOP row, right of the name — that is where a badge
+       belongs; they wrap to their own line only when the card is too narrow. */
+    .vis-tags { display:flex; flex-wrap:wrap; gap:.35rem; margin-left:auto; }
     .vis-tag { font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
       padding:3px 8px; border-radius:6px; border:1px solid transparent; white-space:nowrap; }
     .vis-tag.src-web { background:rgba(59,130,246,.15); color:#3b82f6; border-color:rgba(59,130,246,.35); }
     .vis-tag.src-walk { background:var(--bg-hover); color:var(--text-secondary); border-color:var(--border); }
-    .vis-tag.lead-new { background:rgba(245,158,11,.15); color:#d97706; border-color:rgba(245,158,11,.4); }
     .vis-tag.lead-win { background:rgba(16,185,129,.15); color:#059669; border-color:rgba(16,185,129,.4); }
     .vis-tag.lead-closed { background:var(--bg-hover); color:var(--text-muted); border-color:var(--border-bright); }
-    .vis-tag.st-active { background:rgba(59,130,246,.12); color:#2563eb; border-color:rgba(59,130,246,.3); }
-    .vis-tag.st-done { background:var(--bg-hover); color:var(--text-muted); border-color:var(--border); }
 
-    .vis-meta { display:flex; flex-wrap:wrap; gap:.35rem 1.1rem; font-size:12.5px; color:var(--text-muted); }
+    .vis-meta { display:flex; flex-wrap:wrap; gap:.2rem .9rem; font-size:12px; color:var(--text-muted); }
     .vis-meta b { color:var(--text-secondary); font-weight:600; }
-    .vis-note { font-size:13px; color:var(--text-secondary); background:var(--bg-hover);
-      border-left:3px solid var(--border-bright); border-radius:0 8px 8px 0; padding:.5rem .7rem; margin:0;
+    .vis-note { font-size:12.5px; color:var(--text-secondary); background:var(--bg-hover);
+      border-left:3px solid var(--border-bright); border-radius:0 8px 8px 0; padding:.4rem .6rem; margin:0;
       overflow-wrap:anywhere; white-space:pre-wrap; }
-    .vis-actions { display:flex; flex-wrap:wrap; gap:.45rem; padding-top:.15rem;
-      border-top:1px solid var(--border); margin-top:.1rem; }
-    .vis-actions .btn { min-height:32px; padding:6px 13px; font-size:12.5px; font-weight:700;
-      border-radius:8px; }
+    /* Small right-aligned buttons, NO divider line — the rule above the row
+       is what made the card look heavy with almost no data in it. */
+    .vis-actions { display:flex; flex-wrap:wrap; gap:.35rem; justify-content:flex-end;
+      margin-top:.1rem; }
+    .vis-actions .btn { min-height:26px; padding:3px 10px; font-size:11.5px; font-weight:700;
+      border-radius:7px; }
     .vis-empty { text-align:center; padding:3rem 1rem; color:var(--text-muted);
       border:1px dashed var(--border-bright); border-radius:14px; }
     @media (max-width:520px){
       .vis-list { grid-template-columns:1fr; }
       .vis-top { flex-wrap:wrap; }
-      .vis-tags { justify-content:flex-start; }
+      .vis-tags { margin-left:0; flex:1 1 100%; }
+      .vis-toolbar .vis-fld, .vis-toolbar .vis-fld .input-field { min-width:0; width:100%; }
+      .vis-toolbar { flex-direction:column; align-items:stretch; }
     }`;
   document.head.appendChild(st);
 };
@@ -202,14 +239,6 @@ export const initVisitorAdminUI = async () => {
             <option value="Closed">Closed</option>
           </select>
         </label>
-        <label class="vis-fld">
-          <span>Status</span>
-          <select id="vis-filter-status" class="input-field">
-            <option value="All">All statuses</option>
-            <option value="Active">In building</option>
-            <option value="Completed">Completed</option>
-          </select>
-        </label>
       </div>
       <div id="vis-count" style="font-size:12.5px; color:var(--text-muted);"></div>
     </div>
@@ -260,7 +289,6 @@ export const initVisitorAdminUI = async () => {
   document.getElementById("vis-search").addEventListener("input", renderVis);
   document.getElementById("vis-filter-source").addEventListener("change", renderVis);
   document.getElementById("vis-filter-lead").addEventListener("change", renderVis);
-  document.getElementById("vis-filter-status").addEventListener("change", renderVis);
 
   // Add Button
   document.getElementById("btn-add-visitor").addEventListener("click", () => handleAddVisitor());
@@ -271,6 +299,16 @@ export const initVisitorAdminUI = async () => {
     updateAnalyticsUI();
     renderVis();
   });
+
+  // Mirror of the MAIN student list (approved, non-old) — drives whether the
+  // "Mark converted" button exists on a card at all.
+  if (unsubStudents) unsubStudents();
+  unsubStudents = listenToAllStudents((students) => {
+    const main = students.filter(s => !isOldStatus(s) && isAdmitted(s));
+    studentPhones = new Set(main.map(s => digits(s.phone).slice(-10)).filter(Boolean));
+    studentEmails = new Set(main.map(s => String(s.email || "").trim().toLowerCase()).filter(Boolean));
+    renderVis();
+  }, (err) => console.error("Students listener failed:", err));
 };
 
 const updateAnalyticsUI = () => {
@@ -288,7 +326,6 @@ const getFilteredVisitors = () => {
   const search = document.getElementById("vis-search").value.toLowerCase().trim();
   const source = document.getElementById("vis-filter-source").value;
   const lead = document.getElementById("vis-filter-lead").value;
-  const status = document.getElementById("vis-filter-status").value;
 
   if (search) {
     filtered = filtered.filter(v =>
@@ -303,9 +340,9 @@ const getFilteredVisitors = () => {
   }
   if (source !== "All") filtered = filtered.filter(v => normaliseSource(v) === source);
   // Website leads always carry an explicit leadStatus; rows without one are
-  // plain walk-ins and only match when the filter is set to "All".
-  if (lead !== "All") filtered = filtered.filter(v => (v.leadStatus || "") === lead);
-  if (status !== "All") filtered = filtered.filter(v => v.status === status);
+  // plain walk-ins and only match when the filter is set to "All". A stale
+  // "Converted" (person not on the main student list) behaves as no status.
+  if (lead !== "All") filtered = filtered.filter(v => effectiveLeadStatus(v) === lead);
 
   return filtered;
 };
@@ -329,10 +366,6 @@ const renderVisitors = (canEdit, canDelete) => {
     return;
   }
 
-  window.handleCompleteVisit = async (id) => {
-    await updateVisitorStatus(id, "Completed");
-  };
-
   window.handleLeadStatus = async (id, leadStatus) => {
     const res = await setVisitorLeadStatus(id, leadStatus);
     if (!res.success) window.showToast(res.error, "error");
@@ -347,31 +380,26 @@ const renderVisitors = (canEdit, canDelete) => {
   };
 
   const html = filtered.map(v => {
-    const isCompleted = v.status === "Completed";
     const isWebsite = normaliseSource(v) === "Website";
-    const leadStatus = v.leadStatus || "";
+    const leadStatus = effectiveLeadStatus(v);
     const [fg, bg] = tintFor(v.id);
 
     const srcTag = isWebsite
       ? `<span class="vis-tag src-web">Website</span>`
       : `<span class="vis-tag src-walk">Walk-in</span>`;
 
+    // No badge for an ordinary "New" enquiry — only Converted / Closed are
+    // worth a badge; a fresh lead just shows the source tag.
     let leadTag = "";
-    if (leadStatus === "New") leadTag = `<span class="vis-tag lead-new">New enquiry</span>`;
-    else if (leadStatus === "Converted") leadTag = `<span class="vis-tag lead-win">Converted</span>`;
+    if (leadStatus === "Converted") leadTag = `<span class="vis-tag lead-win">Converted</span>`;
     else if (leadStatus === "Closed") leadTag = `<span class="vis-tag lead-closed">Closed</span>`;
-
-    const statusTag = isCompleted
-      ? `<span class="vis-tag st-done">Completed</span>`
-      : `<span class="vis-tag st-active">In building</span>`;
 
     let actions = "";
     if (canEdit) {
-      if (!isCompleted) {
-        actions += `<button class="btn btn-secondary" onclick="window.handleCompleteVisit('${v.id}')">Mark completed</button>`;
-      }
       if (isWebsite) {
-        if (leadStatus !== "Converted") {
+        // Convert only exists when the person is ALREADY on the main student
+        // list — an unknown visitor gets no convert option at all.
+        if (leadStatus !== "Converted" && isOnMainStudentList(v)) {
           actions += `<button class="btn btn-secondary" onclick="window.handleLeadStatus('${v.id}', 'Converted')">Mark converted</button>`;
         }
         if (leadStatus !== "Closed") {
@@ -384,9 +412,11 @@ const renderVisitors = (canEdit, canDelete) => {
     }
 
     const contact = [
-      v.phone ? `<a href="tel:${esc(v.phone)}">${esc(v.phone)}</a>` : "",
-      v.email ? `<a href="mailto:${esc(v.email)}">${esc(v.email)}</a>` : `<span style="color:var(--text-muted)">No email</span>`,
-    ].filter(Boolean).join(`<span style="color:var(--border-bright)">·</span>`);
+      v.phone ? `<span><b>Phone</b> <a href="tel:${esc(v.phone)}">${esc(v.phone)}</a></span>` : "",
+      `<span><b>Email</b> ${v.email
+        ? `<a href="mailto:${esc(v.email)}">${esc(v.email)}</a>`
+        : `<span style="color:var(--text-muted)">—</span>`}</span>`,
+    ].filter(Boolean).join(`<span class="vis-sep">·</span>`);
 
     const meta = [
       `<span><b>When</b> ${esc(fmtWhen(v))}</span>`,
@@ -397,15 +427,15 @@ const renderVisitors = (canEdit, canDelete) => {
     const note = [v.remarks, isWebsite ? v.message : ""].filter(Boolean).join("\n");
 
     return `
-      <article class="vis-card ${isCompleted ? "is-done" : ""}">
+      <article class="vis-card">
         <div class="vis-top">
           <div class="vis-av" style="background:${bg}; color:${fg};">${esc(initials(v.visitorName))}</div>
           <div class="vis-id">
             <div class="vis-name">${esc(v.visitorName || "Unnamed visitor")}</div>
-            <div class="vis-contact">${contact}</div>
           </div>
-          <div class="vis-tags">${srcTag}${leadTag}${statusTag}</div>
+          <div class="vis-tags">${leadTag}${srcTag}</div>
         </div>
+        <div class="vis-contact">${contact}</div>
         <div class="vis-meta">${meta}</div>
         ${note ? `<p class="vis-note">${esc(note)}</p>` : ""}
         ${actions ? `<div class="vis-actions">${actions}</div>` : ""}

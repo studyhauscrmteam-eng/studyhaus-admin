@@ -428,8 +428,7 @@ const updateCounters = (dataset) => {
   if (!subtitle) return;
   const active = dataset.filter(s => s.status === "Active").length;
   const inactive = dataset.filter(s => s.status === "Inactive" || s.status === "Expired").length;
-  const pending = dataset.filter(s => s.status === "Pending" || s.approvalStatus === "Pending").length;
-  subtitle.innerHTML = `${active} active · ${inactive} inactive · ${pending} pending`;
+  subtitle.innerHTML = `${active} active · ${inactive} inactive`;
 };
 
 const updatePaginationUI = (total) => {
