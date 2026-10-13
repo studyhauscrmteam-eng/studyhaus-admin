@@ -110,11 +110,20 @@ export const softDeleteStudent = async (studentId) => {
  * with `studentDeleted: true` and kept for accounts, unless `wipeHistory`
  * is true — pass wipeHistory only when the record was created by mistake.
  *
+ * `fullWipe: true` (student-card "Delete permanently") goes further: every
+ * trace of the person is removed, while MONEY STAYS COUNTED — payments,
+ * renewals, attendance and complaints are kept as anonymous rows (amounts,
+ * dates, plans intact; names/phones/emails scrubbed) so dashboard totals
+ * and revenue math never change. Message logs, notifications, queued mail,
+ * re-admission uniqueness claims and matching visitor leads are deleted.
+ *
  * @param {string} studentId
- * @param {{ wipeHistory?: boolean }} opts
+ * @param {{ wipeHistory?: boolean, fullWipe?: boolean }} opts
  */
 export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
-  const { wipeHistory = false } = opts;
+  const { wipeHistory = false, fullWipe = false } = opts;
+  const warnings = [];
+  const note = (m) => warnings.push(m);
   try {
     if (!studentId) throw new Error("Missing student ID.");
     const snap = await getDoc(doc(db, "students", studentId));
@@ -173,16 +182,88 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
       }
     } catch (_) { /* seat release is best-effort */ }
 
-    // 2. History collections: tag or wipe
+    // 2. History collections: tag, wipe, or anonymize (fullWipe keeps money counted)
     const historyCols = ["payments", "attendance", "complaints", "renewals", "documents"];
     for (const colName of historyCols) {
       try {
         const hSnap = await getDocs(query(collection(db, colName), where("studentId", "==", studentId)));
         for (const d of hSnap.docs) {
-          if (wipeHistory) await deleteDoc(d.ref);
-          else await updateDoc(d.ref, { studentDeleted: true, updatedAt: serverTimestamp() });
+          try {
+            if (wipeHistory) {
+              await deleteDoc(d.ref);
+            } else if (fullWipe) {
+              if (colName === "documents") {
+                await deleteDoc(d.ref); // base64 images are pure PII
+              } else {
+                await updateDoc(d.ref, {
+                  studentName: "Deleted student",
+                  studentPhone: "",
+                  phone: "",
+                  email: "",
+                  parentPhone: "",
+                  studentDeleted: true,
+                  anonymizedAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+              }
+            } else {
+              await updateDoc(d.ref, { studentDeleted: true, updatedAt: serverTimestamp() });
+            }
+          } catch (e) {
+            note(`${colName}: ${e.message || e}`);
+          }
         }
       } catch (_) { /* collection may be empty or denied — skip */ }
+    }
+
+    if (fullWipe) {
+      // 2b. Every other trace of this person — safe to delete outright.
+      const wipeQueries = [
+        ["messageLogs", where("studentId", "==", studentId)],
+        ["notifications", where("studentId", "==", studentId)],
+        ["notifications", where("admissionId", "==", studentId)],
+        ["mail", where("meta.studentId", "==", studentId)],
+        ["mail", where("meta.admissionId", "==", studentId)],
+        ["globalDocuments", where("studentId", "==", studentId)],
+      ];
+      for (const [colName, cond] of wipeQueries) {
+        try {
+          const s = await getDocs(query(collection(db, colName), cond));
+          for (const d of s.docs) {
+            try { await deleteDoc(d.ref); }
+            catch (e) { note(`${colName}: ${e.message || e}`); }
+          }
+        } catch (_) { /* empty or denied — skip */ }
+      }
+      // 2c. Re-admission claims (phone/email) so the person can rejoin later.
+      // txn_* claims stay: anonymized money rows still reference those txn ids.
+      const claimIds = [];
+      const phoneDigits = String(data.phone || "").replace(/\D/g, "").slice(-10);
+      if (phoneDigits) claimIds.push(`req_adm_${phoneDigits}`);
+      const emailKey = String(data.email || "").trim().toLowerCase();
+      if (emailKey) claimIds.push(`req_admmail_${emailKey}`);
+      for (const cid of claimIds) {
+        try { await deleteDoc(doc(db, "uniqueness", cid)); }
+        catch (_) { /* may not exist — fine */ }
+      }
+      // 2d. Matching visitor leads (same phone/email are this person's data).
+      try {
+        const seenV = new Set();
+        const conds = [];
+        if (data.phone) conds.push(where("phone", "==", data.phone));
+        if (data.email) conds.push(where("email", "==", data.email));
+        for (const cond of conds) {
+          try {
+            const vs = await getDocs(query(collection(db, "visitors"), cond));
+            for (const d of vs.docs) {
+              if (seenV.has(d.id)) continue;
+              seenV.add(d.id);
+              try { await deleteDoc(d.ref); }
+              catch (e) { note(`visitors: ${e.message || e}`); }
+            }
+          } catch (_) { /* skip */ }
+        }
+      } catch (_) { /* best-effort */ }
     }
 
     // 3. Delete linked docs (each best-effort so one failure never half-leaves)
@@ -196,7 +277,7 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
       try { await deleteDoc(ref); } catch (_) { /* may not exist — fine */ }
     }
 
-    return { success: true, name: data.name || "" };
+    return { success: true, name: data.name || "", warnings };
   } catch (error) {
     return { success: false, error: error.message };
   }

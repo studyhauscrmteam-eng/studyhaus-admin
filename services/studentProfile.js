@@ -1,4 +1,4 @@
-import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials, resetPortalPassword } from "./studentService.js";
+import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials, resetPortalPassword, permanentlyDeleteStudent } from "./studentService.js";
 import { searchStudents, filterStudents, sortStudents, paginateStudents } from "./studentDataProcessing.js";
 import { fetchPlansForDropdown } from "./admissionService.js";
 import { convertToOldStudent } from "./oldStudentService.js";
@@ -555,6 +555,7 @@ const renderProfileModal = (s, role) => {
             <a href="tel:${s.phone}" class="btn btn-primary sp-action-btn" style="padding: 0.25rem 0.75rem; font-size: 0.85rem; text-decoration: none;">Call</a>
             <button type="button" class="btn sp-action-btn" style="background: #25D366; color: white; border: none; padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="window.triggerWhatsAppModal('${s.id}')">WhatsApp</button>
             ${canEdit ? `<button type="button" class="btn btn-secondary sp-action-btn" style="padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="window.handleConvertToOld('${s.id}', '${s.name}')">Convert to Old</button>` : ""}
+            ${isOwner ? `<button type="button" class="btn sp-action-btn" style="padding: 0.25rem 0.75rem; font-size: 0.85rem; background: transparent; color: var(--danger, #dc2626); border: 1px solid var(--danger, #dc2626);" onclick="window.handleFullWipeStudent('${s.id}', '${escAttr(s.name || 'this student')}')">Delete</button>` : ""}
             ${canEdit ? `<button type="button" class="btn btn-primary sp-action-btn" style="padding: 0.25rem 0.75rem; font-size: 0.85rem;" onclick="window.openRenewalModal('${s.id}')">Renew</button>` : ""}
           </div>
         </div>
@@ -1139,4 +1140,37 @@ window.handleConvertToOld = (id, name) => {
       window.showToast("Error: " + res.error, "error");
     }
   };
+};
+
+/**
+ * Owner-only full wipe from the active student card. Double-confirmed:
+ * deletes the profile, login, documents, logs and every other trace, while
+ * payments/renewals/attendance survive as ANONYMOUS rows so money stays counted.
+ */
+window.handleFullWipeStudent = async (id, name) => {
+  const first = await window.showCustomConfirm(
+    "Delete Student Permanently?",
+    `${name || "This student"} and EVERY piece of their data (profile, login, documents, logs, history names) will be removed. Money records stay as anonymous totals. This cannot be undone.`,
+    "Continue",
+    true
+  );
+  if (!first) return;
+  const second = await window.showCustomConfirm(
+    "Final Confirmation",
+    `Type-delete ${name || "this student"} forever?`,
+    "Delete Forever",
+    true
+  );
+  if (!second) return;
+  window.showToast("Deleting…", "info");
+  const res = await permanentlyDeleteStudent(id, { fullWipe: true });
+  if (res.success) {
+    const warn = res.warnings && res.warnings.length
+      ? ` (notes: ${res.warnings.slice(0, 3).join("; ")}${res.warnings.length > 3 ? "…" : ""})`
+      : "";
+    window.showToast(`${res.name || name} deleted completely.${warn}`, "success");
+    window.closeStudentProfile();
+  } else {
+    window.showToast("Error: " + res.error, "error");
+  }
 };

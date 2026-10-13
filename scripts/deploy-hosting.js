@@ -11,6 +11,7 @@
  *   node scripts/deploy-hosting.js --status            list sites + live releases
  *   node scripts/deploy-hosting.js --dry-run           show what would upload (no network writes)
  *   node scripts/deploy-hosting.js --site <SITE_ID>    deploy working tree to a site
+ *   node scripts/deploy-hosting.js --rules             deploy firestore.rules (same key, Rules API)
  *
  * Auth (first one found wins):
  *   1. --key <path-to-service-key.json>
@@ -57,6 +58,8 @@ const flag = (name) => {
 };
 const WANT_STATUS = args.includes("--status");
 const WANT_DRY_RUN = args.includes("--dry-run");
+const WANT_RULES = args.includes("--rules");
+const RULES_HOST = "https://firebaserules.googleapis.com/v1";
 let SITE_ID = flag("--site") === true ? null : flag("--site");
 let PROJECT_ID = flag("--project") === true ? null : flag("--project");
 const CHANNEL = flag("--channel") === true ? null : flag("--channel") || "live";
@@ -338,6 +341,86 @@ async function deploy() {
   console.log(`Done — https://${SITE_ID}.web.app (custom domains serve the same release).`);
 }
 
+/* ---------------- firestore.rules ---------------- */
+
+async function rulesApi(method, urlPath, body) {
+  const res = await fetch(RULES_HOST + urlPath, {
+    method,
+    headers: {
+      Authorization: "Bearer " + TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (_) { /* non-JSON */ }
+  if (!res.ok) {
+    const msg = (json && json.error && (json.error.message || JSON.stringify(json.error))) || text || res.statusText;
+    const err = new Error(`Rules API ${method} ${urlPath} -> HTTP ${res.status}: ${String(msg).slice(0, 400)}`);
+    err.http = res.status;
+    throw err;
+  }
+  return json;
+}
+
+async function deployRules() {
+  const rulesPath = path.join(ROOT, "firestore.rules");
+  if (!fs.existsSync(rulesPath)) fail("firestore.rules not found in " + ROOT);
+  const content = fs.readFileSync(rulesPath, "utf8");
+  console.log(`Rules: ${content.length} chars from firestore.rules`);
+
+  // 1. create ruleset
+  const rs = await rulesApi("POST", `/projects/${PROJECT_ID}/rulesets`, {
+    source: { files: [{ name: "firestore.rules", content }] },
+  });
+  const rulesetName = rs.name;
+  console.log("Ruleset: " + rulesetName);
+
+  // 2. point the firestore release at it (create, or patch if it exists)
+  const releaseName = `projects/${PROJECT_ID}/releases/cloud.firestore`;
+  try {
+    await rulesApi("POST", `/projects/${PROJECT_ID}/releases`, {
+      name: releaseName,
+      rulesetName,
+    });
+  } catch (e) {
+    if (e.http === 409) {
+      try {
+        await patchReleaseFirestore(rulesetName);
+      } catch (e2) {
+        if (e2.http !== 403 && !/permission/i.test(e2.message)) throw e2;
+        return rulesManualFallback(rulesetName);
+      }
+    } else if (e.http === 403 || /permission/i.test(e.message)) {
+      return rulesManualFallback(rulesetName);
+    } else {
+      throw e;
+    }
+  }
+  console.log("RULES LIVE for Cloud Firestore.");
+}
+
+function rulesManualFallback(rulesetName) {
+  console.log("\nRuleset compiled OK: " + rulesetName);
+  console.log("This key may NOT publish releases (same IAM gap as the CLI).");
+  console.log("Manual step (1 min, one time): Firebase Console → Firestore Database → Rules tab");
+  console.log("→ paste firestore.rules from this repo → Publish. The seatRequests block then goes live.");
+  process.exit(2);
+}
+
+// PATCH needs query params — small dedicated call (helper has no query support).
+async function patchReleaseFirestore(rulesetName) {
+  const releaseName = `projects/${PROJECT_ID}/releases/cloud.firestore`;
+  const url = `${RULES_HOST}/${releaseName}?updateMask=ruleset_name`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Authorization: "Bearer " + TOKEN, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: releaseName, rulesetName }),
+  });
+  if (!res.ok) fail(`Rules PATCH -> HTTP ${res.status}: ${(await res.text()).slice(0, 400)}`);
+}
+
 /* ---------------- main ---------------- */
 
 (async () => {
@@ -357,5 +440,6 @@ async function deploy() {
   if (process.env.SITE_ID && !SITE_ID) SITE_ID = process.env.SITE_ID;
 
   if (WANT_STATUS) await showStatus();
+  else if (WANT_RULES) await deployRules();
   else await deploy();
 })().catch((e) => fail(e && e.message ? e.message : String(e)));

@@ -45,11 +45,17 @@ const getSeen = () => {
 };
 const isSeen = (key) => getSeen().has(String(key));
 
-/** Every known notification id across all four sources. */
+/** Ids of every seat-change request in the live pending queue. */
+const seatReqIds = () =>
+  (Array.isArray(window.__pendingSeatRequests) ? window.__pendingSeatRequests : [])
+    .map((r) => `req_${r.id}`);
+
+/** Every known notification id across all five sources. */
 const allKnownIds = () => {
   const ids = (lastAnnouncements || []).map((a) => `ann_${a.id}`);
   for (const n of systemNotifs()) ids.push(`sys_${n.id}`);
   for (const k of admissionIds()) ids.push(k);
+  for (const k of seatReqIds()) ids.push(k);
   return ids;
 };
 
@@ -280,12 +286,18 @@ const renderAnnouncementList = () => {
   // Admission alerts are counted by their own read-state, NOT by the raw
   // queue length — that is what made the badge impossible to clear.
   const admissionUnread = admissionIds().filter((id) => !isNotifRead(id) && !isSeen(id)).length;
+  // Seat-change requests: live queue length, seen-filtered like the rest.
+  // Decided requests leave the queue (Approve/Reject), so no read-state needed.
+  const seatReqBadge = seatReqIds().filter((id) => !isSeen(id)).length;
+  const seatBlock = typeof window.__renderSeatAlerts === "function"
+    ? window.__renderSeatAlerts()
+    : "";
 
   // ── ONE number for every surface. ────────────────────────────────────────
   // Visiting this page marks everything seen (badges drop), and tapping any
   // single item dismisses ONLY that item and takes you to its page.
   // No Save, no Clear button, nothing else to press — ever.
-  const total = annBadge + admissionUnread + sys.unread;
+  const total = annBadge + admissionUnread + sys.unread + seatReqBadge;
 
   // Sidebar pill (and every other .nav-badge in the shell).
   document.querySelectorAll('.nav-badge').forEach(badge => {
@@ -307,7 +319,7 @@ const renderAnnouncementList = () => {
       `${String(annError).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</div>`
     : "";
 
-  if (announcements.length === 0 && !alertsBlock && !sys.html) {
+  if (announcements.length === 0 && !alertsBlock && !sys.html && !seatBlock) {
     notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
     renderDashboardBanner([]);
     return;
@@ -323,7 +335,7 @@ const renderAnnouncementList = () => {
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";
 
-  if (visible.length === 0 && !alertsBlock && !sys.html) {
+  if (visible.length === 0 && !alertsBlock && !sys.html && !seatBlock) {
     notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">All caught up — no unread announcements.</div>` + toggle;
     return;
   }
@@ -370,7 +382,7 @@ const renderAnnouncementList = () => {
         </div>
       `;
     });
-    notifList.innerHTML = errBlock + alertsBlock + sys.html + html + toggle;
+    notifList.innerHTML = errBlock + alertsBlock + seatBlock + sys.html + html + toggle;
   renderDashboardBanner(announcements);
 };
 

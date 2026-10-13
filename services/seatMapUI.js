@@ -455,6 +455,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
     
     <div id="seatmap-view-existing">
       <div style="margin-bottom: 1rem;"><p class="page-subtitle" id="seat-subtitle">Loading...</p></div>
+      <div id="seat-req-queue"></div>
       <style>
         #seatmap-view-existing .legend-pill { padding:4px 12px; border-radius:999px; font-size:13px; font-weight:500; display:inline-flex; align-items:center; gap:6px; border:1px solid transparent; }
         #seatmap-view-existing .legend-av { background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
@@ -762,6 +763,21 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
     renderSeatMap();
   });
 
+  // Seat-change requests filed from the student portal (fixed-seat plans).
+  // Approve/Reject run here so staff never leave the Seats page.
+  if (window.__seatReqUnsub) { try { window.__seatReqUnsub(); } catch (_) {} }
+  window.__seatReqUnsub = null;
+  import("./seatRequestService.js").then(({ listenToPendingSeatRequests, wireSeatRequestActions }) => {
+    try {
+      wireSeatRequestActions();
+      window.__seatReqUnsub = listenToPendingSeatRequests((records) => {
+        window.__pendingSeatRequests = records;
+        renderSeatReqQueue(records);
+        if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+      });
+    } catch (e) { console.warn("[seats] seat-request listener failed:", e); }
+  }).catch(() => {});
+
   // Re-paint seat colors when night/day theme toggles
   if (window.__seatThemeObserver) window.__seatThemeObserver.disconnect();
   window.__seatThemeObserver = new MutationObserver(() => renderSeatMap());
@@ -828,6 +844,35 @@ const triggerAssignSeat = async (seat, studentEmailOrId) => {
   } catch (err) {
     window.showToast("Error finding student: " + err.message, "error");
   }
+};
+
+const escSeatReq = (v) => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** Pending student seat-change requests, decided inline on the Seats page. */
+const renderSeatReqQueue = (records) => {
+  const box = document.getElementById("seat-req-queue");
+  if (!box) return;
+  const list = Array.isArray(records) ? records : [];
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `
+    <div class="card" style="border:1px solid rgba(245,158,11,.45); border-radius:12px; padding:1rem 1.25rem; margin-bottom:1.5rem; background:rgba(245,158,11,.06);">
+      <div style="font-size:12px; font-weight:800; letter-spacing:.05em; color:var(--text-secondary); margin-bottom:.6rem;">
+        SEAT CHANGE REQUESTS · ${list.length} WAITING
+      </div>
+      ${list.map((r) => `
+        <div style="display:flex; flex-wrap:wrap; gap:.5rem .9rem; align-items:center; padding:.55rem 0; border-top:1px solid var(--border); font-size:13px;">
+          <div style="flex:1 1 220px; min-width:0;">
+            <strong>${escSeatReq(r.studentName || "Student")}</strong>
+            <span style="color:var(--text-muted);"> wants </span>
+            <strong>${escSeatReq(r.toSeat || "?")}</strong>
+            <span style="color:var(--text-muted);"> (${escSeatReq(r.toFloor || "")}, now ${escSeatReq(r.fromSeat || "?")})</span>
+            ${r.reason ? `<div style="color:var(--text-muted); font-size:12px;">“${escSeatReq(r.reason)}”</div>` : ""}
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="window.approveSeatChange('${r.id}')">Approve</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.rejectSeatChange('${r.id}')">Reject</button>
+        </div>`).join("")}
+    </div>`;
 };
 
 const updateSeatAnalysis = (seats) => {

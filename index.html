@@ -1567,6 +1567,15 @@
           <span class="tab-label-full">Membership Plans (System)</span>
           <span class="tab-label-short">Plans</span>
         </button>
+        <button class="website-tab-btn" data-tab="content" onclick="websiteAdminUI.switchTab('content')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+          <span class="tab-label-full">Homepage Content</span>
+          <span class="tab-label-short">Content</span>
+        </button>
       </div>
 
       <!-- TAB 1: Services & Facilities -->
@@ -1620,6 +1629,20 @@
         <div id="website-plans-list" class="website-plans-grid">
           <div style="text-align: center; padding: 2rem; color: var(--text-muted); grid-column: 1 / -1;">Loading
             membership plans from database...</div>
+        </div>
+      </div>
+
+      <!-- TAB 4: Homepage Content (hero, disciplines, FAQs, reviews) -->
+      <div class="website-tab-panel" id="website-panel-content" style="display:none;">
+        <div class="website-subpanel-header">
+          <div>
+            <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary); font-weight:700;">Homepage Content</h3>
+            <p style="margin:2px 0 0 0; font-size:0.85rem; color:var(--text-secondary);">Hero stats, boys-only badge,
+              discipline cards, FAQs and reviews — live on the website after Save All Changes.</p>
+          </div>
+        </div>
+        <div id="website-content-list">
+          <div style="text-align: center; padding: 2rem; color: var(--text-muted);">Loading content...</div>
         </div>
       </div>
     </div>

@@ -202,6 +202,35 @@ const alertsHtml = () => {
     ${items}${decided}`;
 };
 
+/**
+ * Seat-change request block for the Notifications page. Buttons (not the
+ * card) decide — Approve/Reject run inline and the request leaves the queue.
+ * Decided on the Seats page instead? It disappears here too (same queue).
+ */
+const seatAlertsHtml = () => {
+  const all = window.__pendingSeatRequests || [];
+  if (all.length === 0) return "";
+  const items = all.slice(0, 10).map((r) => `
+      <div class="notif-item unread">
+        <div class="notif-icon amber">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M5 11a2 2 0 0 1 2 2v2h10v-2a2 2 0 1 1 4 0v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z"/><path d="M5 11V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4"/></svg>
+        </div>
+        <div class="notif-content" style="flex:1;">
+          <div class="notif-title">${esc(r.studentName || "Student")} wants seat ${esc(r.toSeat || "?")}</div>
+          <div class="notif-body">Now ${esc(r.fromSeat || "?")} · ${esc(r.toFloor || "")}${r.reason ? ` · “${esc(r.reason)}”` : ""} — decide on the Seats page</div>
+          <div style="display:flex; gap:.4rem; margin-top:.4rem;">
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); window.approveSeatChange('${r.id}')">Approve</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); window.rejectSeatChange('${r.id}')">Reject</button>
+          </div>
+        </div>
+      </div>`).join("");
+  return `
+    <div style="font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--text-muted); padding:.75rem .25rem .5rem;">
+      SEAT CHANGES · ${all.length} WAITING
+    </div>
+    ${items}`;
+};
+
 export const initAdminNotificationUI = () => {
   const list = document.querySelector("#page-notifications .notif-list");
   if (!list) return; // not on a dashboard with notifications
@@ -209,9 +238,38 @@ export const initAdminNotificationUI = () => {
   if (role === "Student") return;
 
   window.__renderAdmissionAlerts = alertsHtml;
+  window.__renderSeatAlerts = seatAlertsHtml;
   window.__admissionBadgesLive = true; // bell pill painted here; don't reset it
   window.__pendingAdmissions = [];
+  window.__pendingSeatRequests = [];
   paintTab(0);
+
+  // Student seat-change requests: same live-queue treatment as admissions —
+  // bell rings on arrival, badge clears on Approve/Reject.
+  import("./seatRequestService.js").then(({ listenToPendingSeatRequests, wireSeatRequestActions }) => {
+    try { wireSeatRequestActions(); } catch (_) {}
+    let knownSeatReqs = null;
+    try {
+      listenToPendingSeatRequests((records) => {
+        window.__pendingSeatRequests = Array.isArray(records) ? records : [];
+        if (knownSeatReqs !== null) {
+          const fresh = window.__pendingSeatRequests.filter((r) => !knownSeatReqs.has(r.id));
+          if (fresh.length > 0) {
+            beep();
+            const f = fresh[0];
+            const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
+            if (typeof window.showToast === "function") {
+              window.showToast(`🪑 Seat change: ${f.studentName || "A student"} wants seat ${f.toSeat || "?"}${extra} — open Seats.`, "info");
+            }
+          }
+        }
+        knownSeatReqs = new Set(window.__pendingSeatRequests.map((r) => r.id));
+        if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+      });
+    } catch (e) {
+      console.error("[notifications] seat-request watch failed:", e);
+    }
+  }).catch(() => {});
 
   // The `notifications` collection (approval decisions + new admission
   // requests written by notifyAdmins()) had no reader anywhere in the app —

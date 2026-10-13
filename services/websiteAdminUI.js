@@ -212,8 +212,8 @@ const AUTHENTIC_17_FEATURES = [
     titleGu: "અનુકૂળ સમયપત્રક",
     icon: "Clock",
     image: "/hero-study-hall.jpg",
-    desc: "Open 17 hours daily (06:00 AM – 11:00 PM), 365 days a year including Sundays & holidays.",
-    descGu: "રવિવાર અને જાહેર રજાઓ સહિત દરરોજ સવારે ૦૬:૦૦ થી રાત્રે ૧૧:૦૦ સુધી ખુલ્લી રહે છે."
+    desc: "Open 24/7 — 24 hours a day, all 365 days a year including Sundays & holidays.",
+    descGu: "રવિવાર અને જાહેર રજાઓ સહિત આખું વર્ષ ૨૪x૭ — દિવસના ૨૪ કલાક ખુલ્લી રહે છે."
   },
   {
     id: "f14",
@@ -253,6 +253,46 @@ const AUTHENTIC_17_FEATURES = [
   }
 ];
 
+// ── Editable homepage content: hero stats, boys-only badge, discipline
+// cards, FAQs and testimonials. The public website reads these from
+// settings/website_content (same doc as services/features) and falls back
+// to these defaults when offline. Hours are 24/7 · 365 days everywhere.
+const DEFAULT_SITE_CONTENT = {
+  hero: {
+    studentCount: "800+",
+    hoursValue: "24/7",
+    rating: "4.9 ★",
+    boysBadgeOn: true,
+    boysBadgeText: "Only for Boys"
+  },
+  disciplines: [
+    { id: "d1", title: "Civil Services", desc: "UPSC CSE, GPSC Class 1-2, Police Sub-Inspector, Talati & State competitive exams." },
+    { id: "d2", title: "CA / CS / CMA", desc: "Chartered Accountancy Foundation, Inter & Final aspirants needing 12+ hours daily focus." },
+    { id: "d3", title: "NEET & JEE", desc: "Medical & Engineering entrance exam students practicing daily mock tests." },
+    { id: "d4", title: "GATE & Tech Exams", desc: "Engineering graduates preparing for PSU exams and master degree entrance." }
+  ],
+  faqs: [
+    { id: "q1", q: "What are the library operating hours?", a: "ShreeJi Reading Library is open 24/7 — 24 hours a day, all 365 days, including Sundays and public holidays." },
+    { id: "q2", q: "Will I get a fixed reserved desk?", a: "Yes! When you enroll in our Full Day or Monthly plans, you are assigned your own personal numbered cubicle with dedicated locker, shelf, and power socket." },
+    { id: "q3", q: "Can I take a free trial before enrolling?", a: "Absolutely. You are welcome to visit our library any time and study for a trial session before selecting a membership plan." },
+    { id: "q4", q: "Is high-speed Wi-Fi included in the fee?", a: "Yes, unlimited high-speed optical fiber Wi-Fi is complimentary with all membership plans for lectures, test series, and PDFs." },
+    { id: "q5", q: "Are there separate facilities for meals and phone calls?", a: "Yes, we have an open terrace refreshment lounge specifically for having lunch, tea breaks, and attending urgent phone calls without disturbing the silent study hall." }
+  ],
+  testimonials: [
+    { id: "t1", name: "Aarav Mehta", exam: "GPSC Class-1 Rank 14", stars: 5,
+      text: "ShreeJi Reading Library gave me the quiet discipline I could never find at home. Having a fixed assigned seat and continuous 24°C AC kept me in peak flow for 10+ hours every day.",
+      textGu: "શ્રીજી રીડિંગ લાઇબ્રેરીએ મને જે શાંતિ અને શિસ્ત આપી તે ઘરમાં ક્યારેય શક્ય ન હતી. ફિક્સ સીટ અને ૨૪°C એસીને લીધે દરરોજ ૧૦+ કલાક સળંગ અભ્યાસ કરી શકાયો." },
+    { id: "t2", name: "Deepak Joshi", exam: "UPSC Mains Qualified", stars: 5,
+      text: "Having my personal desk set up every morning meant I never wasted a single minute. The staff is polite and strictly maintains silence across all reading rooms.",
+      textGu: "રોજ સવારે આવીને પોતાની ફિક્સ સીટ પર બેસવાથી સમયનો એક પણ મિનિટ બગડતો નથી. સ્ટાફ ખૂબ સારો છે અને શાંતિનું ચુસ્ત પાલન કરાવે છે." },
+    { id: "t3", name: "Rohit Patel", exam: "JEE Advanced Rank 512", stars: 5,
+      text: "Super high speed dual fiber Wi-Fi and power sockets at every desk. Solved physics problems for 12 hours straight every single day.",
+      textGu: "દરેક ડેસ્ક પર હાઇ સ્પીડ વાઇ-ફાઇ અને પાવર સોકેટ હોવાથી રોજના ૧૨ કલાક સુધી ઓનલાઇન લેક્ચર્સ અને ટેસ્ટ સીરીઝ સોલ્વ કરી શક્યો." }
+  ]
+};
+
+const cloneContent = () => JSON.parse(JSON.stringify(DEFAULT_SITE_CONTENT));
+
 const AUTHENTIC_SERVICES = [
   {
     id: "s1",
@@ -275,11 +315,12 @@ const AUTHENTIC_SERVICES = [
 export const websiteAdminUI = {
   data: {
     services: JSON.parse(JSON.stringify(AUTHENTIC_SERVICES)),
-    features: JSON.parse(JSON.stringify(AUTHENTIC_17_FEATURES))
+    features: JSON.parse(JSON.stringify(AUTHENTIC_17_FEATURES)),
+    content: cloneContent()
   },
 
   plans: [],
-  activeTab: "services", // Strictly 3 tabs: "services", "features", "plans"
+  activeTab: "services", // Tabs: "services", "features", "plans", "content"
 
   async init() {
     window.websiteAdminUI = this;
@@ -307,9 +348,21 @@ export const websiteAdminUI = {
         const hasValidServices = Array.isArray(remoteData.services) && remoteData.services.length > 0;
         const finalServices = hasValidServices ? remoteData.services : JSON.parse(JSON.stringify(AUTHENTIC_SERVICES));
 
+        // Homepage content (hero/disciplines/faqs/testimonials): merge over
+        // defaults so older docs missing the key still get every section.
+        const base = cloneContent();
+        const remote = (remoteData.content && typeof remoteData.content === "object") ? remoteData.content : {};
+        const finalContent = {
+          hero: { ...base.hero, ...((remote.hero && typeof remote.hero === "object") ? remote.hero : {}) },
+          disciplines: Array.isArray(remote.disciplines) && remote.disciplines.length > 0 ? remote.disciplines : base.disciplines,
+          faqs: Array.isArray(remote.faqs) && remote.faqs.length > 0 ? remote.faqs : base.faqs,
+          testimonials: Array.isArray(remote.testimonials) && remote.testimonials.length > 0 ? remote.testimonials : base.testimonials,
+        };
+
         this.data = {
           services: finalServices,
-          features: finalFeatures
+          features: finalFeatures,
+          content: finalContent
         };
 
         // Compact oversized stored images once (web-light), so the doc
@@ -326,6 +379,7 @@ export const websiteAdminUI = {
             await setDoc(docRef, {
               services: this.data.services,
               features: this.data.features,
+              content: this.data.content,
               updatedAt: new Date().toISOString()
             }, { merge: true });
           }
@@ -336,6 +390,7 @@ export const websiteAdminUI = {
           await setDoc(docRef, {
             services: this.data.services,
             features: this.data.features,
+            content: this.data.content,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         }
@@ -344,6 +399,7 @@ export const websiteAdminUI = {
         await setDoc(docRef, {
           services: this.data.services,
           features: this.data.features,
+          content: this.data.content,
           updatedAt: new Date().toISOString()
         });
       }
@@ -479,6 +535,129 @@ export const websiteAdminUI = {
     this.renderServices();
     this.renderFeatures();
     this.renderPlans();
+    this.renderContent();
+  },
+
+  // ==================== TAB 4: HOMEPAGE CONTENT ====================
+  // Hero stats, boys-only badge, discipline cards, FAQs, testimonials.
+  // Saved into settings/website_content.content; the public website reads it.
+  renderContent() {
+    const list = document.getElementById("website-content-list");
+    if (!list) return;
+    if (!this.data.content) this.data.content = cloneContent();
+    const c = this.data.content;
+    const esc = (v) => String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const fld = "width:100%; box-sizing:border-box; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); color:var(--text-primary);";
+
+    const discHtml = (c.disciplines || []).map((d, i) => `
+      <div class="card" style="padding:1rem; margin-bottom:.75rem;">
+        <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+          <input value="${esc(d.title)}" onchange="websiteAdminUI.updateDiscipline(${i}, 'title', this.value)" placeholder="Card title" class="input-field" style="flex:1;" />
+          <button class="btn btn-ghost btn-sm" onclick="websiteAdminUI.removeDiscipline(${i})">Remove</button>
+        </div>
+        <textarea rows="2" onchange="websiteAdminUI.updateDiscipline(${i}, 'desc', this.value)" placeholder="Card description" class="input-field" style="${fld}">${esc(d.desc)}</textarea>
+      </div>`).join("");
+
+    const faqHtml = (c.faqs || []).map((f, i) => `
+      <div class="card" style="padding:1rem; margin-bottom:.75rem;">
+        <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+          <input value="${esc(f.q)}" onchange="websiteAdminUI.updateFaq(${i}, 'q', this.value)" placeholder="Question" class="input-field" style="flex:1;" />
+          <button class="btn btn-ghost btn-sm" onclick="websiteAdminUI.removeFaq(${i})">Remove</button>
+        </div>
+        <textarea rows="2" onchange="websiteAdminUI.updateFaq(${i}, 'a', this.value)" placeholder="Answer" class="input-field" style="${fld}">${esc(f.a)}</textarea>
+      </div>`).join("");
+
+    const testHtml = (c.testimonials || []).map((t, i) => `
+      <div class="card" style="padding:1rem; margin-bottom:.75rem;">
+        <div style="display:flex; gap:.5rem; margin-bottom:.5rem; flex-wrap:wrap;">
+          <input value="${esc(t.name)}" onchange="websiteAdminUI.updateTestimonial(${i}, 'name', this.value)" placeholder="Name" class="input-field" style="flex:1; min-width:140px;" />
+          <input value="${esc(t.exam)}" onchange="websiteAdminUI.updateTestimonial(${i}, 'exam', this.value)" placeholder="Exam / rank" class="input-field" style="flex:1; min-width:140px;" />
+          <input value="${esc(t.stars == null ? 5 : t.stars)}" type="number" min="1" max="5" onchange="websiteAdminUI.updateTestimonial(${i}, 'stars', this.value)" placeholder="★" class="input-field" style="width:70px;" />
+          <button class="btn btn-ghost btn-sm" onclick="websiteAdminUI.removeTestimonial(${i})">Remove</button>
+        </div>
+        <textarea rows="2" onchange="websiteAdminUI.updateTestimonial(${i}, 'text', this.value)" placeholder="Review text (English)" class="input-field" style="${fld}">${esc(t.text)}</textarea>
+        <textarea rows="2" onchange="websiteAdminUI.updateTestimonial(${i}, 'textGu', this.value)" placeholder="Review text (Gujarati, optional)" class="input-field" style="${fld} margin-top:.5rem;">${esc(t.textGu || "")}</textarea>
+      </div>`).join("");
+
+    list.innerHTML = `
+      <div class="card" style="padding:1.25rem; margin-bottom:1rem;">
+        <h3 style="margin:0 0 .75rem;">Hero stats</h3>
+        <div style="display:flex; gap:.75rem; flex-wrap:wrap;">
+          <label style="flex:1; min-width:140px; font-size:12px;">Students
+            <input value="${esc(c.hero.studentCount)}" onchange="websiteAdminUI.updateHero('studentCount', this.value)" class="input-field" style="${fld}" /></label>
+          <label style="flex:1; min-width:140px; font-size:12px;">Hours value
+            <input value="${esc(c.hero.hoursValue)}" onchange="websiteAdminUI.updateHero('hoursValue', this.value)" class="input-field" style="${fld}" /></label>
+          <label style="flex:1; min-width:140px; font-size:12px;">Google rating
+            <input value="${esc(c.hero.rating)}" onchange="websiteAdminUI.updateHero('rating', this.value)" class="input-field" style="${fld}" /></label>
+        </div>
+        <div style="display:flex; gap:.75rem; align-items:center; margin-top:.75rem; flex-wrap:wrap;">
+          <label style="font-size:13px; display:flex; gap:.4rem; align-items:center; cursor:pointer;">
+            <input type="checkbox" ${c.hero.boysBadgeOn ? "checked" : ""} onchange="websiteAdminUI.updateHero('boysBadgeOn', this.checked)" style="width:16px; height:16px;" />
+            Show boys-only badge in hero</label>
+          <input value="${esc(c.hero.boysBadgeText)}" onchange="websiteAdminUI.updateHero('boysBadgeText', this.value)" placeholder="Badge text" class="input-field" style="flex:1; min-width:180px;" />
+        </div>
+      </div>
+      <div class="card" style="padding:1.25rem; margin-bottom:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
+          <h3 style="margin:0;">Discipline cards</h3>
+          <button class="btn btn-secondary btn-sm" onclick="websiteAdminUI.addDiscipline()">+ Add</button>
+        </div>${discHtml || `<div style="color:var(--text-muted); font-size:13px;">No cards.</div>`}
+      </div>
+      <div class="card" style="padding:1.25rem; margin-bottom:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
+          <h3 style="margin:0;">FAQs</h3>
+          <button class="btn btn-secondary btn-sm" onclick="websiteAdminUI.addFaq()">+ Add</button>
+        </div>${faqHtml || `<div style="color:var(--text-muted); font-size:13px;">No FAQs.</div>`}
+      </div>
+      <div class="card" style="padding:1.25rem; margin-bottom:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
+          <h3 style="margin:0;">Reviews (boys only)</h3>
+          <button class="btn btn-secondary btn-sm" onclick="websiteAdminUI.addTestimonial()">+ Add</button>
+        </div>${testHtml || `<div style="color:var(--text-muted); font-size:13px;">No reviews.</div>`}
+      </div>`;
+  },
+
+  updateHero(field, value) {
+    if (!this.data.content) this.data.content = cloneContent();
+    this.data.content.hero[field] = value;
+  },
+  updateDiscipline(i, field, value) {
+    const d = (this.data.content.disciplines || [])[i];
+    if (d) d[field] = String(value);
+  },
+  addDiscipline() {
+    this.data.content.disciplines.push({ id: "d" + Date.now(), title: "", desc: "" });
+    this.renderContent();
+  },
+  removeDiscipline(i) {
+    this.data.content.disciplines.splice(i, 1);
+    this.renderContent();
+  },
+  updateFaq(i, field, value) {
+    const f = (this.data.content.faqs || [])[i];
+    if (f) f[field] = String(value);
+  },
+  addFaq() {
+    this.data.content.faqs.push({ id: "q" + Date.now(), q: "", a: "" });
+    this.renderContent();
+  },
+  removeFaq(i) {
+    this.data.content.faqs.splice(i, 1);
+    this.renderContent();
+  },
+  updateTestimonial(i, field, value) {
+    const t = (this.data.content.testimonials || [])[i];
+    if (!t) return;
+    t[field] = field === "stars" ? Math.max(1, Math.min(5, Number(value) || 5)) : String(value);
+  },
+  addTestimonial() {
+    this.data.content.testimonials.push({ id: "t" + Date.now(), name: "", exam: "", stars: 5, text: "", textGu: "" });
+    this.renderContent();
+  },
+  removeTestimonial(i) {
+    this.data.content.testimonials.splice(i, 1);
+    this.renderContent();
   },
 
   // ==================== TAB 1: SERVICES (FACILITIES) ====================
@@ -1267,7 +1446,8 @@ export const websiteAdminUI = {
       // Write/channel 400. Fail fast with a human message instead.
       const approxBytes = JSON.stringify({
         services: this.data.services,
-        features: this.data.features
+        features: this.data.features,
+        content: this.data.content
       }).length;
       if (approxBytes > 900000) {
         const msg = `Website content is ~${Math.round(approxBytes / 1024)}KB — over Firestore's ~1MB per-document limit. Remove or Reset some photos, then save again. Nothing was written.`;
@@ -1279,6 +1459,7 @@ export const websiteAdminUI = {
       await setDoc(docRef, {
         services: this.data.services,
         features: this.data.features,
+        content: this.data.content,
         updatedAt: new Date().toISOString()
       });
 
@@ -1290,7 +1471,7 @@ export const websiteAdminUI = {
       }
 
       if (typeof window.showToast === "function") {
-        window.showToast("Services, features & plans saved! Public website updated live.", "success");
+        window.showToast("Services, features, content & plans saved! Public website updated live.", "success");
       } else {
         alert("Website content saved successfully! Changes are live on the website.");
       }
