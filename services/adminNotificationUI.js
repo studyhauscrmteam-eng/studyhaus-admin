@@ -78,14 +78,14 @@ window.__paintNotifBadges = (n) => { paintBell(n); paintTab(n); };
 const fmtWhen = (r) => {
   try {
     const v = r.createdAt;
-    if (!v) return "Just now";
+    if (!v) return "Date unavailable";
     const t = typeof v.toMillis === "function" ? v.toMillis()
       : typeof v.seconds === "number" ? v.seconds * 1000
         : (typeof v === "string" || v instanceof Date ? new Date(v).getTime() : NaN);
     // Never render "Invalid Date" — say so plainly instead.
     return Number.isFinite(t) ? new Date(t).toLocaleString() : "Date unavailable";
   } catch (_) {
-    return "Just now";
+    return "Date unavailable";
   }
 };
 
@@ -175,14 +175,11 @@ const historyHtml = () => {
  */
 const alertsHtml = () => {
   const all = window.__pendingAdmissions || [];
-  // Dismissed (clicked) alerts stay in the queue but leave the list, exactly
-  // like every other notification. Items acknowledged by merely opening the
-  // Notifications page stay visible for that visit (session) so they can
-  // still be tapped through to Pending approval. The applicant is untouched.
-  const session = new Set(
-    Array.isArray(window.__notifSession) ? window.__notifSession.map(String) : []
-  );
-  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`) || session.has(`adm_${r.id}`));
+  // Clicked alerts leave the list (exactly like every other notification) —
+  // but ONLY the clicked one. Merely opening the Notifications page clears
+  // the badges (seen-state) and never dismisses alerts. The applicant is
+  // untouched until Approved/Rejected in Pending approval.
+  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`));
   const decided = historyHtml();
   if (pending.length === 0) return decided;
   // Plain cards like every other notification: no Review button, the whole
@@ -242,15 +239,37 @@ export const initAdminNotificationUI = () => {
       (snap) => {
         const live = new Set();
         const fresh = [];
+        const allNew = [];
         snap.forEach((d) => {
           const v = d.data() || {};
           if ((v.leadStatus || "New") !== "New") return;
           live.add(d.id);
+          allNew.push({ id: d.id, ...v });
           if (knownLeads && !knownLeads.has(d.id)) fresh.push({ id: d.id, ...v });
         });
         const first = knownLeads === null;
         knownLeads = live;
-        if (first || fresh.length === 0) return;
+        // The list is the LIVE New-lead queue (not just arrivals this session),
+        // so an enquiry stays until it is Converted/Closed or clicked away.
+        // Clicked-away leads stay gone via the shared read-state (sys_lead_*).
+        window.__leadNotifs = allNew
+          .sort((a, b) => {
+            const ta = (a.createdAt && (a.createdAt.seconds || 0)) || 0;
+            const tb = (b.createdAt && (b.createdAt.seconds || 0)) || 0;
+            return tb - ta;
+          })
+          .slice(0, 20)
+          .map((v) => ({
+            id: "lead_" + v.id,
+            type: "new-lead",
+            title: "New website enquiry",
+            body: `${v.visitorName || ""}${v.phone ? " · " + v.phone : ""}${v.planName ? " · " + v.planName : ""}`,
+            createdAt: v.createdAt,
+          }));
+        if (first || fresh.length === 0) {
+          if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+          return;
+        }
 
         beep();
         const n = fresh[0];
@@ -261,16 +280,6 @@ export const initAdminNotificationUI = () => {
             "info"
           );
         }
-        window.__leadNotifs = [
-          ...fresh.map((v) => ({
-            id: "lead_" + v.id,
-            type: "new-lead",
-            title: "New website enquiry",
-            body: `${v.visitorName || ""}${v.phone ? " · " + v.phone : ""}${v.planName ? " · " + v.planName : ""}`,
-            createdAt: v.createdAt,
-          })),
-          ...(window.__leadNotifs || []),
-        ].slice(0, 20);
         if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
       },
       (e) => console.error("[notifications] lead watch failed:", e?.message || e)

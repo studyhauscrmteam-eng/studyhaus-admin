@@ -14,11 +14,11 @@ let layoutEditMode = false;
 let dragSeatId = null;
 
 // ── Seat naming helpers ─────────────────────────────────────────────────────
-// The physical room layouts below are hardcoded for seats named A1..A68
-// (Ground Floor) and B1..B40 (First Floor). Imported floors may use other
-// naming schemes (e.g. "2".."40" or "R1".."R20") — those must fall back to
-// the generic responsive grid so every real seat is still rendered.
-const AB_SEAT_PATTERN = /^[AB]\d+$/;
+// Plain numbers only: Ground 1-68, First 1-40. Floor disambiguates duplicates.
+// Legacy "A20"/"B15" docs are migrated by cleanupNonPlanSeats; anything
+// non-numeric (e.g. "R1") falls back to the generic responsive grid.
+const AB_SEAT_PATTERN = /^\d+$/;
+const NUMERIC_SEAT_PATTERN = /^\d+$/;
 
 // Numeric-aware ordering so seats sort naturally:
 //   2, 3, ..., 10, ..., 40  and  R1, R2, ..., R5, ..., R9, R10, ..., R20
@@ -29,11 +29,15 @@ const compareSeatNumbers = (a, b) =>
     sensitivity: "base",
   });
 
-// Rule 1 — normalize seat names before matching (DB "A01" vs layout "A1")
+// Rule 1 — normalize seat names before matching ("A20"/"20A"/"01" -> "20")
 const normalizeSeatNumber = (value) => {
   const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
-  const m = raw.match(/^([A-Z]+)-?0*(\d+)$/);
-  return m ? `${m[1]}${Number(m[2])}` : raw;
+  if (!raw) return "";
+  const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+  if (m) return String(Number(m[1]));
+  const m2 = raw.match(/^([A-Z]+)-?0*(\d+)$/);
+  if (m2) return String(Number(m2[2]));
+  return raw;
 };
 
 const findSeatByLayoutName = (floorSeats, seatNumStr) => {
@@ -60,15 +64,16 @@ const seatPalette = (status) => {
   return { bg: "var(--bg-hover)", border: "1px dashed var(--border-bright)", color: "var(--text-muted)" };
 };
 
-// True when this floor's seats are A/B-named, i.e. the hardcoded room layout
+// True when this floor's seats are plain numbers, i.e. the hardcoded room layout
 // can be painted. An empty floor keeps the existing (placeholder) layout so
 // current behaviour is unchanged when no seats exist yet; any floor with seats
-// that are not ALL A/B-named renders the generic grid instead.
+// that are not ALL numeric renders the generic grid instead.
 const shouldUseABLayout = (seats) => {
   if (!Array.isArray(seats) || seats.length === 0) return true;
-  const firstIsAB = AB_SEAT_PATTERN.test(String(seats[0] && seats[0].seatNumber));
-  if (!firstIsAB) return false;
-  return seats.every(s => AB_SEAT_PATTERN.test(String(s && s.seatNumber)));
+  const norm = (s) => normalizeSeatNumber(s && s.seatNumber);
+  const firstIsNum = NUMERIC_SEAT_PATTERN.test(norm(seats[0]));
+  if (!firstIsNum) return false;
+  return seats.every(s => NUMERIC_SEAT_PATTERN.test(norm(s)));
 };
 
 // Unsubscribe for the signup/check-in picker's live seat listener — this init
@@ -126,12 +131,12 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
         return;
       }
 
-      const generateRange = (prefix, start, end) => {
+      const generateRange = (_prefix, start, end) => {
         const arr = [];
         if (start <= end) {
-          for (let i = start; i <= end; i++) arr.push(`${prefix}${i}`);
+          for (let i = start; i <= end; i++) arr.push(String(i));
         } else {
-          for (let i = start; i >= end; i--) arr.push(`${prefix}${i}`);
+          for (let i = start; i >= end; i--) arr.push(String(i));
         }
         return arr;
       };
@@ -185,15 +190,15 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
         return colHtml;
       };
 
-      const groundCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(n => 'A' + n);
-      const groundCol2 = [null, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 67, 23, 22, 21, 20, 19].map(n => n ? 'A' + n : null);
-      const groundCol3 = [null, 35, 36, null, 37, 38, 39, 40, 41, 42, null, 43, 68, 44, 45, 46, 47, 48].map(n => n ? 'A' + n : null);
-      const groundCol4 = [66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49].map(n => 'A' + n);
+      const groundCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(n => String(n));
+      const groundCol2 = [null, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 67, 23, 22, 21, 20, 19].map(n => n ? String(n) : null);
+      const groundCol3 = [null, 35, 36, null, 37, 38, 39, 40, 41, 42, null, 43, 68, 44, 45, 46, 47, 48].map(n => n ? String(n) : null);
+      const groundCol4 = [66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49].map(n => String(n));
 
-      const firstCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, null].map(n => n ? 'B' + n : null);
-      const firstCol2 = [null, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11].map(n => n ? 'B' + n : null);
-      const firstCol3 = [null, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map(n => n ? 'B' + n : null);
-      const firstCol4 = [40, 39, 38, 37, 36, 35, 34, 33, 32, 31, null].map(n => n ? 'B' + n : null);
+      const firstCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, null].map(n => n ? String(n) : null);
+      const firstCol2 = [null, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11].map(n => n ? String(n) : null);
+      const firstCol3 = [null, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map(n => n ? String(n) : null);
+      const firstCol4 = [40, 39, 38, 37, 36, 35, 34, 33, 32, 31, null].map(n => n ? String(n) : null);
 
       // Generic responsive grid — every seat of this floor, natural order,
       // existing status colors and the existing "pickable" (Available only)
@@ -495,7 +500,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
       <!-- Main Floor Card -->
       <div class="card" style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:2rem;">
         <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:4px;" id="current-floor-title" data-i18n="floor.ground">Ground Floor</h3>
-        <p style="font-size:13px; color:var(--text-muted); margin-bottom:1.5rem;">Section A · Section B · click a seat to manage it</p>
+        <p style="font-size:13px; color:var(--text-muted); margin-bottom:1.5rem;">Plain seat numbers · click a seat to manage it</p>
         
         <div id="seat-grid">
           <div style="text-align:center; padding:2rem; color:var(--text-muted);">Loading live seat map...</div>
@@ -870,16 +875,16 @@ const updateSeatAnalysis = (seats) => {
     });
 
     // Spec layout names — also used to infer positions for backend docs that
-    // predate col/row, and to know structural gaps (nulls).
-    const groundCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(n => 'A' + n);
-    const groundCol2 = [null, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 67, 23, 22, 21, 20, 19].map(n => n ? 'A' + n : null);
-    const groundCol3 = [null, 35, 36, null, 37, 38, 39, 40, 41, 42, null, 43, 68, 44, 45, 46, 47, 48].map(n => n ? 'A' + n : null);
-    const groundCol4 = [66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49].map(n => 'A' + n);
+    // predate col/row, and to know structural gaps (nulls). Plain numbers now.
+    const groundCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(n => String(n));
+    const groundCol2 = [null, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 67, 23, 22, 21, 20, 19].map(n => n ? String(n) : null);
+    const groundCol3 = [null, 35, 36, null, 37, 38, 39, 40, 41, 42, null, 43, 68, 44, 45, 46, 47, 48].map(n => n ? String(n) : null);
+    const groundCol4 = [66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49].map(n => String(n));
 
-    const firstCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, null].map(n => n ? 'B' + n : null);
-    const firstCol2 = [null, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11].map(n => n ? 'B' + n : null);
-    const firstCol3 = [null, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map(n => n ? 'B' + n : null);
-    const firstCol4 = [40, 39, 38, 37, 36, 35, 34, 33, 32, 31, null].map(n => n ? 'B' + n : null);
+    const firstCol1 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, null].map(n => n ? String(n) : null);
+    const firstCol2 = [null, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11].map(n => n ? String(n) : null);
+    const firstCol3 = [null, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map(n => n ? String(n) : null);
+    const firstCol4 = [40, 39, 38, 37, 36, 35, 34, 33, 32, 31, null].map(n => n ? String(n) : null);
 
     const specCols = currentFilters.floor === "First Floor"
       ? [firstCol1, firstCol2, firstCol3, firstCol4]

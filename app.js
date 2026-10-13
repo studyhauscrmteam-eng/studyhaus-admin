@@ -72,17 +72,12 @@ function navigate(page) {
     window.__renderAnalytics();
   }
 
-  // Visit-to-clear notifications: entering the Notifications page
-  // acknowledges everything on sight (bell, sidebar and tab badges drop —
-  // the renderer does the ack), leaving it ends that visit's session so the
-  // next visit shows only what arrived since. No buttons involved.
+  // Notifications: entering the page marks everything on sight as seen
+  // (bell, sidebar and tab badges drop — the renderer does the ack).
+  // Cards are dismissed ONLY by tapping them one by one, so leaving the page
+  // must not clear anything — untapped cards stay until tapped. No buttons.
   try {
     if (page === 'notifications') {
-      if (typeof window.__refreshNotifBadges === 'function') {
-        setTimeout(() => { try { window.__refreshNotifBadges(); } catch (_) {} }, 0);
-      }
-    } else if (Array.isArray(window.__notifSession) && window.__notifSession.length) {
-      window.__notifSession = [];
       if (typeof window.__refreshNotifBadges === 'function') {
         setTimeout(() => { try { window.__refreshNotifBadges(); } catch (_) {} }, 0);
       }

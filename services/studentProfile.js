@@ -683,7 +683,7 @@ const renderProfileModal = (s, role) => {
 
             <div class="form-group">
               <label>Seat</label>
-              <input type="text" id="edit-seat" value="${escAttr(s.seatNumber || s.seatAssigned || '')}" placeholder="e.g. A17" ${!canEdit ? 'disabled' : ''} />
+              <input type="text" id="edit-seat" value="${escAttr(s.seatNumber || s.seatAssigned || '')}" placeholder="e.g. 20" ${!canEdit ? 'disabled' : ''} />
             </div>
             <div class="form-group">
               <label>Payment Method</label>

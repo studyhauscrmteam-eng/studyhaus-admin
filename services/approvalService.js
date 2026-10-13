@@ -6,21 +6,55 @@ import { db } from "../firebase/firebase.js";
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Locate a seat by its number. Doc ids are now deterministic
- * (`seats/A17` === seatNumber), but legacy auto-keyed seats still exist, so
- * fall back to a seatNumber query when the direct read misses.
+ * Locate a seat by its number (plain "20", legacy "A20" also accepted).
+ * New deterministic ids are floor-aware ("ground-20"/"first-20"); legacy
+ * "A20"-style ids still resolve via direct read for backward compatibility.
+ * Optional floorHint disambiguates duplicate numbers across floors.
  * @returns {{ref: any, data: Object}|null}
  */
-const findSeat = async (seatNumber) => {
+const stripSeatPlain = (v) => {
+  const raw = String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
+  const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+  if (m) return String(Number(m[1]));
+  return String(v);
+};
+const findSeat = async (seatNumber, floorHint = "") => {
+  const plain = stripSeatPlain(seatNumber);
+  // Try deterministic + legacy direct ids first.
+  const candidates = [String(seatNumber)];
+  if (floorHint) {
+    candidates.unshift(floorHint === "First Floor" ? `first-${plain}` : `ground-${plain}`);
+  } else {
+    candidates.push(`ground-${plain}`, `first-${plain}`);
+  }
+  for (const id of candidates) {
+    try {
+      const ref = doc(db, "seats", id);
+      const snap = await getDoc(ref);
+      if (snap.exists()) return { ref, data: snap.data() };
+    } catch (_) { /* try next */ }
+  }
   try {
-    const directRef = doc(db, "seats", seatNumber);
-    const snap = await getDoc(directRef);
-    if (snap.exists()) return { ref: directRef, data: snap.data() };
-  } catch (_) { /* fall through to the query */ }
-  try {
-    const q = query(collection(db, "seats"), where("seatNumber", "==", seatNumber));
+    const q = query(collection(db, "seats"), where("seatNumber", "==", plain));
     const snap = await getDocs(q);
-    if (!snap.empty) return { ref: snap.docs[0].ref, data: snap.docs[0].data() };
+    if (snap.empty) {
+      // Legacy docs may still carry "A20" — try the raw value too.
+      if (String(seatNumber) !== plain) {
+        const q2 = query(collection(db, "seats"), where("seatNumber", "==", String(seatNumber)));
+        const s2 = await getDocs(q2);
+        if (!s2.empty) {
+          const pick = floorHint
+            ? (s2.docs.find(d => ((d.data() || {}).floor || "") === floorHint) || s2.docs[0])
+            : s2.docs[0];
+          return { ref: pick.ref, data: pick.data() };
+        }
+      }
+      return null;
+    }
+    const pick = floorHint
+      ? (snap.docs.find(d => ((d.data() || {}).floor || "Ground Floor") === floorHint) || snap.docs[0])
+      : snap.docs[0];
+    return { ref: pick.ref, data: pick.data() };
   } catch (_) { /* no seat doc — nothing to resolve */ }
   return null;
 };
@@ -33,16 +67,18 @@ const findSeat = async (seatNumber) => {
  */
 const resolveSeat = async (data) => {
   let seatNumber = String(data.seatAssigned || data.seatNumber || "").trim();
-  if (!seatNumber || seatNumber === "undefined") return { number: "", allowed: false };
+  if (!seatNumber || seatNumber === "undefined") return { number: "", floor: "", allowed: false };
 
   if (data.planId) {
     try {
       const { planAllowsSeatSelection } = await import("./planValidation.js");
       const allowed = await planAllowsSeatSelection(data.planId);
-      if (!allowed) return { number: "", allowed: false };
+      if (!allowed) return { number: "", floor: "", allowed: false };
     } catch (_) { /* fail open only when the plan can't be read */ }
   }
-  return { number: seatNumber, allowed: true };
+  seatNumber = stripSeatPlain(seatNumber);
+  const floor = data.seatFloor || data.seatfloor || "";
+  return { number: seatNumber, floor, allowed: true };
 };
 
 /**
@@ -188,7 +224,10 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
     payload.studentId = data.studentId || "";
     payload.admissionNo = data.admissionNo || data.studentId || "";
   }
-  if (seat.allowed) payload.seatNumber = seat.number;
+  if (seat.allowed) {
+    payload.seatNumber = seat.number;
+    if (seat.floor) payload.seatFloor = seat.floor;
+  }
 
   // One transaction: the student flips to Active and the seat becomes
   // Occupied together — never one without the other.
@@ -196,29 +235,32 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
     const fresh = await tx.get(studentRef);
     if (!fresh.exists()) throw new Error("Admission record not found.");
 
-    // Read the seat BEFORE any write so a seat grabbed by someone else in
-    // the meantime fails cleanly instead of being stolen.
+    // Resolve the seat doc inside the txn (floor-aware, legacy-safe).
+    let seatRef = null;
     if (seat.allowed && seat.number) {
-      const seatRef = doc(db, "seats", seat.number);
-      const seatSnap = await tx.get(seatRef);
-      if (seatSnap.exists()) {
-        const sd = seatSnap.data() || {};
+      const found = await findSeat(seat.number, seat.floor);
+      if (found) {
+        seatRef = found.ref;
+        const sd = found.data || {};
         const holder = sd.assignedStudentId || "";
         const taken = sd.status === "Occupied" || sd.status === "Reserved";
         if (taken && holder && holder !== id) {
           throw new Error(`Seat ${seat.number} is already taken (${sd.assignedStudentName || holder}). Re-submit with a different seat.`);
         }
+      } else if (seat.floor) {
+        seatRef = doc(db, "seats", seat.floor === "First Floor" ? `first-${seat.number}` : `ground-${seat.number}`);
+      } else {
+        seatRef = doc(db, "seats", `ground-${seat.number}`);
       }
     }
 
     tx.update(studentRef, payload);
 
-    if (seat.allowed && seat.number) {
-      // Deterministic doc id: seats/A17 (doc id === seatNumber).
+    if (seat.allowed && seat.number && seatRef) {
       // merge:true preserves floor/col/row on the existing seat doc.
-      const seatRef = doc(db, "seats", seat.number);
       tx.set(seatRef, {
         seatNumber: seat.number,
+        ...(seat.floor ? { floor: seat.floor } : {}),
         status: "Occupied",
         assignedStudentId: id,
         assignedStudentName: data.name || "",
@@ -343,7 +385,7 @@ export const rejectAdmission = async (admissionId, reason) => {
     // student's seat, never touches an already-Occupied seat).
     const seatNumber = String(data.seatAssigned || data.seatNumber || "").trim();
     if (seatNumber && seatNumber !== "undefined") {
-      const seatDoc = await findSeat(seatNumber);
+      const seatDoc = await findSeat(seatNumber, data.seatFloor || "");
       if (seatDoc &&
           seatDoc.data.status === "Reserved" &&
           seatDoc.data.assignedStudentId === admissionId) {
@@ -416,7 +458,7 @@ export const dismissAdmission = async (admissionId) => {
 
     const seatNumber = String(data.seatAssigned || data.seatNumber || "").trim();
     if (seatNumber && seatNumber !== "undefined") {
-      const seatDoc = await findSeat(seatNumber);
+      const seatDoc = await findSeat(seatNumber, data.seatFloor || "");
       if (seatDoc &&
           seatDoc.data.status === "Reserved" &&
           seatDoc.data.assignedStudentId === admissionId) {

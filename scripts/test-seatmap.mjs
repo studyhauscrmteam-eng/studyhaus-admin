@@ -157,20 +157,20 @@ async function main() {
 
   /* 5 — selecting an Available seat writes the hidden inputs. */
   await expect("clicking an Available seat selects it", async () => {
-    await seatButton(page, "B1").first().click();
+    await seatButton(page, "1").first().click();
     const num = await page.inputValue("#selectedSeatNumber");
     const id = await page.inputValue("#selectedSeatId");
-    assert(num === "B1", `selectedSeatNumber was "${num}", expected "B1"`);
-    assert(id === "B1", `selectedSeatId was "${id}", expected "B1"`);
+    assert(num === "1", `selectedSeatNumber was "${num}", expected "1"`);
+    assert(id === "first-1", `selectedSeatId was "${id}", expected "first-1"`);
     const label = await page.textContent("#signup-selected-label");
-    assert(/B1/.test(label), "selection label did not update: " + label);
+    assert(/Seat 1 selected/.test(label), "selection label did not update: " + label);
   });
 
-  /* 6 — an Occupied seat must be refused. B7 is Occupied in the stub data. */
+  /* 6 — an Occupied seat must be refused. 7 is Occupied in the stub data. */
   await expect("clicking an Occupied seat is refused", async () => {
-    await seatButton(page, "B7").first().click();
+    await seatButton(page, "7").first().click();
     const num = await page.inputValue("#selectedSeatNumber");
-    assert(num === "B1", `occupied seat overwrote the selection (got "${num}")`);
+    assert(num === "1", `occupied seat overwrote the selection (got "${num}")`);
   });
 
   /* Back to Ground Floor — re-render must keep working after a floor switch. */

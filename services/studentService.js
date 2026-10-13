@@ -134,25 +134,44 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
       );
     }
 
-    // 1. Free the seat (if one is assigned)
-    const seatNo = data.seatNumber || data.seatAssigned || "";
-    if (seatNo) {
-      try {
-        const seatSnap = await getDocs(query(collection(db, "seats"), where("seatNumber", "==", seatNo)));
-        for (const d of seatSnap.docs) {
-          const sd = d.data() || {};
-          if (!sd.assignedStudentId || sd.assignedStudentId === studentId) {
-            await updateDoc(d.ref, {
-              status: "Available",
-              assignedStudentId: null,
-              assignedStudentName: null,
-              planType: null,
-              lastUpdated: serverTimestamp()
-            });
-          }
+    // 1. Free the seat (if one is assigned) — legacy A/B safe + holder-safe
+    try {
+      const heldSnap = await getDocs(query(collection(db, "seats"), where("assignedStudentId", "==", studentId)));
+      for (const d of heldSnap.docs) {
+        await updateDoc(d.ref, {
+          status: "Available",
+          assignedStudentId: null,
+          assignedStudentName: null,
+          planType: null,
+          lastUpdated: serverTimestamp()
+        });
+      }
+      const seatNo = data.seatNumber || data.seatAssigned || "";
+      if (seatNo) {
+        const stripPlain = (v) => {
+          const raw = String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
+          const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+          return m ? String(Number(m[1])) : String(v);
+        };
+        for (const key of [String(seatNo), stripPlain(seatNo)]) {
+          try {
+            const seatSnap = await getDocs(query(collection(db, "seats"), where("seatNumber", "==", key)));
+            for (const d of seatSnap.docs) {
+              const sd = d.data() || {};
+              if (!sd.assignedStudentId || sd.assignedStudentId === studentId) {
+                await updateDoc(d.ref, {
+                  status: "Available",
+                  assignedStudentId: null,
+                  assignedStudentName: null,
+                  planType: null,
+                  lastUpdated: serverTimestamp()
+                });
+              }
+            }
+          } catch (_) { /* best-effort */ }
         }
-      } catch (_) { /* seat release is best-effort */ }
-    }
+      }
+    } catch (_) { /* seat release is best-effort */ }
 
     // 2. History collections: tag or wipe
     const historyCols = ["payments", "attendance", "complaints", "renewals", "documents"];
@@ -367,26 +386,40 @@ export const updateStudentProfile = async (studentId, updates) => {
             }
           }
           
-          // 2. Reserve new seat (name normalized so "A01" finds "A1" instead
-          // of cloning a duplicate; deterministic ID as final backstop)
+          // 2. Reserve new seat (plain numbers: "A20" -> "20"; floor-aware so
+          // duplicate 20s on different floors don't collide)
           if (updates.seatNumber) {
-            const normedSeat = String(updates.seatNumber).trim().toUpperCase().replace(/\s+/g, "").replace(/^([A-Z]+)-?0*(\d+)$/, (_, p, n) => `${p}${Number(n)}`);
+            const stripPlain = (v) => {
+              const raw = String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
+              const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+              if (m) return String(Number(m[1]));
+              const m2 = raw.match(/^([A-Z]+)-?0*(\d+)$/);
+              if (m2) return String(Number(m2[2]));
+              return raw;
+            };
+            const normedSeat = stripPlain(updates.seatNumber);
+            const legacyFloor = (() => {
+              const raw = String(updates.seatNumber).trim().toUpperCase().replace(/\s+/g, "");
+              if (/^B\d/.test(raw) || /\dB$/.test(raw)) return "First Floor";
+              return null;
+            })();
+            const floor = updates.seatFloor || oldData.seatFloor || legacyFloor || "Ground Floor";
             const qNew = query(seatsRef, where("seatNumber", "==", normedSeat));
             const newSnap = await getDocs(qNew);
-            if (!newSnap.empty) {
-              await updateDoc(doc(db, "seats", newSnap.docs[0].id), {
+            const floorMatch = newSnap.docs.find(d => ((d.data() || {}).floor || "Ground Floor") === floor)
+              || (newSnap.docs.length === 1 ? newSnap.docs[0] : null);
+            if (floorMatch) {
+              await updateDoc(doc(db, "seats", floorMatch.id), {
                 status: "Reserved",
                 assignedStudentId: studentId,
                 assignedStudentName: updates.name || oldData.name || "Unknown",
                 planType: updates.planName || oldData.planName || "Unknown",
                 lastUpdated: serverTimestamp()
               });
-            } else {
-              // Create the seat if it doesn't exist
-              let floor = "Ground Floor";
-              if (normedSeat.startsWith("B")) floor = "First Floor";
-
-              await setDoc(doc(seatsRef, normedSeat), {
+            } else if (newSnap.empty) {
+              // Create the seat if it doesn't exist (deterministic floor-aware id)
+              const docId = (floor === "First Floor" ? `first-${normedSeat}` : `ground-${normedSeat}`);
+              await setDoc(doc(seatsRef, docId), {
                 seatNumber: normedSeat,
                 floor: floor,
                 status: "Reserved",
@@ -397,6 +430,7 @@ export const updateStudentProfile = async (studentId, updates) => {
               });
             }
             updates.seatNumber = normedSeat;
+            updates.seatFloor = floor;
           }
         }
       }

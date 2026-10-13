@@ -19,22 +19,20 @@ const getTodayStr = () => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
 };
 
-// NOTE: NO zero-padding — matches Firestore seat numbers exactly ("A1", "A34", not "A01")
-const generateRange = (prefix, start, end) => {
+// NOTE: NO zero-padding — matches Firestore seat numbers exactly ("1", "34", not "01")
+const generateRange = (_prefix, start, end) => {
   const arr = [];
   if (start <= end) {
-    for (let i = start; i <= end; i++) arr.push(`${prefix}${i}`);
+    for (let i = start; i <= end; i++) arr.push(String(i));
   } else {
-    for (let i = start; i >= end; i--) arr.push(`${prefix}${i}`);
+    for (let i = start; i >= end; i--) arr.push(String(i));
   }
   return arr;
 };
 
 // ── Seat naming helpers ─────────────────────────────────────────────────────
-// The hardcoded room layouts below only cover A1..A68 / B1..B40. Imported
-// floors may use other names (e.g. "2".."40" or "R1".."R20") — those fall
-// back to a generic grid so every real seat still renders.
-const AB_SEAT_PATTERN = /^[AB]\d+$/;
+// Plain numbers only: Ground 1-68, First 1-40.
+const AB_SEAT_PATTERN = /^\d+$/;
 
 // Numeric-aware ordering: 2,3,...,10,...,40 and R1,R2,...,R9,R10,...,R20
 // (so "R10" sorts after "R9" instead of lexically before it).
@@ -44,20 +42,25 @@ const compareSeatNumbers = (a, b) =>
     sensitivity: "base",
   });
 
-// True when this floor's seats are A/B-named (hardcoded layout applies).
+// True when this floor's seats are plain numbers (hardcoded layout applies).
 // An empty floor keeps the existing placeholder layout (unchanged behaviour).
 const shouldUseABLayout = (seats) => {
   if (!Array.isArray(seats) || seats.length === 0) return true;
-  const firstIsAB = AB_SEAT_PATTERN.test(String(seats[0] && seats[0].seatNumber));
-  if (!firstIsAB) return false;
-  return seats.every(s => AB_SEAT_PATTERN.test(String(s && s.seatNumber)));
+  const norm = (s) => normalizeSeatNumber(s && s.seatNumber);
+  const firstIsNum = AB_SEAT_PATTERN.test(norm(seats[0]));
+  if (!firstIsNum) return false;
+  return seats.every(s => AB_SEAT_PATTERN.test(norm(s)));
 };
 
-// Rule 1 — normalize seat names before matching (DB "A01" vs layout "A1")
+// Rule 1 — normalize seat names before matching ("A20"/"20A"/"01" -> "20")
 const normalizeSeatNumber = (value) => {
   const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
-  const m = raw.match(/^([A-Z]+)-?0*(\d+)$/);
-  return m ? `${m[1]}${Number(m[2])}` : raw;
+  if (!raw) return "";
+  const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+  if (m) return String(Number(m[1]));
+  const m2 = raw.match(/^([A-Z]+)-?0*(\d+)$/);
+  if (m2) return String(Number(m2[2]));
+  return raw;
 };
 
 // Theme-aware status colors — mirrors seatMapUI's palette so the live map
@@ -191,7 +194,7 @@ export const initLiveSeatMapInTab = (containerId) => {
     <!-- Main Floor Card — identical structure to regular Seat Map -->
     <div class="card" style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:1.5rem; margin-bottom:2rem; overflow-x:auto;">
       <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:4px;" id="live-floor-title" data-i18n="floor.ground">Ground Floor</h3>
-      <p style="font-size:13px; color:var(--text-muted); margin-bottom:1.5rem;">Section A · Section B · hover a seat to see who is present</p>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:1.5rem;">Plain seat numbers · hover a seat to see who is present</p>
       <div id="live-seat-grid">
         <div style="text-align:center; padding:3rem; color:var(--text-muted);">Connecting to live stream...</div>
       </div>
@@ -302,8 +305,14 @@ const renderLiveMap = () => {
   // ── Single seat card — attendance wins, else live seat status shows ──
   const renderSeatCard = (seat) => {
     const seatNumStr = seat.seatNumber;
-    const att = activeAttendance.find(a =>
-      normalizeSeatNumber(a.seatNumber) === normalizeSeatNumber(seatNumStr));
+    const seatFloor = seat.floor || currentFloor;
+    const att = activeAttendance.find(a => {
+      if (normalizeSeatNumber(a.seatNumber) !== normalizeSeatNumber(seatNumStr)) return false;
+      // When the attendance record carries a floor, it must match the seat's
+      // floor — otherwise duplicate plain numbers (20 on both floors) collide.
+      if (a.seatFloor) return (a.seatFloor || "") === seatFloor;
+      return true;
+    });
 
     if (att) {
       // PRESENT — show photo or colored initial avatar
@@ -420,7 +429,7 @@ const renderLiveMap = () => {
     [40,39,38,37,36,35,34,33,32,31,null],
   ];
   const specCols = currentFloor === "First Floor" ? firstSpec : groundSpec;
-  const specName = (n) => (currentFloor === "First Floor" ? "B" : "A") + n;
+  const specName = (n) => String(n);
 
   floorSeats.forEach(seat => {
     if (place(seat)) return;

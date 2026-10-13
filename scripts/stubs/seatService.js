@@ -3,14 +3,14 @@
  * data with NO Firestore, so the render test exercises the real seatMapUI
  * code (layout, palette, normalisation, selection) against real data.
  *
- * 108 seats: A1-A68 (Ground Floor) + B1-B40 (First Floor), matching the live
+ * 108 seats: 1-68 (Ground Floor) + 1-40 (First Floor), matching the live
  * collection exactly, including a couple of Occupied rows.
  */
 const seats = [];
 for (let i = 1; i <= 68; i++) {
   seats.push({
-    id: `A${i}`,
-    seatNumber: `A${i}`,
+    id: `ground-${i}`,
+    seatNumber: `${i}`,
     floor: "Ground Floor",
     col: i,
     row: 1,
@@ -21,8 +21,8 @@ for (let i = 1; i <= 68; i++) {
 }
 for (let i = 1; i <= 40; i++) {
   seats.push({
-    id: `B${i}`,
-    seatNumber: `B${i}`,
+    id: `first-${i}`,
+    seatNumber: `${i}`,
     floor: "First Floor",
     col: i,
     row: 1,

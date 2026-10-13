@@ -7,8 +7,12 @@ import { validateSeatAssignment } from "./seatValidation.js";
 // ===============================================
 
 // ── Library room plan: exact spec positions (col 1-4, row 1-based) ──────────
-// Ground Floor 4 cols × 18 rows (A1-A68), First Floor 4 cols × 11 rows (B1-B40).
+// Ground Floor 4 cols × 18 rows (1-68), First Floor 4 cols × 11 rows (1-40).
+// seatNumber is ALWAYS the plain number ("20", never "A20"). Floor disambiguates
+// duplicates: doc id = "ground-20" / "first-20", key = "Ground Floor||20".
 // Used to seed col/row so the map is data-driven but looks identical.
+export const GROUND_SEAT_COUNT = 68;
+export const FIRST_SEAT_COUNT = 40;
 const GROUND_COLS_RAW = [
   [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18],
   [null,34,33,32,31,30,29,28,27,26,25,24,67,23,22,21,20,19],
@@ -22,45 +26,85 @@ const FIRST_COLS_RAW = [
   [40,39,38,37,36,35,34,33,32,31,null],
 ];
 
+/** Plain-number normaliser: "A20"/"B07"/"20A"/" A 01 " -> "20". Legacy-safe. */
+export const normalizeSeatNumberPlain = (value) => {
+  const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
+  if (!raw) return "";
+  // Strip one leading and/or trailing A/B (old prefix scheme + reported suffix form)
+  const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+  if (m) return String(Number(m[1]));
+  const m2 = raw.match(/^([A-Z]+)-?0*(\d+)$/);
+  if (m2) return String(Number(m2[2]));
+  return raw;
+};
+
+/** Floor-aware key: "Ground Floor||20". Identity = number + floor. */
+export const seatKey = (floor, number) =>
+  `${String(floor || "Ground Floor")}||${normalizeSeatNumberPlain(number)}`;
+
+/** Deterministic doc id for the new scheme: "ground-20" / "first-20". */
+export const docIdForSeat = (floor, number) => {
+  const n = normalizeSeatNumberPlain(number);
+  return (String(floor) === "First Floor" ? `first-${n}` : `ground-${n}`);
+};
+
+/** Floor from a legacy A/B name ("A20"->Ground, "B15"->First), else null. */
+export const legacyFloorForName = (value) => {
+  const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
+  if (/^B\d/.test(raw) || /\dB$/.test(raw)) return "First Floor";
+  if (/^A\d/.test(raw) || /\dA$/.test(raw)) return "Ground Floor";
+  return null;
+};
+
+export const maxSeatForFloor = (floor) =>
+  String(floor) === "First Floor" ? FIRST_SEAT_COUNT : GROUND_SEAT_COUNT;
+
+export const isValidSeatForFloor = (number, floor) => {
+  const n = Number(normalizeSeatNumberPlain(number));
+  return Number.isInteger(n) && n >= 1 && n <= maxSeatForFloor(floor);
+};
+
 const PLAN_POSITION = (() => {
   const m = new Map();
   GROUND_COLS_RAW.forEach((colArr, ci) => {
     colArr.forEach((n, ri) => {
       if (n == null) return;
-      m.set(`A${n}`, { floor: "Ground Floor", col: ci + 1, row: ri + 1 });
+      m.set(seatKey("Ground Floor", n), { floor: "Ground Floor", col: ci + 1, row: ri + 1 });
     });
   });
   FIRST_COLS_RAW.forEach((colArr, ci) => {
     colArr.forEach((n, ri) => {
       if (n == null) return;
-      m.set(`B${n}`, { floor: "First Floor", col: ci + 1, row: ri + 1 });
+      m.set(seatKey("First Floor", n), { floor: "First Floor", col: ci + 1, row: ri + 1 });
     });
   });
   return m;
 })();
+
+export const planPositionFor = (floor, number) => PLAN_POSITION.get(seatKey(floor, number)) || null;
 
 export const seedInitialSeats = async () => {
   const seatsRef = collection(db, "seats");
   const snap = await getDocs(seatsRef);
 
   if (snap.empty) {
-    console.log("Seeding library seat plan: A1-A68 Ground Floor, B1-B40 First Floor...");
+    console.log("Seeding library seat plan: 1-68 Ground Floor, 1-40 First Floor...");
     // Single batched write (was 108 sequential round-trips) — the map
     // appears in about a second instead of hanging on "0 seats".
     const batch = writeBatch(db);
     const plan = [
-      { prefix: 'A', count: 68, floor: 'Ground Floor' },
-      { prefix: 'B', count: 40, floor: 'First Floor' }
+      { count: GROUND_SEAT_COUNT, floor: 'Ground Floor' },
+      { count: FIRST_SEAT_COUNT, floor: 'First Floor' }
     ];
 
-    for (const { prefix, count, floor } of plan) {
+    for (const { count, floor } of plan) {
       for (let i = 1; i <= count; i++) {
-        const name = `${prefix}${i}`;
-        const pos = PLAN_POSITION.get(name) || {};
-        // Deterministic doc ID = seat name: re-running seed (two tabs at
-        // once, double-clicks) overwrites the same docs instead of cloning
-        // duplicates. This is THE fix for "two same A1 seats".
-        batch.set(doc(seatsRef, name), {
+        const name = String(i);
+        const pos = planPositionFor(floor, name) || {};
+        // Deterministic doc ID = floor + number (ground-20 / first-20):
+        // re-running seed overwrites the same docs instead of cloning
+        // duplicates. seatNumber itself is the plain number.
+        batch.set(doc(seatsRef, docIdForSeat(floor, name)), {
           seatNumber: name,
           floor,
           col: pos.col ?? null,
@@ -101,23 +145,28 @@ export const reconcileSeatOccupancy = async () => {
     ]);
     if (seatsSnap.empty) return empty;
 
-    // Active claims by normalized seat name.
-    const claims = new Map(); // normName -> { id, name }
+    // Active claims by floor-aware key ("Ground Floor||20").
+    const claims = new Map(); // key -> { id, name }
     studentsSnap.forEach(stu => {
       const data = stu.data() || {};
       const raw = data.seatNumber;
       if (!raw) return;
       const n = normalizePlanName(raw);
-      if (!claims.has(n)) {
-        claims.set(n, { id: stu.id, name: data.name || "Student", planValid: PLAN_SEAT_NAMES.has(n) });
+      const floor = data.seatFloor || legacyFloorForName(raw) || "Ground Floor";
+      const key = seatKey(floor, n);
+      if (!claims.has(key)) {
+        claims.set(key, { id: stu.id, name: data.name || "Student", planValid: PLAN_SEAT_NAMES.has(key), floor, number: n });
       }
     });
 
-    // Which normalized names already have a doc.
+    // Which floor-aware keys already have a doc.
     const present = new Set();
     seatsSnap.forEach(d => {
-      const n = normalizePlanName((d.data() || {}).seatNumber);
-      if (PLAN_SEAT_NAMES.has(n)) present.add(n);
+      const sd = d.data() || {};
+      const n = normalizePlanName(sd.seatNumber);
+      const floor = sd.floor || legacyFloorForName(sd.seatNumber) || "Ground Floor";
+      const key = seatKey(floor, n);
+      if (PLAN_SEAT_NAMES.has(key)) present.add(key);
     });
 
     const batch = writeBatch(db);
@@ -126,8 +175,10 @@ export const reconcileSeatOccupancy = async () => {
     seatsSnap.forEach(d => {
       const data = d.data() || {};
       const n = normalizePlanName(data.seatNumber);
-      if (!PLAN_SEAT_NAMES.has(n)) return; // non-plan docs: cleanup owns these
-      const claim = claims.get(n);
+      const floor = data.floor || legacyFloorForName(data.seatNumber) || "Ground Floor";
+      const key = seatKey(floor, n);
+      if (!PLAN_SEAT_NAMES.has(key)) return; // non-plan docs: cleanup owns these
+      const claim = claims.get(key);
       if (data.status === "Occupied" && !claim) {
         batch.update(d.ref, {
           status: "Available",
@@ -150,16 +201,16 @@ export const reconcileSeatOccupancy = async () => {
 
     // Recreate missing docs for plan-valid claims (plan doc gone entirely).
     const seatsRef = collection(db, "seats");
-    claims.forEach((claim, n) => {
+    claims.forEach((claim, key) => {
       if (!claim.planValid) {
-        orphans.push({ studentName: claim.name, seatNumber: n });
+        orphans.push({ studentName: claim.name, seatNumber: claim.number });
         return;
       }
-      if (!present.has(n)) {
-        const want = PLAN_POSITION.get(n) || {};
-        batch.set(doc(seatsRef, n), {
-          seatNumber: n,
-          floor: want.floor || (String(n).startsWith("B") ? "First Floor" : "Ground Floor"),
+      if (!present.has(key)) {
+        const want = planPositionFor(claim.floor, claim.number) || {};
+        batch.set(doc(seatsRef, docIdForSeat(claim.floor, claim.number)), {
+          seatNumber: claim.number,
+          floor: claim.floor,
           col: want.col ?? null,
           row: want.row ?? null,
           status: "Occupied",
@@ -181,28 +232,25 @@ export const reconcileSeatOccupancy = async () => {
   }
 };
 
-// "A01" -> "A1" (same matching the seat map uses)
-const normalizePlanName = (value) => {
-  const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
-  const m = raw.match(/^([A-Z]+)-?0*(\d+)$/);
-  return m ? `${m[1]}${Number(m[2])}` : raw;
-};
+// "A01"/"A20"/"20A" -> "20" (same matching the seat map uses)
+const normalizePlanName = (value) => normalizeSeatNumberPlain(value);
+export { normalizePlanName };
 
 const PLAN_SEAT_NAMES = (() => {
   const names = new Set();
-  for (let i = 1; i <= 68; i++) names.add(`A${i}`);
-  for (let i = 1; i <= 40; i++) names.add(`B${i}`);
+  for (let i = 1; i <= GROUND_SEAT_COUNT; i++) names.add(seatKey("Ground Floor", i));
+  for (let i = 1; i <= FIRST_SEAT_COUNT; i++) names.add(seatKey("First Floor", i));
   return names;
 })();
 
 // One-time backend fix: rebuild EVERYTHING to match the library map.
-// Deletes all seats, recreates A1-A68 (Ground) + B1-B40 (First) as Available.
-// Student seats that fit the plan are kept (renamed to plan form, e.g. A01 -> A1);
+// Deletes all seats, recreates 1-68 (Ground) + 1-40 (First) as Available.
+// Student seats that fit the plan are kept (renamed to plain form, e.g. A20 -> 20);
 // old seats that fit nowhere are cleared. Old attendance history is untouched.
 // Run once from the browser console while logged in as staff:
 //   await window.rebuildSeatPlan()
 export const rebuildSeatPlan = async () => {
-  if (!window.confirm("Rebuild the seat map backend?\n\nALL seats will be deleted and recreated as A1-A68 (Ground Floor) + B1-B40 (First Floor).\n\nStudent seats that fit the plan are kept (renamed to plan form). Old seats that fit nowhere are cleared.")) {
+  if (!window.confirm("Rebuild the seat map backend?\n\nALL seats will be deleted and recreated as 1-68 (Ground Floor) + 1-40 (First Floor).\n\nStudent seats that fit the plan are kept (renamed to plain numbers). Old seats that fit nowhere are cleared.")) {
     return { success: false, error: "cancelled" };
   }
 
@@ -210,11 +258,11 @@ export const rebuildSeatPlan = async () => {
   const existing = await getDocs(seatsRef);
   await Promise.all(existing.docs.map(d => deleteDoc(doc(db, "seats", d.id))));
 
-  for (const target of [{ prefix: "A", count: 68, floor: "Ground Floor" }, { prefix: "B", count: 40, floor: "First Floor" }]) {
+  for (const target of [{ count: GROUND_SEAT_COUNT, floor: "Ground Floor" }, { count: FIRST_SEAT_COUNT, floor: "First Floor" }]) {
     for (let i = 1; i <= target.count; i++) {
-      const name = `${target.prefix}${i}`;
-      const pos = PLAN_POSITION.get(name) || {};
-      await setDoc(doc(seatsRef, name), {
+      const name = String(i);
+      const pos = planPositionFor(target.floor, name) || {};
+      await setDoc(doc(seatsRef, docIdForSeat(target.floor, name)), {
         seatNumber: name,
         floor: target.floor,
         col: pos.col ?? null,
@@ -232,11 +280,16 @@ export const rebuildSeatPlan = async () => {
   const batch = writeBatch(db);
   let kept = 0, cleared = 0;
   studentsSnap.forEach(stu => {
-    const current = stu.data().seatNumber;
+    const sd = stu.data() || {};
+    const current = sd.seatNumber;
     if (!current) return;
     const normed = normalizePlanName(current);
-    if (PLAN_SEAT_NAMES.has(normed)) {
-      if (current !== normed) batch.update(stu.ref, { seatNumber: normed });
+    const floor = sd.seatFloor || legacyFloorForName(current) || "Ground Floor";
+    if (PLAN_SEAT_NAMES.has(seatKey(floor, normed)) && isValidSeatForFloor(normed, floor)) {
+      const upd = {};
+      if (current !== normed) upd.seatNumber = normed;
+      if (!sd.seatFloor) upd.seatFloor = floor;
+      if (Object.keys(upd).length) batch.update(stu.ref, upd);
       kept++;
     } else {
       batch.update(stu.ref, { seatNumber: null });
@@ -252,11 +305,10 @@ if (typeof window !== "undefined") window.rebuildSeatPlan = rebuildSeatPlan;
 
 // Automatic backend reconcile: the map is a real playground, so the backend
 // must hold EXACTLY the library plan. On every admin map open:
-//  1. deletes seats that are NOT part of the plan ("2","3","4"… / R-names / dupes)
-//  2. renames padded names to plan form ("A01" -> "A1")
-//  3. creates any missing plan seats (A1-A68 + B1-B40) as Available at their
-//     spec col/row — this kills the dashed "click-to-create" tiles forever
-//  4. backfills col/row on plan seats that lack correct positions
+//  1. migrates legacy A/B names to plain numbers ("A20" -> "20", floor kept)
+//  2. deletes seats that are NOT part of the plan (R-names / out-of-range)
+//  3. creates any missing plan seats (1-68 Ground + 1-40 First) as Available
+//  4. backfills col/row/floor on plan seats that lack correct positions
 // Student seat refs are fixed the same way (kept+renamed when fitting, cleared
 // when not). Safe to run on every admin map open — no-ops once clean.
 export const cleanupNonPlanSeats = async () => {
@@ -265,31 +317,32 @@ export const cleanupNonPlanSeats = async () => {
     const snap = await getDocs(seatsRef);
     if (snap.empty) return { success: true, deleted: 0, renamed: 0, created: 0, positioned: 0, clearedStudents: 0, fixedStudents: 0 };
 
-    const exactNames = new Set();
-    snap.forEach(d => { const n = d.data() && d.data().seatNumber; if (n) exactNames.add(n); });
+    const floorOf = (data) =>
+      data.floor || legacyFloorForName(data.seatNumber) || "Ground Floor";
 
     const toDeleteRefs = [];
     const deletedIds = new Set();
-    const renames = [];
+    const renames = []; // { ref, to (plain number), floor }
 
-    // 0. DEDUPE identical normalized names ("two A1s") FIRST — the old code
-    // never caught these. Keep the richest record (Occupied > Reserved >
-    // Available, then one with an assignee, then one with a position),
-    // adopt an assignee onto the keeper when it lacks one, delete the rest.
-    // Students reference seats by NAME, so deleting dupe docs breaks nothing.
+    // 0. DEDUPE identical floor-aware keys ("two 20s on Ground") FIRST.
+    // Keep the richest record (Occupied > Reserved > Available, then assignee,
+    // then position), adopt an assignee onto the keeper when it lacks one.
     const statusRank = (s) => s === "Occupied" ? 3 : s === "Reserved" ? 2 : s === "Available" ? 1 : 0;
-    const byName = new Map();
+    const byKey = new Map();
     snap.forEach(d => {
-      const name = d.data() && d.data().seatNumber;
+      const data = d.data() || {};
+      const name = data.seatNumber;
       if (!name) return;
       const n = normalizePlanName(name);
-      if (!PLAN_SEAT_NAMES.has(n)) return;
-      if (!byName.has(n)) byName.set(n, []);
-      byName.get(n).push(d);
+      const floor = floorOf(data);
+      const key = seatKey(floor, n);
+      if (!PLAN_SEAT_NAMES.has(key)) return;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(d);
     });
     const dedupeMerges = [];
     let deduped = 0;
-    byName.forEach((docs) => {
+    byKey.forEach((docs) => {
       if (docs.length < 2) return;
       const sorted = [...docs].sort((a, b) => {
         const da = a.data() || {}, db = b.data() || {};
@@ -308,13 +361,16 @@ export const cleanupNonPlanSeats = async () => {
 
     snap.forEach(d => {
       if (deletedIds.has(d.id)) return; // already condemned as a dupe
-      const name = d.data() && d.data().seatNumber;
+      const data = d.data() || {};
+      const name = data.seatNumber;
       if (!name) { toDeleteRefs.push(d.ref); return; }
       const n = normalizePlanName(name);
-      if (!PLAN_SEAT_NAMES.has(n)) { toDeleteRefs.push(d.ref); return; }
-      if (name !== n) {
-        if (exactNames.has(n)) { toDeleteRefs.push(d.ref); }
-        else { renames.push({ ref: d.ref, to: n }); exactNames.add(n); }
+      const floor = floorOf(data);
+      const key = seatKey(floor, n);
+      if (!PLAN_SEAT_NAMES.has(key) || !isValidSeatForFloor(n, floor)) { toDeleteRefs.push(d.ref); return; }
+      // Migrate legacy "A20" -> "20" (and fix missing/wrong floor) in place.
+      if (String(name) !== String(n) || !data.floor) {
+        renames.push({ ref: d.ref, to: String(n), floor });
       }
     });
 
@@ -329,7 +385,7 @@ export const cleanupNonPlanSeats = async () => {
       if (m.donor.status === "Occupied") upd.status = "Occupied";
       return updateDoc(m.keeperRef, upd);
     }));
-    await Promise.all(renames.map(r => updateDoc(r.ref, { seatNumber: r.to, lastUpdated: serverTimestamp() })));
+    await Promise.all(renames.map(r => updateDoc(r.ref, { seatNumber: r.to, floor: r.floor, lastUpdated: serverTimestamp() })));
 
     // Re-read survivors, then create missing plan seats + fix positions.
     const afterSnap = await getDocs(seatsRef);
@@ -338,24 +394,26 @@ export const cleanupNonPlanSeats = async () => {
     afterSnap.forEach(d => {
       const data = d.data() || {};
       const n = normalizePlanName(data.seatNumber);
-      if (PLAN_SEAT_NAMES.has(n)) {
-        present.add(n);
-        const want = PLAN_POSITION.get(n);
-        if (want && (data.col !== want.col || data.row !== want.row || (data.floor || "Ground Floor") !== want.floor)) {
+      const floor = data.floor || "Ground Floor";
+      const key = seatKey(floor, n);
+      if (PLAN_SEAT_NAMES.has(key)) {
+        present.add(key);
+        const want = planPositionFor(floor, n);
+        if (want && (data.col !== want.col || data.row !== want.row || data.floor !== want.floor)) {
           posFixes.push({ ref: d.ref, want });
         }
       }
     });
 
     let created = 0;
-    const missing = [...PLAN_SEAT_NAMES].filter(n => !present.has(n));
-    await Promise.all(missing.map(async (n) => {
-      const want = PLAN_POSITION.get(n) || {};
-      // Deterministic ID: concurrent runs converge on the same doc instead
-      // of cloning a second copy.
-      await setDoc(doc(seatsRef, n), {
-        seatNumber: n,
-        floor: want.floor || (String(n).startsWith("B") ? "First Floor" : "Ground Floor"),
+    const missing = [...PLAN_SEAT_NAMES].filter(k => !present.has(k));
+    await Promise.all(missing.map(async (key) => {
+      const [floor, num] = key.split("||");
+      const want = planPositionFor(floor, num) || {};
+      // Deterministic ID ground-20 / first-20: concurrent runs converge.
+      await setDoc(doc(seatsRef, docIdForSeat(floor, num)), {
+        seatNumber: String(num),
+        floor,
         col: want.col ?? null,
         row: want.row ?? null,
         status: "Available",
@@ -374,11 +432,17 @@ export const cleanupNonPlanSeats = async () => {
     const batch = writeBatch(db);
     let clearedStudents = 0, fixedStudents = 0;
     studentsSnap.forEach(stu => {
-      const current = stu.data().seatNumber;
+      const sd = stu.data() || {};
+      const current = sd.seatNumber;
       if (!current) return;
       const n = normalizePlanName(current);
-      if (!PLAN_SEAT_NAMES.has(n)) { batch.update(stu.ref, { seatNumber: null }); clearedStudents++; }
-      else if (current !== n) { batch.update(stu.ref, { seatNumber: n }); fixedStudents++; }
+      const floor = sd.seatFloor || legacyFloorForName(current) || "Ground Floor";
+      const key = seatKey(floor, n);
+      if (!PLAN_SEAT_NAMES.has(key)) { batch.update(stu.ref, { seatNumber: null }); clearedStudents++; }
+      else if (String(current) !== String(n) || !sd.seatFloor) {
+        batch.update(stu.ref, { seatNumber: String(n), seatFloor: floor });
+        fixedStudents++;
+      }
     });
     await batch.commit();
 
@@ -399,21 +463,26 @@ export const saveSeatPosition = async (seatId, col, row) => {
 
 export const renameSeat = async (seatId, newNumber) => {
   try {
-    const normed = normalizePlanName(newNumber);
-    if (!/^[AB]\d+$/.test(normed)) throw new Error("Seat number must look like A12 or B7.");
-    const seatsSnap = await getDocs(collection(db, "seats"));
-    let clash = false;
-    seatsSnap.forEach(d => {
-      if (d.id !== seatId && normalizePlanName(d.data().seatNumber) === normed) clash = true;
-    });
-    if (clash) throw new Error(`Seat ${normed} already exists.`);
+    const normed = normalizeSeatNumberPlain(newNumber);
+    if (!/^\d+$/.test(normed)) throw new Error("Seat number must be a plain number like 20.");
     const seatRef = doc(db, "seats", seatId);
     const snap = await getDoc(seatRef);
     if (!snap.exists()) throw new Error("Seat not found.");
+    const floor = (snap.data() || {}).floor || "Ground Floor";
+    if (!isValidSeatForFloor(normed, floor)) throw new Error(`Seat ${normed} is out of range for ${floor} (1-${maxSeatForFloor(floor)}).`);
+    const seatsSnap = await getDocs(collection(db, "seats"));
+    let clash = false;
+    seatsSnap.forEach(d => {
+      if (d.id === seatId) return;
+      const dd = d.data() || {};
+      const dfloor = dd.floor || "Ground Floor";
+      if (dfloor === floor && normalizeSeatNumberPlain(dd.seatNumber) === normed) clash = true;
+    });
+    if (clash) throw new Error(`Seat ${normed} already exists on ${floor}.`);
     await updateDoc(seatRef, { seatNumber: normed, lastUpdated: serverTimestamp() });
     const data = snap.data();
     if (data.assignedStudentId) {
-      try { await updateDoc(doc(db, "students", data.assignedStudentId), { seatNumber: normed }); } catch (_) {}
+      try { await updateDoc(doc(db, "students", data.assignedStudentId), { seatNumber: normed, seatFloor: floor }); } catch (_) {}
     }
     return { success: true, seatNumber: normed };
   } catch (e) { return { success: false, error: e.message }; }
@@ -423,16 +492,16 @@ export const addSeatAt = async (floor, col, row) => {
   try {
     const seatsSnap = await getDocs(collection(db, "seats"));
     let occupied = false, maxNum = 0;
-    const prefix = floor === "First Floor" ? "B" : "A";
     seatsSnap.forEach(d => {
       const s = d.data() || {};
       if ((s.floor || "Ground Floor") === floor && Number(s.col) === Number(col) && Number(s.row) === Number(row)) occupied = true;
-      const n = normalizePlanName(s.seatNumber);
-      if (n.startsWith(prefix)) { const num = Number(n.slice(prefix.length)); if (Number.isFinite(num) && num > maxNum) maxNum = num; }
+      if ((s.floor || "Ground Floor") !== floor) return;
+      const num = Number(normalizeSeatNumberPlain(s.seatNumber));
+      if (Number.isFinite(num) && num > maxNum) maxNum = num;
     });
     if (occupied) throw new Error("That cell is already occupied.");
-    const seatNumber = `${prefix}${maxNum + 1}`;
-    await addDoc(collection(db, "seats"), {
+    const seatNumber = String(maxNum + 1);
+    await setDoc(doc(collection(db, "seats"), docIdForSeat(floor, seatNumber)), {
       seatNumber, floor, col, row,
       status: "Available",
       assignedStudentId: null,
@@ -510,7 +579,8 @@ export const assignSeat = async (seatId, student) => {
     try {
       const studentRef = doc(db, "students", student.id);
       await updateDoc(studentRef, {
-        seatNumber: snap.data().seatNumber,
+        seatNumber: normalizeSeatNumberPlain(snap.data().seatNumber),
+        seatFloor: (snap.data() || {}).floor || "Ground Floor",
         updatedAt: serverTimestamp()
       });
     } catch (_) { /* admission flow creates the doc moments later */ }

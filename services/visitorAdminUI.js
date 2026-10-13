@@ -2,6 +2,9 @@ import { listenToVisitors, addVisitor, setVisitorLeadStatus, deleteVisitor } fro
 import { calculateVisitorAnalytics } from "./visitorAnalytics.js";
 import { listenToAllStudents } from "./studentService.js";
 import { isAdmitted, isOldStatus } from "./studentProfile.js";
+import { sendWhatsAppMessage } from "./whatsappService.js";
+
+export const STUDENT_LOGIN_URL = "https://student.shreejilibrary.co.in/";
 
 let allVisitors = [];
 let unsubVisitors = null;
@@ -379,6 +382,36 @@ const renderVisitors = (canEdit, canDelete) => {
     }
   };
 
+  // WhatsApp invite: opens wa.me with a prefilled "fill your details in the
+  // Student Login" message and logs it to Message Logs (same pipeline as
+  // student WhatsApp). Available to all staff viewing Visitors.
+  window.messageVisitorOnWhatsApp = async (id) => {
+    const v = allVisitors.find(x => x.id === id);
+    if (!v) {
+      if (typeof window.showToast === "function") window.showToast("Visitor not found.", "error");
+      return;
+    }
+    const phoneDigits = String(v.phone || "").replace(/\D/g, "");
+    if (phoneDigits.length < 10) {
+      if (typeof window.showToast === "function") window.showToast("Visitor phone number is missing.", "error");
+      return;
+    }
+    const name = String(v.visitorName || "there").trim() || "there";
+    const message =
+      `Hello ${name}, this is Studyhaus Library. ` +
+      `Please fill your details in the Student Login here: ${STUDENT_LOGIN_URL} ` +
+      `— reply here after submitting.`;
+    try {
+      await sendWhatsAppMessage(
+        { id: v.id, fullName: v.visitorName || "Visitor", phone: v.phone },
+        "Visitor Invite",
+        message
+      );
+    } catch (e) {
+      if (typeof window.showToast === "function") window.showToast("Could not open WhatsApp: " + (e && e.message ? e.message : e), "error");
+    }
+  };
+
   const html = filtered.map(v => {
     const isWebsite = normaliseSource(v) === "Website";
     const leadStatus = effectiveLeadStatus(v);
@@ -426,6 +459,13 @@ const renderVisitors = (canEdit, canDelete) => {
 
     const note = [v.remarks, isWebsite ? v.message : ""].filter(Boolean).join("\n");
 
+    // WhatsApp invite — every card with a phone number gets one (staff-only
+    // page already). Green tint so it reads as WhatsApp next to the tel: link.
+    const waBtn = v.phone
+      ? `<button class="btn btn-secondary" style="color:#059669; border-color:rgba(16,185,129,.4);" onclick="window.messageVisitorOnWhatsApp('${v.id}')" title="Invite on WhatsApp to fill Student Login details">WhatsApp</button>`
+      : "";
+
+    const allActions = `${waBtn}${actions}`;
     return `
       <article class="vis-card">
         <div class="vis-top">
@@ -438,7 +478,7 @@ const renderVisitors = (canEdit, canDelete) => {
         <div class="vis-contact">${contact}</div>
         <div class="vis-meta">${meta}</div>
         ${note ? `<p class="vis-note">${esc(note)}</p>` : ""}
-        ${actions ? `<div class="vis-actions">${actions}</div>` : ""}
+        ${allActions ? `<div class="vis-actions">${allActions}</div>` : ""}
       </article>`;
   }).join("");
 

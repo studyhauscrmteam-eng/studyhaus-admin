@@ -27,9 +27,17 @@ const validateCheckIn = async (student, selectedSeatNumber) => {
 
   // Seat-first check-in: the seat the student CHOSE wins for every plan.
   // Falls back to the assigned seat only when nothing was selected (desk flow).
-  const chosenSeat = selectedSeatNumber ? String(selectedSeatNumber).trim() : "";
-  const assignedSeat = student.seatNumber ? String(student.seatNumber).trim() : "";
+  // Plain numbers only ("A20" -> "20"); floor hint carried for disambiguation.
+  const stripPlain = (v) => {
+    const raw = String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
+    const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
+    return m ? String(Number(m[1])) : String(v == null ? "" : v).trim();
+  };
+  const chosenSeat = selectedSeatNumber ? stripPlain(selectedSeatNumber) : "";
+  const assignedSeat = student.seatNumber ? stripPlain(student.seatNumber) : "";
   const finalSeat = chosenSeat || assignedSeat;
+  // Floor hint: explicit arg wins, else the student's stored floor.
+  const seatFloorHint = (student && (student.seatFloor || "")) || "";
 
   if (!finalSeat) throw new Error("Select a seat to check in.");
 
@@ -92,7 +100,10 @@ const validateCheckIn = async (student, selectedSeatNumber) => {
             const seatQ = query(collection(db, "seats"), where("seatNumber", "==", sessionData.seatNumber));
             const seatSnap = await getDocs(seatQ);
             if (!seatSnap.empty) {
-              const seatDoc = seatSnap.docs[0];
+              const fh = sessionData.seatFloor || "";
+              const seatDoc = seatSnap.docs.length === 1
+                ? seatSnap.docs[0]
+                : (fh && seatSnap.docs.find(d => ((d.data() || {}).floor || "") === fh)) || seatSnap.docs[0];
               const sData = seatDoc.data();
               const newStatus = sData.assignedStudentId ? "Reserved" : "Available";
               await updateDoc(seatDoc.ref, { status: newStatus, lastUpdated: serverTimestamp() });
@@ -115,18 +126,33 @@ export const checkIn = async (student, selectedSeatNumber = null) => {
   }
 
   try {
-    // Verify seat is available (or reserved — first come, first served)
+    // Verify seat is available (or reserved — first come, first served).
+    // Floor-aware: duplicate plain numbers exist on both floors.
+    const pickSeatDoc = (snap, floorHint) => {
+      if (snap.empty) return null;
+      if (snap.docs.length === 1) return snap.docs[0];
+      if (floorHint) {
+        const hit = snap.docs.find(d => ((d.data() || {}).floor || "Ground Floor") === floorHint);
+        if (hit) return hit;
+      }
+      return snap.docs[0];
+    };
     let seatSnap;
     try {
       const seatQ = query(collection(db, "seats"), where("seatNumber", "==", finalSeat));
       seatSnap = await getDocs(seatQ);
+      if (seatSnap.empty && String(selectedSeatNumber || "") !== finalSeat) {
+        // Legacy docs may still carry "A20" — try raw too.
+        const q2 = query(collection(db, "seats"), where("seatNumber", "==", String(selectedSeatNumber).trim()));
+        seatSnap = await getDocs(q2);
+      }
     } catch (e) {
       if (isPermissionError(e)) return { success: false, error: permissionHint() };
       throw e;
     }
-    if (seatSnap.empty) return { success: false, error: `Seat ${finalSeat} not found. Please pick another seat.` };
+    const seatDoc = pickSeatDoc(seatSnap, seatFloorHint);
+    if (!seatDoc) return { success: false, error: `Seat ${finalSeat} not found. Please pick another seat.` };
 
-    const seatDoc = seatSnap.docs[0];
     const seatData = seatDoc.data();
 
     if (seatData.status === "Occupied") return { success: false, error: `Seat ${finalSeat} is already occupied. Please pick another seat.` };
@@ -138,7 +164,8 @@ export const checkIn = async (student, selectedSeatNumber = null) => {
     const payload = {
       studentId: student.id,
       studentName: student.name,
-      seatNumber: finalSeat, // The actual seat they are taking
+      seatNumber: finalSeat, // plain number — the actual seat they are taking
+      seatFloor: (seatData || {}).floor || seatFloorHint || student.seatFloor || "Ground Floor",
       planName: student.planName || "",
       date: getTodayStr(),
       checkIn: now.getTime(),
@@ -214,13 +241,16 @@ export const checkOut = async (attendanceId, checkInTimestamp) => {
       throw e;
     }
 
-    // 2. Free up the seat (best effort).
+    // 2. Free up the seat (best effort, floor-aware).
     if (attData.seatNumber) {
       try {
         const seatQ = query(collection(db, "seats"), where("seatNumber", "==", attData.seatNumber));
         const seatSnap = await getDocs(seatQ);
         if (!seatSnap.empty) {
-          const seatDoc = seatSnap.docs[0];
+          const floorHint = attData.seatFloor || "";
+          const seatDoc = seatSnap.docs.length === 1
+            ? seatSnap.docs[0]
+            : (floorHint && seatSnap.docs.find(d => ((d.data() || {}).floor || "") === floorHint)) || seatSnap.docs[0];
           const sData = seatDoc.data();
 
           // If it's a fixed seat belonging to someone, revert to Reserved. Else Available.

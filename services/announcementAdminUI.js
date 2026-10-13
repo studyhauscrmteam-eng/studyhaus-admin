@@ -1,6 +1,6 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
-import { markAllNotificationsRead, markNotificationRead } from "./notificationService.js";
-import { isNotifRead, markNotifRead, markNotifsRead, countUnread } from "./notificationReadState.js";
+import { markNotificationRead } from "./notificationService.js";
+import { isNotifRead, markNotifRead, countUnread } from "./notificationReadState.js";
 
 // OWN copy of the tab title. This used to reference BASE_TITLE from
 // adminNotificationUI.js — a module-scoped const that is NOT in scope here —
@@ -25,17 +25,25 @@ const admissionIds = () =>
     .map((r) => `adm_${r.id}`);
 
 /**
- * Visit-to-clear session. Opening the Notifications page acknowledges
- * everything on sight (bell pill, sidebar pill and browser-tab counter all
- * drop to zero — no clicking, no Clear button), BUT the items stay on screen
- * for this visit so each one is still clickable: tapping one navigates to
- * its page (or pops its details) and it is gone afterwards. Leaving the
- * page ends the session — the next visit shows only what arrived since.
+ * Badge-seen state (NOT card-dismiss state). Opening the Notifications page
+ * marks everything on sight as seen so the bell pill, sidebar pill and
+ * browser-tab counter all drop to zero — no clicking, no Clear button.
+ * Cards themselves stay on screen until each one is individually tapped
+ * (or its action is performed) — tapping one card must NEVER dismiss the
+ * others. Seen ids persist on this device (like read-state) so the badges
+ * stay cleared across reloads; only genuinely new arrivals light them again.
  */
-const getSession = () => new Set(
-  Array.isArray(window.__notifSession) ? window.__notifSession.map(String) : []
-);
-const inSession = (key) => getSession().has(String(key));
+const SEEN_KEY = "sh_notif_seen_v1";
+const getSeen = () => {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY) || "[]";
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch (_) {
+    return new Set();
+  }
+};
+const isSeen = (key) => getSeen().has(String(key));
 
 /** Every known notification id across all four sources. */
 const allKnownIds = () => {
@@ -46,28 +54,21 @@ const allKnownIds = () => {
 };
 
 /**
- * Acknowledge the whole page at once. Called automatically while the
- * Notifications page is open (see renderAnnouncementList) — never wired to
- * any button. Persists two ways so "gone" survives sign-in and reopen:
- * device-local read-state (announcements, alerts, leads) plus the
- * server-side `read` flag for system notifications (all devices).
+ * Mark the whole page as SEEN at once (badges only — cards untouched).
+ * Called automatically while the Notifications page is open (see
+ * renderAnnouncementList) — never wired to any button. Cards are dismissed
+ * exclusively by tapping them (see the delegated click handler below, which
+ * also flips the server `read` flag for system items). Server state is never
+ * touched here, so a visit can never wipe cards that were never tapped.
  */
 window.__ackNotificationsPage = () => {
   try {
     const ids = allKnownIds();
     if (ids.length === 0) return;
-    markNotifsRead(ids);
-    const s = getSession();
+    const s = getSeen();
     for (const id of ids) s.add(String(id));
-    window.__notifSession = [...s].slice(-150);
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...s].slice(-500)));
   } catch (_) { /* storage blocked — badges just stay until clicked */ }
-  // Server flag is best-effort and never blocks the instant local clear.
-  // Filtered out of systemNotifs() once read, so the echo from the
-  // listener below can never resurrect the badge (no ack loop).
-  try {
-    const p = markAllNotificationsRead();
-    if (p && typeof p.catch === "function") p.catch(() => {});
-  } catch (_) {}
 };
 
 const isNotifPageActive = () => {
@@ -162,17 +163,19 @@ const routeNotification = (key) => {
 const renderSystemNotifs = () => {
   const items = systemNotifs();
   // Clicked = read = GONE from the list (the owner's rule: click it and it
-  // disappears). Items acknowledged by merely opening the page stay visible
-  // for that visit (session) so they can still be tapped through.
-  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`) || inSession(`sys_${n.id}`));
+  // disappears — and ONLY the clicked one). Merely opening the page clears
+  // the badges (seen-state) but never dismisses cards.
+  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`));
   if (live.length === 0) return { html: "", unread: 0 };
 
+  // Badge counts only what arrived since the last page visit; the list above
+  // keeps every untapped card.
   let unread = 0;
   const html =
     `<div style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); padding:0.4rem 0.2rem 0.5rem;">Activity</div>` +
     live.map((n) => {
       const key = `sys_${n.id}`;
-      unread++;
+      if (!isSeen(key)) unread++;
       const ms = tsMs(n.createdAt);
       // Never claim "Just now" for a record we couldn't read a date from —
       // that made a page of old entries look like they all just fired.
@@ -221,12 +224,8 @@ export const initAnnouncementAdminUI = () => {
           if (p && typeof p.catch === "function") p.catch(() => {});
         }
       } catch (_) {}
-      // Out of this visit's session too — clicked means gone, immediately,
-      // whether it navigates away or just clears in place. No save, no Clear.
-      try {
-        window.__notifSession = (Array.isArray(window.__notifSession) ? window.__notifSession : [])
-          .filter((id) => String(id) !== String(key));
-      } catch (_) {}
+      // Clicked means gone — ONLY this card, immediately, whether it
+      // navigates away or just clears in place. Nothing else is touched.
       renderAnnouncementList();
       routeNotification(key);
     });
@@ -254,14 +253,13 @@ const renderAnnouncementList = () => {
   const notifList = document.querySelector("#page-notifications .notif-list");
   if (!notifList) return;
 
-  // Visit-to-clear: while the Notifications page is open, everything on
-  // sight is acknowledged at once — bell pill, sidebar pill and tab counter
-  // drop to zero with no clicking and no buttons. Items stay on screen for
-  // this visit (session) so each can still be tapped through to its page.
+  // Badges clear on sight: while the Notifications page is open, everything
+  // on screen is marked SEEN so the bell pill, sidebar pill and tab counter
+  // drop to zero with no clicking and no buttons. Cards are NOT dismissed by
+  // this — each card stays until it is individually tapped.
   if (isNotifPageActive()) {
     try {
-      const ids = allKnownIds();
-      if (countUnread(ids) > 0) window.__ackNotificationsPage();
+      window.__ackNotificationsPage();
     } catch (_) {}
   }
 
@@ -269,6 +267,9 @@ const renderAnnouncementList = () => {
   const unreadIds = announcements.map(a => `ann_${a.id}`);
   const unread = countUnread(unreadIds);
   const readCount = announcements.length - unread;
+  // Badge counts only arrivals since the last page visit — tapping one card
+  // must never clear the badges (or cards) of the others.
+  const annBadge = unreadIds.filter((id) => !isNotifRead(id) && !isSeen(id)).length;
 
   // Approval decisions / new admission requests written to `notifications`
   // by notifyAdmins().
@@ -278,13 +279,13 @@ const renderAnnouncementList = () => {
     : "";
   // Admission alerts are counted by their own read-state, NOT by the raw
   // queue length — that is what made the badge impossible to clear.
-  const admissionUnread = countUnread(admissionIds());
+  const admissionUnread = admissionIds().filter((id) => !isNotifRead(id) && !isSeen(id)).length;
 
   // ── ONE number for every surface. ────────────────────────────────────────
-  // Visiting this page acknowledges everything on sight (auto-ack above),
-  // and tapping any item clears that item and takes you to its page.
+  // Visiting this page marks everything seen (badges drop), and tapping any
+  // single item dismisses ONLY that item and takes you to its page.
   // No Save, no Clear button, nothing else to press — ever.
-  const total = unread + admissionUnread + sys.unread;
+  const total = annBadge + admissionUnread + sys.unread;
 
   // Sidebar pill (and every other .nav-badge in the shell).
   document.querySelectorAll('.nav-badge').forEach(badge => {
@@ -312,13 +313,12 @@ const renderAnnouncementList = () => {
     return;
   }
 
-  // Read items are hidden — tapping a notification makes it disappear.
-  // Items acknowledged by the page visit stay for this visit (session) so
-  // they remain tappable; leaving the page ends the session.
+  // Read items are hidden — tapping a notification dismisses ONLY that one.
+  // Visiting the page clears badges (seen-state) but never dismisses cards.
   // The toggle below brings read items back deliberately.
   const visible = showReadAdmin
     ? announcements
-    : announcements.filter(a => !isNotifRead(`ann_${a.id}`) || inSession(`ann_${a.id}`));
+    : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
   const toggle = readCount > 0
     ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
     : "";
@@ -346,7 +346,7 @@ const renderAnnouncementList = () => {
 
       const dateStr = a.createdAt?.seconds
         ? new Date(a.createdAt.seconds * 1000).toLocaleString()
-        : "Just now";
+        : "Date unavailable";
 
       const scheduledStr = a.scheduledFor ? `Scheduled for: ${new Date(a.scheduledFor).toLocaleString()}` : "";
       // Admins see everything (they manage the schedule); future items get a
@@ -385,7 +385,9 @@ window.__refreshNotifBadges = () => { try { renderAnnouncementList(); } catch (_
 const renderDashboardBanner = (announcements) => {
   const card = document.getElementById("dashboard-announcement");
   if (!card) return;
-  const live = (announcements || []).filter(isAnnouncementLive);
+  // Dismissed announcements stay dismissed — the banner must never resurrect
+  // an item already seen/clicked on the Notifications page.
+  const live = (announcements || []).filter(a => isAnnouncementLive(a) && !isNotifRead(`ann_${a.id}`));
   if (live.length === 0) {
     card.style.display = "none";
     return;
