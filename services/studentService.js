@@ -162,9 +162,15 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
           const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
           return m ? String(Number(m[1])) : String(v);
         };
+        // Floor-aware: use the student's floor to find the correct seat
+        const studentFloor = data.seatFloor || "Ground Floor";
         for (const key of [String(seatNo), stripPlain(seatNo)]) {
           try {
-            const seatSnap = await getDocs(query(collection(db, "seats"), where("seatNumber", "==", key)));
+            const seatSnap = await getDocs(query(
+              collection(db, "seats"),
+              where("seatNumber", "==", key),
+              where("floor", "==", studentFloor)
+            ));
             for (const d of seatSnap.docs) {
               const sd = d.data() || {};
               if (!sd.assignedStudentId || sd.assignedStudentId === studentId) {
@@ -452,9 +458,14 @@ export const updateStudentProfile = async (studentId, updates) => {
         if (oldData.seatNumber !== updates.seatNumber) {
           const seatsRef = collection(db, "seats");
           
-          // 1. Release old seat
+          // 1. Release old seat (floor-aware)
           if (oldData.seatNumber) {
-            const qOld = query(seatsRef, where("seatNumber", "==", oldData.seatNumber));
+            const oldFloor = oldData.seatFloor || "Ground Floor";
+            const qOld = query(
+              seatsRef,
+              where("seatNumber", "==", oldData.seatNumber),
+              where("floor", "==", oldFloor)
+            );
             const oldSnap = await getDocs(qOld);
             if (!oldSnap.empty) {
               await updateDoc(doc(db, "seats", oldSnap.docs[0].id), {
@@ -485,7 +496,11 @@ export const updateStudentProfile = async (studentId, updates) => {
               return null;
             })();
             const floor = updates.seatFloor || oldData.seatFloor || legacyFloor || "Ground Floor";
-            const qNew = query(seatsRef, where("seatNumber", "==", normedSeat));
+            const qNew = query(
+              seatsRef,
+              where("seatNumber", "==", normedSeat),
+              where("floor", "==", floor)
+            );
             const newSnap = await getDocs(qNew);
             const floorMatch = newSnap.docs.find(d => ((d.data() || {}).floor || "Ground Floor") === floor)
               || (newSnap.docs.length === 1 ? newSnap.docs[0] : null);

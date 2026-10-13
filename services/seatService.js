@@ -189,8 +189,11 @@ export const reconcileSeatOccupancy = async () => {
         });
         released++;
       } else if (data.status === "Available" && claim) {
+        // A student is assigned to this seat but it shows Available — fix it.
+        // Use "Reserved" (not "Occupied") because assignment means reservation;
+        // "Occupied" should only be set when the student actively checks in.
         batch.update(d.ref, {
-          status: "Occupied",
+          status: "Reserved",
           assignedStudentId: claim.id,
           assignedStudentName: claim.name,
           lastUpdated: serverTimestamp()
@@ -213,7 +216,7 @@ export const reconcileSeatOccupancy = async () => {
           floor: claim.floor,
           col: want.col ?? null,
           row: want.row ?? null,
-          status: "Occupied",
+          status: "Reserved",
           assignedStudentId: claim.id,
           assignedStudentName: claim.name,
           planType: null,
