@@ -6,7 +6,10 @@
   "scripts": {
     "start": "npx -y http-server",
     "dev": "npx -y http-server",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "node scripts/deploy-hosting.js --site studyhaus-crm-admin",
+    "deploy:status": "node scripts/deploy-hosting.js --status",
+    "deploy:dry-run": "node scripts/deploy-hosting.js --dry-run --site studyhaus-crm-admin"
   },
   "license": "ISC",
   "dependencies": {
