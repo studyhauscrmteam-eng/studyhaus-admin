@@ -235,11 +235,18 @@ async function showStatus() {
     try {
       const ch = await api("GET", `/${name}/channels/${CHANNEL}`);
       const rel = ch.release || {};
-      line += `  url=${ch.url || "?"}  release=${(rel.version && (rel.version.config ? rel.version.name : rel.version.name)) || rel.name || "?"}`;
+      line += `  url=${ch.url || "?"}`;
+      const ver = (rel.version && rel.version.name) || rel.name || null;
+      line += `  release=${ver || "?"}`;
       if (rel.createTime) line += `  at=${rel.createTime}`;
     } catch (e) {
       line += "  (no live release info)";
     }
+    try {
+      const doms = await api("GET", `/${name}/customDomains`);
+      const list = (doms && doms.customDomains) || [];
+      if (list.length) line += `  domains=[${list.map((d) => (d.name || "").split("/").pop()).join(", ")}]`;
+    } catch (e) { /* custom-domain listing not permitted — skip */ }
     console.log(line);
   }
 }
