@@ -4,8 +4,9 @@ import { db } from "../firebase/firebase.js";
 /**
  * Staff side of seat-change requests (student files from the portal).
  * approveSeatChangeRequest runs one transaction: student flips to the new
- * seat, the old seat is freed, the new seat becomes Occupied, the request
- * is marked Approved — never one without the others.
+ * seat, the old seat is freed, the new seat becomes Reserved (so the student
+ * can clock in right away), the request is marked Approved — never one
+ * without the others.
  */
 
 /**
@@ -119,7 +120,7 @@ export const approveSeatChangeRequest = async (requestId, staffName) => {
         throw new Error("Request was already decided.");
       }
       tx.update(studentRef, {
-        seatNumber: toSeat,
+        seatNumber: td.seatNumber || toSeat,
         seatFloor: toFloor,
         updatedAt: serverTimestamp(),
       });
@@ -133,7 +134,7 @@ export const approveSeatChangeRequest = async (requestId, staffName) => {
         });
       }
       tx.update(target.ref, {
-        status: "Occupied",
+        status: "Reserved",
         assignedStudentId: req.studentId,
         assignedStudentName: student.name || req.studentName || "",
         planType: student.planName || req.planName || "",
@@ -165,6 +166,19 @@ export const rejectSeatChangeRequest = async (requestId, staffName, reason) => {
       decidedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    // Release the Pending hold the student placed on the target seat.
+    try {
+      const req = reqSnap.data() || {};
+      const target = await findSeatDoc(req.toSeat, req.toFloor || "Ground Floor");
+      if (target && target.data.status === "Pending" && target.data.assignedStudentId === req.studentId) {
+        await updateDoc(target.ref, {
+          status: "Available",
+          assignedStudentId: null,
+          assignedStudentName: null,
+          lastUpdated: serverTimestamp(),
+        });
+      }
+    } catch (_) { /* best effort — staff can also free the seat by hand */ }
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
