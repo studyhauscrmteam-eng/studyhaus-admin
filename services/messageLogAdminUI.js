@@ -42,11 +42,11 @@ export const initMessageLogAdminUI = () => {
             <tr>
               <th>Date/Time</th>
               <th>Student Name</th>
-              <th data-i18n="table.phone">\${window.t ? window.t("table.phone") : "Phone"}</th>
+              <th data-i18n="table.phone">${window.t ? window.t("table.phone") : "Phone"}</th>
               <th>Template</th>
               <th>Message Preview</th>
               <th>Sent By</th>
-              <th data-i18n="table.status">\${window.t ? window.t("table.status") : "Status"}</th>
+              <th data-i18n="table.status">${window.t ? window.t("table.status") : "Status"}</th>
             </tr>
           </thead>
           <tbody id="log-tbody">

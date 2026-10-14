@@ -147,10 +147,10 @@ export const renderRenewalHistory = (studentId, containerId) => {
       <table class="data-table">
         <thead>
           <tr>
-            <th data-i18n="table.date">\${window.t ? window.t("table.date") : "Date"}</th>
+            <th data-i18n="table.date">${window.t ? window.t("table.date") : "Date"}</th>
             <th>Plan Change</th>
             <th>Period</th>
-            <th data-i18n="table.amount">\${window.t ? window.t("table.amount") : "Amount"}</th>
+            <th data-i18n="table.amount">${window.t ? window.t("table.amount") : "Amount"}</th>
             <th>Method</th>
           </tr>
         </thead>

@@ -78,12 +78,12 @@ export const initComplaintAdminUI = () => {
       <table class="data-table">
         <thead>
           <tr>
-            <th data-i18n="table.date">\${window.t ? window.t("table.date") : "Date"}</th>
+            <th data-i18n="table.date">${window.t ? window.t("table.date") : "Date"}</th>
             <th>Student</th>
-            <th data-i18n="table.seat">\${window.t ? window.t("table.seat") : "Seat"}</th>
+            <th data-i18n="table.seat">${window.t ? window.t("table.seat") : "Seat"}</th>
             <th>Category</th>
             <th>Issue Description</th>
-            <th data-i18n="table.status">\${window.t ? window.t("table.status") : "Status"}</th>
+            <th data-i18n="table.status">${window.t ? window.t("table.status") : "Status"}</th>
             <th>Actions</th>
           </tr>
         </thead>
