@@ -296,9 +296,9 @@ const renderExpenses = () => {
     const status = r.status || "Paid";
     const isPending = status === "Pending";
     const statusText = isPending ? "Pending" : "Paid";
-    const statusStyle = isPending 
-      ? "background:#fffbeb; color:#d97706; border:1px solid #fde68a;" 
-      : "background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;";
+    const statusStyle = isPending
+      ? "background:rgba(245,158,11,0.14); color:var(--warning); border:1px solid rgba(245,158,11,0.45);"
+      : "background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45);";
 
     const catName = r.categoryName || r.category || "General";
     const expName = r.expenseName || r.name || "-";

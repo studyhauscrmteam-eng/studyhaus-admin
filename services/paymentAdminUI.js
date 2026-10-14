@@ -1,7 +1,60 @@
 import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment } from "./paymentService.js";
 import { ROLES, hasPermission } from "../auth/roles.js";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase/firebase.js";
 
 let allPayments = [];
+
+// ── Payment screenshot viewer — every payment carries its own screenshots ──
+window.viewPaymentScreenshots = async (paymentId) => {
+  let shots = [];
+  try {
+    const snap = await getDoc(doc(db, "payments", paymentId));
+    if (snap.exists()) shots = (snap.data().screenshots || []).filter(s => typeof s === "string" && s.startsWith("data:image/"));
+  } catch (e) {
+    return window.showToast("Could not load screenshots: " + e.message, "error");
+  }
+  if (!shots.length) return window.showToast("No screenshots attached to this payment.", "warning");
+
+  let idx = 0;
+  const dialog = document.createElement("dialog");
+  dialog.className = "card smooth-modal";
+  dialog.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 18px 45px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(560px, 94vw);";
+  dialog.innerHTML = `
+    <div style="padding:1.25rem 1.5rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+        <h3 style="margin:0; font-size:1.05rem;">Payment Screenshots</h3>
+        <button class="btn btn-ghost" id="pss-close" style="padding:0.15rem 0.5rem;">✕</button>
+      </div>
+      <div id="pss-stage" style="text-align:center;"></div>
+      ${shots.length > 1 ? `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.75rem;">
+        <button class="btn btn-secondary" id="pss-prev" style="padding:0.35rem 1rem;">← Prev</button>
+        <span id="pss-count" style="font-size:12px; color:var(--text-muted);"></span>
+        <button class="btn btn-secondary" id="pss-next" style="padding:0.35rem 1rem;">Next →</button>
+      </div>` : ""}
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  const stage = dialog.querySelector("#pss-stage");
+  const paint = () => {
+    stage.innerHTML = `<img src="${shots[idx]}" alt="Payment screenshot ${idx + 1}" style="width:100%; max-height:60vh; object-fit:contain; border-radius:10px; border:1px solid var(--border);" />`;
+    const c = dialog.querySelector("#pss-count");
+    if (c) c.textContent = `${idx + 1} of ${shots.length}`;
+    const prev = dialog.querySelector("#pss-prev");
+    const next = dialog.querySelector("#pss-next");
+    if (prev) prev.disabled = idx === 0;
+    if (next) next.disabled = idx === shots.length - 1;
+  };
+  paint();
+  dialog.querySelector("#pss-close").onclick = () => dialog.close();
+  const prevBtn = dialog.querySelector("#pss-prev");
+  const nextBtn = dialog.querySelector("#pss-next");
+  if (prevBtn) prevBtn.onclick = () => { if (idx > 0) { idx--; paint(); } };
+  if (nextBtn) nextBtn.onclick = () => { if (idx < shots.length - 1) { idx++; paint(); } };
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.showModal();
+};
 let unsubscribe = null;
 let currentFilters = { status: "All", search: "" };
 
@@ -30,9 +83,9 @@ const normalisePaymentStatus = (raw) => {
 };
 
 const STATUS_STYLES = {
-  pending: "background:#fffbeb; color:#d97706; border:1px solid #fde68a;",
-  paid: "background:#f0fdf4; color:#16a34a; border:1px solid #bbf7d0;",
-  rejected: "background:#fef2f2; color:#991b1b; border:1px solid #fecaca;",
+  pending: "background:rgba(245,158,11,0.14); color:var(--warning); border:1px solid rgba(245,158,11,0.45);",
+  paid: "background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45);",
+  rejected: "background:rgba(239,68,68,0.14); color:var(--danger); border:1px solid rgba(239,68,68,0.45);",
   unknown: "background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border);"
 };
 
@@ -324,7 +377,9 @@ const renderPaymentAdminTable = () => {
 
     html += `
       <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:16px;">${r.transactionId || "RC-N/A"}</td>
+        <td style="padding:16px;">${/rc-imp/i.test(r.transactionId || "") ? "—" : (r.transactionId || "RC-N/A")}
+          ${(r.screenshots || []).length ? `<div style="margin-top:4px;"><span class="badge" onclick="event.stopPropagation(); window.viewPaymentScreenshots('${r.id}')" style="cursor:pointer; background:rgba(0,113,227,0.12); color:var(--primary); font-size:0.7rem; padding:2px 8px; border-radius:999px; font-weight:600;">📎 ${(r.screenshots).length} SS</span></div>` : ""}
+        </td>
         <td style="padding:16px; font-weight:600; color:var(--text-primary);">${r.studentName || "Unknown"}</td>
         <td style="padding:16px;">${r.planName || "Unknown Plan"}</td>
         <td style="padding:16px;">${r.paymentMethod || "Cash"}</td>

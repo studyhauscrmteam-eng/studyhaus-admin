@@ -1,5 +1,5 @@
 import { listenToAllSeats, assignSeat, unassignSeat, changeSeatStatus, seedInitialSeats, reconcileSeatOccupancy, cleanupNonPlanSeats, saveSeatPosition, renameSeat, addSeatAt, deleteSeatById } from "./seatService.js";
-import { getDocs, collection, query, where } from "firebase/firestore";
+import { getDocs, collection, query, where, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
 let allSeats = [];
@@ -12,6 +12,79 @@ let seatHealthOrphans = [];
 // Playground: admin "Edit layout" mode — drag/rename/add/delete seats.
 let layoutEditMode = false;
 let dragSeatId = null;
+
+// ── Seat hover card: student photo + name on an assigned seat ───────────────
+// Bigger accent-styled card that opens ABOVE the tile (flips below only when
+// there is no room on top). Shared by the Seat Map and the Live Seat Map —
+// callers pass the seat object itself (window.__seatHoverShow(seat, el)).
+let seatHoverCard = null;
+let seatHoverCurrent = null;
+const seatHoverPhotoCache = {}; // studentId → dataURL | null
+
+const ensureHoverCard = () => {
+  if (seatHoverCard) return seatHoverCard;
+  seatHoverCard = document.createElement("div");
+  seatHoverCard.id = "seat-hover-card";
+  seatHoverCard.style.cssText = "position:fixed; z-index:99990; display:none; pointer-events:none; background:var(--bg-card); border:1px solid var(--border); border-left:4px solid var(--primary); border-radius:14px; padding:16px 18px; box-shadow:0 18px 45px rgba(0,0,0,0.45); gap:14px; align-items:center; min-width:250px;";
+  document.body.appendChild(seatHoverCard);
+  return seatHoverCard;
+};
+
+const seatHoverPhoto = async (studentId) => {
+  if (studentId in seatHoverPhotoCache) return seatHoverPhotoCache[studentId];
+  let url = null;
+  try {
+    const sSnap = await getDoc(doc(db, "students", studentId));
+    if (sSnap.exists()) {
+      const v = sSnap.data() || {};
+      url = v.profilePhotoUrl || v.photoUrl || null;
+    }
+    if (!url) {
+      const dSnap = await getDoc(doc(db, "studentDocuments", studentId));
+      if (dSnap.exists()) url = (dSnap.data() || {}).photo || null;
+    }
+  } catch (_) { url = null; }
+  seatHoverPhotoCache[studentId] = url;
+  return url;
+};
+
+const seatHoverStatusLabel = (status) => (status === "Reserved" ? "Preferred" : (status === "Occupied" ? "Checked in" : (status || "")));
+
+window.__seatHoverShow = async (seatOrId, el) => {
+  const seat = typeof seatOrId === "string" ? allSeats.find(s => s.id === seatOrId) : seatOrId;
+  if (!seat || !(seat.assignedStudentId || seat.studentId)) return;
+  const studentId = seat.assignedStudentId || seat.studentId;
+  const name = seat.assignedStudentName || seat.studentName || "Student";
+  seatHoverCurrent = studentId + "|" + (seat.seatNumber || "");
+  const card = ensureHoverCard();
+  const initials = name.trim().substring(0, 2).toUpperCase();
+  const statusLabel = seatHoverStatusLabel(seat.status);
+  card.innerHTML = `
+    <div id="seat-hover-photo" style="width:60px; height:60px; border-radius:14px; background:var(--bg-hover); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; overflow:hidden; flex-shrink:0;">${initials}</div>
+    <div style="min-width:0;">
+      <div style="font-weight:700; font-size:15px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;">${name}</div>
+      <div style="font-size:12px; color:var(--text-secondary); margin-top:3px; white-space:nowrap;">Seat ${seat.seatNumber || "?"} · ${seatHoverStatusLabel(statusLabel) === statusLabel ? statusLabel : statusLabel}</div>
+      <div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px; letter-spacing:0.3px;">${statusLabel.toUpperCase()}</div>
+    </div>`;
+  card.style.display = "flex";
+  const rect = el.getBoundingClientRect();
+  const cardH = 100;
+  let top = rect.top - cardH - 8; // ABOVE the tile by default
+  if (top < 8) top = rect.bottom + 8; // no room on top → fall below
+  let left = Math.min(rect.left, window.innerWidth - 270);
+  card.style.left = `${Math.max(8, left)}px`;
+  card.style.top = `${Math.max(8, top)}px`;
+  const photo = await seatHoverPhoto(studentId);
+  if (seatHoverCurrent !== studentId + "|" + (seat.seatNumber || "")) return; // mouse moved on while fetching
+  if (photo) {
+    const ph = card.querySelector("#seat-hover-photo");
+    if (ph) ph.innerHTML = `<img src="${photo}" style="width:100%;height:100%;object-fit:cover;display:block;" alt="" />`;
+  }
+};
+window.__seatHoverHide = () => {
+  seatHoverCurrent = null;
+  if (seatHoverCard) seatHoverCard.style.display = "none";
+};
 
 // ── Seat naming helpers ─────────────────────────────────────────────────────
 // Plain numbers only: Ground 1-68, First 1-40. Floor disambiguates duplicates.
@@ -108,7 +181,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
         <div style="display:flex; gap:0.75rem; margin-bottom:0.75rem; flex-wrap:wrap;">
           <span style="background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:500;">● Available</span>
           <span style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:500;">● Occupied</span>
-          <span style="background:#fffbeb; color:#92400e; border:1px solid #fde68a; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:500;">${isCheckinContext ? "● Reserved — pickable" : "● Reserved"}</span>
+          <span style="background:#fffbeb; color:#92400e; border:1px solid #fde68a; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:500;">${isCheckinContext ? "● Preferred — pickable" : "● Preferred"}</span>
           <span style="background:var(--primary); color:#fff; border:1px solid var(--primary); padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600;">✓ Selected</span>
         </div>
         <!-- Seat grid -->
@@ -333,7 +406,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
       if (!isPickable) {
         window.showToast && window.showToast(
         isCheckinContext
-          ? "This seat can't be taken right now. Choose a free seat — green (Available) or amber (Reserved)."
+          ? "This seat can't be taken right now. Choose a free seat — green (Available) or amber (Preferred)."
           : "This seat is not available. Please choose a green (Available) seat.",
         "warning");
         return;
@@ -473,7 +546,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
       <div class="seat-legend" style="display:flex; gap:1rem; margin-bottom:1.5rem;">
         <span class="legend-pill legend-av"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.available">Available</span></span>
         <span class="legend-pill legend-oc"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.occupied">Occupied</span></span>
-        <span class="legend-pill legend-rs"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.reserved">Reserved</span></span>
+        <span class="legend-pill legend-rs"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.reserved">Preferred</span></span>
         <span class="legend-pill legend-mt"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.maintenance">Maintenance</span></span>
       </div>
 
@@ -485,7 +558,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
           style="padding:8px 14px; border:1px solid var(--border); border-radius:999px; background:var(--bg-card); color:var(--text-primary); font-size:13px; cursor:pointer;">
           <option value="All">All statuses</option>
           <option value="Available">Available</option>
-          <option value="Reserved">Reserved</option>
+          <option value="Reserved">Preferred</option>
           <option value="Occupied">Occupied</option>
           <option value="Maintenance">Maintenance</option>
           <option value="Inactive">Inactive</option>
@@ -988,6 +1061,7 @@ const updateSeatAnalysis = (seats) => {
           class="seat-card"
           ${dragAttrs} ${dropAttrs}
           onclick="window.handleSeatClick('${seat.id}')"
+          ${seat.assignedStudentId ? `onmouseenter="window.__seatHoverShow('${seat.id}', this)" onmouseleave="window.__seatHoverHide()"` : ""}
           style="
             position:relative;
             background: ${__pal.bg}; border: ${__pal.border}; color: ${__pal.color};
@@ -998,7 +1072,6 @@ const updateSeatAnalysis = (seats) => {
           "
           onmouseover="this.style.boxShadow='0 0 0 2px currentColor';"
           onmouseout="this.style.boxShadow='none';"
-          title="${seat.seatNumber} · ${seat.status}${seat.assignedStudentName ? ' · ' + seat.assignedStudentName : ''}${layoutEditMode ? ' · drag to move' : ''}"
         >
           ${editBtns}
           <div style="font-size: 14px; font-weight: 600;">${seat.seatNumber}</div>

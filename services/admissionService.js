@@ -1385,8 +1385,9 @@ export const initAdmissionsUI = async () => {
             }
         } else {
             if (selectedSeat) {
+              // Assignment = Reserved ("Preferred"); Occupied happens on check-in.
               await updateDoc(doc(db, "seats", selectedSeat.id), {
-                status: "Occupied",
+                status: "Reserved",
                 assignedStudentId: res.studentId,
                 assignedStudentName: data.name,
                 planType: data.planName,

@@ -33,7 +33,7 @@
   "auth.register": "Register",
   "status.available": "Available",
   "status.occupied": "Occupied",
-  "status.reserved": "Reserved",
+  "status.reserved": "Preferred",
   "status.maintenance": "Maintenance",
   "status.present": "Present",
   "status.absent": "Absent",

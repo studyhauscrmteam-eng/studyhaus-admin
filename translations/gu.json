@@ -33,7 +33,7 @@
   "auth.register": "નોંધણી",
   "status.available": "ઉપલબ્ધ",
   "status.occupied": "ભરાયેલ",
-  "status.reserved": "આરક્ષિત",
+  "status.reserved": "પ્રેફર્ડ",
   "status.maintenance": "જાળવણી",
   "status.present": "હાજર",
   "status.absent": "ગેરહાજર",

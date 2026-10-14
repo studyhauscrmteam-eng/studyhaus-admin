@@ -139,7 +139,7 @@ const renderLogs = () => {
         <td style="font-size:0.85rem; color:var(--text-muted);">${l.sentDate}</td>
         <td style="font-weight:600;">${l.studentName}</td>
         <td>${l.phone}</td>
-        <td><span class="badge" style="background:#e5e7eb; color:#374151;">${l.templateName}</span></td>
+        <td><span class="badge" style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border);">${l.templateName}</span></td>
         <td style="font-size:0.85rem; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${l.message}">
           ${snippet}
         </td>

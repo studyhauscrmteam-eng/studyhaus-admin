@@ -16,6 +16,9 @@ yarn-error.log*
 firebase-debug.log
 firestore-debug.log
 
+# Migration artifacts (raw exports, backups, reports)
+migration/
+
 # OS files
 .DS_Store
 Thumbs.db

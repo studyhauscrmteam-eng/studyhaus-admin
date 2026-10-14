@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(npm:*)",
+      "Shell(node -e console.log(require.resolve('firebase-admin/package.json')))",
+      "Shell(node -e \"try{console.log(require.resolve('firebase-admin/package.json'))}catch(e){console.log('NOT RESOLVED:', e.code)}\")",
+      "Shell(node -e \"console.log(process.version); const fs=require('fs'); console.log('firebase-admin dir:', fs.existsSync('node_modules/firebase-admin')); console.log('firebase dir:', fs.existsSync('node_modules/firebase')); console.log('lock entries:', (function(){const l=JSON.parse(fs.readFileSync('package-lock.json','utf8')); return Object.keys(l.packages||{}).filter(k=>k.includes('firebase-admin'));})())\")",
+      "Shell(node -e \"console.log(require.resolve('firebase-admin/package.json')); const {getApps}=require('firebase-admin/app'); console.log('firebase-admin loads OK')\")",
+      "Shell(node -e \"const fs=require('fs'); const dirs=fs.readdirSync('node_modules').filter(d=>/fire/i.test(d)); console.log(dirs); console.log('lockfile firebase-admin:', JSON.parse(fs.readFileSync('package-lock.json','utf8')).packages['node_modules/firebase-admin']?.version)\")",
+      "Shell(node -e \"const fs=require('fs'); console.log('.npmrc:', fs.existsSync('.npmrc') ? fs.readFileSync('.npmrc','utf8') : 'none'); console.log('home .npmrc:'); try{console.log(fs.readFileSync(require('path').join(require('os').homedir(),'.npmrc'),'utf8'))}catch(e){console.log('none')}\")",
+      "Shell(node -e \"const l=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); const p=l.packages['node_modules/firebase-admin']; console.log(JSON.stringify(p,null,2).slice(0,800))\")",
+      "Shell(node -e \"const fs=require('fs'); ['google-auth-library','@fastify/busboy','jsonwebtoken','firebase-admin'].forEach(d=>console.log(d, fs.existsSync('node_modules/'+d)))\")",
+      "Shell(node -e \"console.log('playwright-core:', require('fs').existsSync('node_modules/playwright-core'))\")",
+      "Shell(node -e \"require('firebase-admin/app'); require('firebase-admin/firestore'); require('playwright-core'); console.log('firebase-admin + playwright-core load OK')\")",
+      "Shell(node --check scripts/migration/lib.mjs)",
+      "Shell(node --check scripts/migration/extract-mlibrary.mjs)",
+      "Shell(node --check scripts/migration/normalize.mjs)",
+      "Shell(node --check scripts/migration/import.mjs)",
+      "Shell(node --check scripts/migration/verify.mjs)",
+      "Shell(node -e const fs=require('fs'); const f=JSON.parse(fs.readFileSync('migration/raw/students.fixture.json','utf8')); fs.writeFileSync('migration/raw/students.json', JSON.stringify({extractedAt:new Date().toISOString(),students:f.students},null,2)); fs.writeFileSync('migration/raw/payments.json', JSON.stringify({extractedAt:new Date().toISOString(),payments:f.payments},null,2)); console.log('fixture installed'))",
+      "Shell(node scripts/migration/normalize.mjs)",
+      "Shell(node -e \"const a=require('firebase-admin'); console.log('keys:', Object.keys(a).slice(0,40).join(', ')); console.log('has credential:', !!a.credential)\")",
+      "Shell(node -e \"const app=require('firebase-admin/app'); console.log('app:', Object.keys(app).join(', ')); const fs2=require('firebase-admin/firestore'); console.log('firestore:', Object.keys(fs2).slice(0,25).join(', '))\")",
+      "Shell(node -e \"const fs=require('fs'); for (const f of ['scripts/migration/normalize.mjs','scripts/migration/import.mjs','scripts/migration/verify.mjs']) { let c=fs.readFileSync(f,'utf8'); const before=c; c=c.replace(/\\.exists\\(\\)/g, '.exists'); fs.writeFileSync(f,c); console.log(f, before!==c ? 'fixed' : 'no change'); }\")",
+      "Shell(node -e \"const d=require('./migration/normalized/students.json'); console.log('errors:', JSON.stringify(d.errors, null, 2)); console.log('plan of test one:', JSON.stringify(d.students[0], null, 2).slice(0, 600))\")",
+      "Shell(node -e \" const { initializeApp, cert, applicationDefault } = require('firebase-admin/app'); const { getFirestore } = require('firebase-admin/firestore'); const fs = require('fs'); const path = 'D:/code/LIB/New folder/Shreeji-Library/server/serviceAccountKey.json'; const app = initializeApp({ credential: cert(JSON.parse(fs.readFileSync(path,'utf8'))), projectId: 'studyhaus-crm' }); const db = getFirestore(app); db.collection('membershipPlans').get().then(s => { const out=[]; s.forEach(d=>{const v=d.data()||{}; out.push({id:d.id, planName:v.planName, price:v.price, status:v.status||''});}); console.log(JSON.stringify(out,null,2)); process.exit(0); }).catch(e=>{console.error(e.message); process.exit(1);}); \")",
+      "Shell(node -e \" const { initializeApp, cert } = require('firebase-admin/app'); const { getFirestore } = require('firebase-admin/firestore'); const fs = require('fs'); const keyPath = 'D:/code/LIB/New folder/Shreeji-Library/server/serviceAccountKey.json'; const app = initializeApp({ credential: cert(JSON.parse(fs.readFileSync(keyPath,'utf8'))), projectId: 'studyhaus-crm' }); const db = getFirestore(app); (async () => { try { const s = await db.collection('membershipPlans').get(); const out = []; s.forEach(d => { const v = d.data() || {}; out.push({ id: d.id, planName: v.planName, price: v.price, status: v.status || '' }); }); console.log(JSON.stringify(out, null, 2)); process.exit(0); } catch (e) { console.error('ERR', e.message); process.exit(1); } })(); \")",
+      "Shell(node \"C:\\Users\\Asus\\AppData\\Local\\Temp\\commandcode\\D--code-BBAACCKKUUPP-studyhaus-admin\\1ba04510-6ca8-4a54-89f8-7e3f3157f57c\\scratchpad\\list-plans.mjs\")",
+      "Shell(node scripts/migration/import.mjs)",
+      "Shell(node scripts/migration/verify.mjs)",
+      "Shell(node scripts/check-modules.js)",
+      "Shell(node -e const fs=require('fs'); fs.rmSync('migration', {recursive:true, force:true}); console.log('migration/ test artifacts removed'))"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

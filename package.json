@@ -9,13 +9,24 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "deploy": "node scripts/deploy-hosting.js --site studyhaus-crm-admin",
     "deploy:status": "node scripts/deploy-hosting.js --status",
-    "deploy:dry-run": "node scripts/deploy-hosting.js --dry-run --site studyhaus-crm-admin"
+    "deploy:dry-run": "node scripts/deploy-hosting.js --dry-run --site studyhaus-crm-admin",
+    "migrate:extract": "node scripts/migration/extract-mlibrary.mjs",
+    "migrate:extract:inspect": "node scripts/migration/extract-mlibrary.mjs --inspect",
+    "migrate:check": "node scripts/migration/normalize.mjs",
+    "migrate:backup": "node scripts/migration/backup.mjs",
+    "migrate:cleanup": "node scripts/migration/cleanup.mjs",
+    "migrate:fix-seats": "node scripts/migration/fix-seats.mjs",
+    "migrate:photos:download": "node scripts/migration/download-photos.mjs",
+    "migrate:photos:import": "node scripts/migration/import-photos.mjs",
+    "migrate:renewals:import": "node scripts/migration/import-renewals.mjs",
+    "migrate:import": "node scripts/migration/import.mjs",
+    "migrate:verify": "node scripts/migration/verify.mjs"
   },
   "license": "ISC",
   "dependencies": {
-    "firebase": "^12.16.0"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.64.0"
+    "firebase": "^12.16.0",
+    "firebase-admin": "14.5.0",
+    "playwright-core": "^1.64.0",
+    "sharp": "0.35.5"
   }
 }

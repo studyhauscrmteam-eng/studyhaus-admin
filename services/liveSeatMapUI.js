@@ -1,6 +1,18 @@
 import { collection, query, where, onSnapshot, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
+// Hover card bridge — the shared photo+name card lives in seatMapUI.js.
+// Pass-through with JS-safe string escaping for inline attributes.
+const escJs = (v) => String(v == null ? "" : v).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+window.__liveSeatHoverShow = (studentId, studentName, seatNumber, status, el) => {
+  window.__seatHoverShow({
+    assignedStudentId: studentId,
+    assignedStudentName: studentName,
+    seatNumber: seatNumber,
+    status: status,
+  }, el);
+};
+
 // State
 let allSeats = [];
 let activeAttendance = [];
@@ -171,7 +183,7 @@ export const initLiveSeatMapInTab = (containerId) => {
       </span>
       <span class="legend-pill" id="live-legend-reserved" style="padding:4px 12px; border-radius:999px; font-size:13px; font-weight:500; display:inline-flex; align-items:center; gap:6px;">
         <span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span>
-        Reserved
+        Preferred
       </span>
       <span class="legend-pill" id="live-legend-maint" style="padding:4px 12px; border-radius:999px; font-size:13px; font-weight:500; display:inline-flex; align-items:center; gap:6px;">
         <span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span>
@@ -353,7 +365,9 @@ const renderLiveMap = () => {
                  width:100%; height:70px; box-sizing:border-box;
                  display:flex; flex-direction:column; align-items:center;
                  justify-content:center; gap:2px; cursor:default; overflow:hidden; padding:4px;
-                 box-shadow:0 1px 3px rgba(239,68,68,0.12); position:relative;">
+                 box-shadow:0 1px 3px rgba(239,68,68,0.12); position:relative;"
+             onmouseenter="window.__liveSeatHoverShow('${escJs(att.studentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this)"
+             onmouseleave="window.__seatHoverHide()">
           <div style="position:absolute; top:4px; left:4px; font-size:9px; font-weight:700; color:${ps.sub}; line-height:1;">${seatNumStr}</div>
           <div style="display:flex; align-items:center; justify-content:center; position:relative; margin-top:6px;">
             ${avatarHtml}
@@ -361,7 +375,7 @@ const renderLiveMap = () => {
                         background:#22c55e; border-radius:50%; border:1px solid #fff;"></div>
           </div>
           <div style="font-size:9px; font-weight:600; color:${ps.color}; max-width:100%; white-space:nowrap;
-                      overflow:hidden; text-overflow:ellipsis; line-height:1; text-align:center;" title="${firstName}">${firstName}</div>
+                      overflow:hidden; text-overflow:ellipsis; line-height:1; text-align:center;">${firstName}</div>
           ${checkInTime ? `<div style="position:absolute; bottom:4px; right:4px; font-size:8px; color:${ps.sub}; font-weight:500;">${checkInTime}</div>` : ''}
         </div>
       `;
@@ -371,17 +385,20 @@ const renderLiveMap = () => {
     // Reserved/Maintenance/Inactive) so status changes reflect here instantly.
     const st = liveStatusStyle(seat.status);
     const sub = seat.assignedStudentName
-      ? `<div style="font-size:9px; font-weight:600; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1; text-align:center;" title="${seat.assignedStudentName}">${String(seat.assignedStudentName).split(' ')[0]}</div>`
+      ? `<div style="font-size:9px; font-weight:600; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1;">${String(seat.assignedStudentName).split(' ')[0]}</div>`
       : "";
     const statusTag = (seat.status !== "Available")
       ? `<div style="position:absolute; top:4px; left:4px; font-size:8px; font-weight:700; line-height:1; opacity:0.8;">${seat.status}</div>`
+      : "";
+    const hoverAttrs = seat.assignedStudentId
+      ? `onmouseenter="window.__liveSeatHoverShow('${escJs(seat.assignedStudentId)}', '${escJs(seat.assignedStudentName)}', '${escJs(seatNumStr)}', '${escJs(seat.status)}', this)" onmouseleave="window.__seatHoverHide()"`
       : "";
     return `
       <div style="background:${st.bg}; border:${st.border}; color:${st.color}; border-radius:10px;
                   width:100%; height:70px; box-sizing:border-box;
                   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
                   cursor:default; padding:4px; position:relative; overflow:hidden;"
-           title="${seatNumStr} · ${seat.status}${seat.assignedStudentName ? ' · ' + seat.assignedStudentName : ''}">
+           ${hoverAttrs}>
         ${statusTag}
         <div style="font-size:15px; font-weight:600; line-height:1; margin-top:${sub ? "6px" : "0"};">${seatNumStr}</div>
         ${sub}

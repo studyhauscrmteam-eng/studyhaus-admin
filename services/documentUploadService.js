@@ -509,6 +509,42 @@ export const renderStudentDocuments = async (studentId, containerId = "student-d
   }
 
   html += `</div>`;
+
+  // ── Payment screenshots carried by the student's PAYMENTS ────────────────
+  // Every portal payment can hold up to 4 of its own screenshots in
+  // payments/{id}.screenshots[] — render them ALL here, newest first,
+  // labelled with the payment date, so history is never one-and-overwritten.
+  try {
+    const { collection: fsCollection, query: fsQuery, where: fsWhere, getDocs: fsGetDocs } = await import("firebase/firestore");
+    const paySnap = await fsGetDocs(fsQuery(fsCollection(db, "payments"), fsWhere("studentId", "==", studentId)));
+    const shots = [];
+    paySnap.forEach((d) => {
+      const v = d.data() || {};
+      const arr = Array.isArray(v.screenshots) ? v.screenshots : [];
+      const when = v.paymentDate || (v.date ? String(v.date).split("T")[0] : "");
+      arr.forEach((dataUrl, i) => shots.push({ dataUrl, when, n: arr.length > 1 ? ` ${i + 1}/${arr.length}` : "" }));
+    });
+    shots.sort((a, b) => String(b.when).localeCompare(String(a.when)));
+    if (shots.length) {
+      html += `<h3 style="margin:1.25rem 0 0.75rem; font-size:0.95rem; font-weight:600;">Payment Screenshots (${shots.length})</h3>`;
+      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;">`;
+      shots.forEach((s, i) => {
+        html += `
+          <div style="border:1px solid var(--border);border-radius:12px;padding:.75rem;background:var(--bg-card);display:flex;flex-direction:column;gap:.5rem;">
+            <img src="${s.dataUrl}" alt="Payment screenshot" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:#000;">
+            <div style="font-weight:600;font-size:12px;">Payment Screenshot${s.n}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:-4px;">Paid on ${s.when || "—"}</div>
+            <div style="margin-top:auto;">
+              <a class="btn btn-primary" style="width:100%;font-size:12px;padding:7px;text-align:center;text-decoration:none;" download="payment-screenshot-${s.when || i}.jpg" href="${s.dataUrl}">Download</a>
+            </div>
+          </div>`;
+      });
+      html += `</div>`;
+    }
+  } catch (e) {
+    console.warn("[docs] payment screenshots load skipped:", e);
+  }
+
   container.innerHTML = html;
 };
 

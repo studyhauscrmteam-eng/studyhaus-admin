@@ -92,7 +92,7 @@ export const listenToMyPayments = (studentId, onUpdate, onError) => {
   return onSnapshot(q, (snapshot) => {
     const records = [];
     snapshot.forEach(doc => records.push({ id: doc.id, ...doc.data() }));
-    records.sort((a, b) => new Date(b.date) - new Date(a.date));
+    records.sort((a, b) => new Date(b.date || b.paymentDate || 0) - new Date(a.date || a.paymentDate || 0));
     try { onUpdate(records); } catch (e) { console.warn("[payments] onUpdate failed:", e); }
   }, (err) => {
     const msg = (err && (err.message || err.code)) || String(err);
@@ -116,7 +116,7 @@ export const listenToAllPayments = (onUpdate) => {
   return onSnapshot(q, (snapshot) => {
     const records = [];
     snapshot.forEach(doc => records.push({ id: doc.id, ...doc.data() }));
-    records.sort((a, b) => new Date(b.date) - new Date(a.date));
+    records.sort((a, b) => new Date(b.date || b.paymentDate || 0) - new Date(a.date || a.paymentDate || 0));
     onUpdate(records);
   });
 };

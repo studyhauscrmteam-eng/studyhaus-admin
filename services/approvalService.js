@@ -258,10 +258,12 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
 
     if (seat.allowed && seat.number && seatRef) {
       // merge:true preserves floor/col/row on the existing seat doc.
+      // Assignment marks the seat Reserved ("Preferred"): the student has
+      // claimed it, but Occupied is only set when they check in.
       tx.set(seatRef, {
         seatNumber: seat.number,
         ...(seat.floor ? { floor: seat.floor } : {}),
-        status: "Occupied",
+        status: "Reserved",
         assignedStudentId: id,
         assignedStudentName: data.name || "",
         planType: data.planName || "",
@@ -319,7 +321,7 @@ const approveLegacyAdmission = async (admissionId) => {
     if (seatDoc && (seatDoc.data.status === "Available" ||
         (seatDoc.data.status === "Reserved" && seatDoc.data.assignedStudentId === admissionId))) {
       await updateDoc(seatDoc.ref, {
-        status: "Occupied",
+        status: "Reserved",
         assignedStudentId: admissionId,
         assignedStudentName: data.name,
         planType: data.planName,

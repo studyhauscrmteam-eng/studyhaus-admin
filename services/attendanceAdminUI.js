@@ -323,15 +323,15 @@ const renderTable = () => {
 
     let badgeHtml = "";
     if (record && record.status === "Active") {
-      badgeHtml = `<button onclick="window.handleForceCheckOut('${record.id}', ${record.checkIn})" title="Click to check out" style="background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='#dcfce7'" onmouseout="this.style.background='#f0fdf4'">Present</button>`;
+      badgeHtml = `<button onclick="window.handleForceCheckOut('${record.id}', ${record.checkIn})" title="Click to check out" style="background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='rgba(34,197,94,0.28)'" onmouseout="this.style.background='rgba(34,197,94,0.14)'">Present</button>`;
     } else if (record && record.status === "Completed") {
-      badgeHtml = `<span style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid #cbd5e1; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px;">Completed</span>`;
+      badgeHtml = `<span style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px;">Completed</span>`;
     } else if (isOnLeave) {
-      badgeHtml = `<button onclick="window.toggleLeave('${student.id}', '${todayStr}', false)" title="Remove Leave" style="background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='#ffedd5'" onmouseout="this.style.background='#fff7ed'">On Leave</button>`;
+      badgeHtml = `<button onclick="window.toggleLeave('${student.id}', '${todayStr}', false)" title="Remove Leave" style="background:rgba(245,158,11,0.14); color:var(--warning); border:1px solid rgba(245,158,11,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='rgba(245,158,11,0.28)'" onmouseout="this.style.background='rgba(245,158,11,0.14)'">On Leave</button>`;
     } else {
-      badgeHtml = `<span style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; margin-bottom: 4px;">Absent</span>
+      badgeHtml = `<span style="background:rgba(239,68,68,0.14); color:var(--danger); border:1px solid rgba(239,68,68,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; margin-bottom: 4px;">Absent</span>
                    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">
-                     <div style="font-size:10px; color:#166534; cursor:pointer; text-decoration:underline;" onclick="window.markPresent('${student.id}', event)">Mark Present</div>
+                     <div style="font-size:10px; color:var(--success); cursor:pointer; text-decoration:underline;" onclick="window.markPresent('${student.id}', event)">Mark Present</div>
                      <div style="font-size:10px; color:var(--text-secondary); cursor:pointer; text-decoration:underline;" onclick="window.toggleLeave('${student.id}', '${todayStr}', true, event)">Mark Leave</div>
                    </div>`;
     }

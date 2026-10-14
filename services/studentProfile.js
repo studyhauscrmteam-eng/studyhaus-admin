@@ -358,31 +358,32 @@ const renderTable = () => {
       ? `<span class="st${tone ? ` st-${tone}` : ""}"${tone ? "" : ` style="color:var(--text-muted);"`}><i class="st-dot"></i>${esc(statusText)}</span>`
       : `<span style="color:var(--text-muted);">—</span>`;
 
-    let planHtml = `<span style="white-space: normal;">${s.planName || "None"}</span>`;
-    const priceMatch = s.planName ? s.planName.match(/(.*?)( - | · | )₹(\d+.*)/) : null;
-    if (priceMatch) {
-      planHtml = `<div style="line-height: 1.4;">
-                    <div>${priceMatch[1].trim()}</div>
-                    <div style="font-size: 0.85em; color: var(--text-muted);">₹${priceMatch[3]}</div>
-                  </div>`;
-    } else if (s.planName) {
-      planHtml = `<div style="line-height: 1.4;">${s.planName}</div>`;
-    }
+    // Plan on ONE line — "Monthly - ₹1,200" never wraps.
+    const planHtml = s.planName
+      ? `<span style="white-space: nowrap;">${s.planName}</span>`
+      : `<span style="color:var(--text-muted);">None</span>`;
 
     let nameHtml = s.name ? `<div class="name" style="line-height: 1.3;">${s.name}</div>` : `<div class="name">Unknown</div>`;
 
     // Migration / provenance flags. These records are NEVER hidden or
     // removed — they are only labelled so staff know what they're looking at.
     const flagsHtml = buildFlagBadges(s);
-    let leavingDateHtml = `<span style="color:var(--text-muted);">—</span>`;
-    if (s.plannedExitDate) {
-      const exitD = new Date(s.plannedExitDate);
-      if (!isNaN(exitD.getTime())) {
-        const diffTime = exitD - today;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        const short = exitD.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-        const left = diffDays < 0 ? "Passed" : diffDays + "d left";
-        leavingDateHtml = `<div style="line-height:1.5;" title="${s.plannedExitDate}"><div style="font-weight:500; white-space:nowrap;">${short}</div><div style="font-size:11px; color:var(--text-muted);">${left}</div></div>`;
+
+    // Membership end + days left (old-site style: End: 25 Oct 2026 · 11 days left)
+    let dueHtml = `<span style="color:var(--text-muted);">—</span>`;
+    if (s.paymentDueDate) {
+      const due = new Date(`${s.paymentDueDate}T00:00:00`);
+      if (!isNaN(due.getTime())) {
+        const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+        const endStr = due.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+        const left = diffDays < 0
+          ? `<span style="color:var(--danger); font-weight:600;">Expired ${-diffDays}d ago</span>`
+          : diffDays === 0
+            ? `<span style="color:var(--warning); font-weight:600;">Due today</span>`
+            : `<span style="color:var(--success); font-weight:600;">${diffDays} days left</span>`;
+        dueHtml = `<div style="line-height:1.5;"><div style="white-space:nowrap;">End: ${endStr}</div>${left}</div>`;
+      } else {
+        dueHtml = `<div style="white-space:nowrap;">${s.paymentDueDate}</div>`;
       }
     }
 
@@ -400,10 +401,9 @@ const renderTable = () => {
             </div>
           </div>
         </td>
-        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 180px; white-space: normal; word-wrap: break-word;">${planHtml}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 180px; white-space: nowrap;">${planHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.createdAt?.toDate ? new Date(s.createdAt.toDate()).toLocaleDateString() : 'N/A'}</td>
-        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.paymentDueDate || "N/A"}</td>
-        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 130px;">${leavingDateHtml}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${dueHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusHtml}</td>
       </tr>
     `;
@@ -611,10 +611,6 @@ const renderProfileModal = (s, role) => {
               <label>Emergency Contact</label>
               <input type="tel" id="edit-emergency" value="${s.parentPhone || ''}" ${!canEdit ? 'disabled' : ''} />
             </div>
-            <div class="form-group">
-              <label>Leaving Date (Optional)</label>
-              <input type="date" id="edit-leaving-date" value="${s.plannedExitDate || ''}" ${!canEdit ? 'disabled' : ''} />
-            </div>
             
             <div class="form-group" style="grid-column: span 2;">
               <hr style="border: none; border-top: 1px solid var(--border); margin: 1rem 0;" />
@@ -692,10 +688,11 @@ const renderProfileModal = (s, role) => {
                 ${payOptions}
               </select>
             </div>
+            ${isOldStatus(s) ? "" : `
             <div class="form-group">
               <label>Transaction ID</label>
               <input type="text" id="edit-txn-id" value="${escAttr(s.transactionId || '')}" placeholder="UPI / bank reference" ${!canEdit ? 'disabled' : ''} />
-            </div>
+            </div>`}
             <div class="form-group">
               <label>Payment Due Date</label>
               <input type="date" id="edit-payment-due" value="${escAttr(s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} />
@@ -896,7 +893,6 @@ window.submitStudentEdit = async (id) => {
       planId: planEl.value,
       planName: planEl.options[planEl.selectedIndex]?.text || "",
       status: document.getElementById("edit-status").value,
-      plannedExitDate: document.getElementById("edit-leaving-date").value,
       remarks: document.getElementById("edit-remarks").value
     };
 

@@ -11,8 +11,12 @@ export const listenToRenewalHistory = (studentId, onUpdate, onError) => {
   return onSnapshot(q, (snapshot) => {
     const history = [];
     snapshot.forEach(doc => history.push({ id: doc.id, ...doc.data() }));
-    // Sort descending
-    history.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    // Sort descending. createdAt may be a Firestore Timestamp (serverTimestamp)
+    // or an ISO string — handle both, plain new Date(Timestamp) is Invalid.
+    const ts = (x) => (x && typeof x === "object" && typeof x.seconds === "number"
+      ? x.seconds * 1000
+      : new Date(x || 0).getTime() || 0);
+    history.sort((a, b) => ts(b.createdAt) - ts(a.createdAt));
     try { onUpdate(history); } catch (e) { console.warn("[renewals] onUpdate failed:", e); }
   }, (err) => {
     const msg = (err && (err.message || err.code)) || String(err);
