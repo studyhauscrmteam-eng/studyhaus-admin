@@ -68,12 +68,15 @@ window.__seatHoverShow = async (seatOrId, el) => {
     </div>`;
   card.style.display = "flex";
   const rect = el.getBoundingClientRect();
-  const cardH = 100;
-  let top = rect.top - cardH - 8; // ABOVE the tile by default
-  if (top < 8) top = rect.bottom + 8; // no room on top → fall below
-  let left = Math.min(rect.left, window.innerWidth - 270);
-  card.style.left = `${Math.max(8, left)}px`;
-  card.style.top = `${Math.max(8, top)}px`;
+  const cardW = card.offsetWidth || 260;
+  const cardH = card.offsetHeight || 100;
+  let top = rect.top - cardH - 10; // ABOVE the tile by default
+  if (top < 8) top = rect.bottom + 10; // no room on top → fall below
+  // Center horizontally directly over the seat tile
+  let left = rect.left + (rect.width / 2) - (cardW / 2);
+  left = Math.max(10, Math.min(left, window.innerWidth - cardW - 10));
+  card.style.left = `${Math.round(left)}px`;
+  card.style.top = `${Math.round(top)}px`;
   const photo = await seatHoverPhoto(studentId);
   if (seatHoverCurrent !== studentId + "|" + (seat.seatNumber || "")) return; // mouse moved on while fetching
   if (photo) {
@@ -543,11 +546,11 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
         body:not(.light-mode) #seatmap-view-existing .legend-mt { background:rgba(59,130,246,0.16); color:#60a5fa; border-color:rgba(59,130,246,0.5); }
       </style>
       <!-- Seat Legend -->
-      <div class="seat-legend" style="display:flex; gap:1rem; margin-bottom:1.5rem;">
-        <span class="legend-pill legend-av"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.available">Available</span></span>
-        <span class="legend-pill legend-oc"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.occupied">Occupied</span></span>
-        <span class="legend-pill legend-rs"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.reserved">Preferred</span></span>
-        <span class="legend-pill legend-mt"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.maintenance">Maintenance</span></span>
+      <div class="seat-legend" style="display:flex; gap:0.75rem; margin-bottom:1.5rem; flex-wrap:wrap; align-items:center;">
+        <span class="legend-pill legend-av"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.available">Available</span> <strong id="legend-count-available" style="font-weight:700; margin-left:2px;">(0)</strong></span>
+        <span class="legend-pill legend-oc"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.occupied">Occupied</span> <strong id="legend-count-occupied" style="font-weight:700; margin-left:2px;">(0)</strong></span>
+        <span class="legend-pill legend-rs"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.reserved">Chosen</span> <strong id="legend-count-reserved" style="font-weight:700; margin-left:2px;">(0)</strong></span>
+        <span class="legend-pill legend-mt"><span style="width:8px; height:8px; border-radius:50%; background:currentColor;"></span><span data-i18n="status.maintenance">Under Maintenance</span> <strong id="legend-count-maintenance" style="font-weight:700; margin-left:2px;">(0)</strong></span>
       </div>
 
       <!-- Filters: name/seat search + status only -->
@@ -558,9 +561,9 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
           style="padding:8px 14px; border:1px solid var(--border); border-radius:999px; background:var(--bg-card); color:var(--text-primary); font-size:13px; cursor:pointer;">
           <option value="All">All statuses</option>
           <option value="Available">Available</option>
-          <option value="Reserved">Preferred</option>
+          <option value="Reserved">Chosen (Preferred)</option>
           <option value="Occupied">Occupied</option>
-          <option value="Maintenance">Maintenance</option>
+          <option value="Maintenance">Under Maintenance</option>
           <option value="Inactive">Inactive</option>
         </select>
         <button id="seat-filter-clear" style="padding:8px 16px; border:1px solid var(--border); border-radius:999px; background:transparent; color:var(--text-secondary); font-size:13px; cursor:pointer;">Clear</button>
@@ -951,21 +954,46 @@ const renderSeatReqQueue = (records) => {
 };
 
 const updateSeatAnalysis = (seats) => {
-  // Scoped to the floor actually on screen — the old global count is what
-  // made "1 occupied" show while the visible map looked all-clean
-  // (the occupied seat was on the other floor, or dimmed by a filter).
   const floor = (currentFilters && currentFilters.floor) || "Ground Floor";
   const onFloor = seats.filter(s => (s.floor || "Ground Floor") === floor);
+  const total = onFloor.length;
   const occupied = onFloor.filter(s => s.status === "Occupied").length;
   const available = onFloor.filter(s => s.status === "Available").length;
+  const reserved = onFloor.filter(s => s.status === "Reserved").length;
+  const maintenance = onFloor.filter(s => s.status === "Maintenance").length;
+  const pending = onFloor.filter(s => s.status === "Pending").length;
+  const inactive = onFloor.filter(s => s.status === "Inactive").length;
+
+  // Update live counts on legend badges
+  const avEl = document.getElementById("legend-count-available");
+  if (avEl) avEl.textContent = `(${available})`;
+  const ocEl = document.getElementById("legend-count-occupied");
+  if (ocEl) ocEl.textContent = `(${occupied})`;
+  const rsEl = document.getElementById("legend-count-reserved");
+  if (rsEl) rsEl.textContent = `(${reserved})`;
+  const mtEl = document.getElementById("legend-count-maintenance");
+  if (mtEl) mtEl.textContent = `(${maintenance})`;
+
   const occupiedOther = seats.filter(s => s.status === "Occupied" && (s.floor || "Ground Floor") !== floor);
+  const reservedOther = seats.filter(s => s.status === "Reserved" && (s.floor || "Ground Floor") !== floor);
+
   const subtitle = document.getElementById("seat-subtitle");
   if (subtitle) {
-    let text = `${occupied} occupied · ${available} available on ${floor}`;
-    if (occupiedOther.length > 0) {
-      const names = occupiedOther.slice(0, 3).map(s => s.seatNumber).join(", ");
-      const more = occupiedOther.length > 3 ? ` +${occupiedOther.length - 3} more` : "";
-      text += ` · ${occupiedOther.length} occupied elsewhere (${names}${more}) — switch floor to see`;
+    const parts = [
+      `${occupied} occupied`,
+      `${available} available`,
+      `${reserved} chosen`,
+      `${maintenance} under maintenance`
+    ];
+    if (pending > 0) parts.push(`${pending} pending`);
+    if (inactive > 0) parts.push(`${inactive} inactive`);
+
+    let text = `${parts.join(" · ")} · ${total} total on ${floor}`;
+    if (occupiedOther.length > 0 || reservedOther.length > 0) {
+      const otherDetails = [];
+      if (occupiedOther.length > 0) otherDetails.push(`${occupiedOther.length} occupied`);
+      if (reservedOther.length > 0) otherDetails.push(`${reservedOther.length} chosen`);
+      text += ` · ${otherDetails.join(", ")} on other floor (switch floor to see)`;
     }
     // A status/search filter dims non-matching seats to near-invisible —
     // say so, or the scoped count looks wrong against a "clean" map.

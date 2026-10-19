@@ -224,9 +224,14 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
     payload.studentId = data.studentId || "";
     payload.admissionNo = data.admissionNo || data.studentId || "";
   }
-  if (seat.allowed) {
-    payload.seatNumber = seat.number;
-    if (seat.floor) payload.seatFloor = seat.floor;
+  if (!data.startDate) {
+    payload.startDate = new Date().toISOString().split("T")[0];
+  }
+  if (!data.endDate) {
+    payload.endDate = data.paymentDueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  }
+  if (!data.paymentDueDate && payload.endDate) {
+    payload.paymentDueDate = payload.endDate;
   }
 
   // One transaction: the student flips to Active and the seat becomes
@@ -274,6 +279,99 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
 
   await syncUserStatus(id, "Active");
   await announceDecision(id, data, "Approved");
+
+  // ── Mirror or approve initial admission payment into renewals & payments ──
+  // So Renewal History and Payment History tabs on BOTH Admin Panel and Student
+  // Portal show the admission payment + screenshot proof!
+  try {
+    const payQ = query(
+      collection(db, "payments"),
+      where("studentId", "==", id)
+    );
+    const paySnap = await getDocs(payQ);
+    let foundOnbPay = false;
+    for (const pDoc of paySnap.docs) {
+      const pData = pDoc.data() || {};
+      if (pData.source === "onboarding" || pData.source === "admission" || pData.status === "pending") {
+        foundOnbPay = true;
+        const shot = pData.screenshot || pData.paymentScreenshotUrl || (Array.isArray(pData.screenshots) ? pData.screenshots[0] : "") || data.paymentScreenshotUrl || "";
+        await updateDoc(pDoc.ref, {
+          status: "approved",
+          approvedBy: "Admin",
+          approvalDate: serverTimestamp(),
+          ...(shot ? { screenshot: shot, paymentScreenshotUrl: shot, screenshots: [shot] } : {})
+        });
+        const rQ = query(collection(db, "renewals"), where("paymentId", "==", pDoc.id));
+        const rSnap = await getDocs(rQ);
+        if (rSnap.empty) {
+          const { addDoc } = await import("firebase/firestore");
+          await addDoc(collection(db, "renewals"), {
+            studentId: id,
+            studentName: data.name || pData.studentName || "",
+            oldPlan: "",
+            newPlan: data.planName || pData.planName || "",
+            startDate: pData.startDate || payload.startDate || data.startDate || "",
+            endDate: pData.endDate || payload.endDate || data.endDate || data.paymentDueDate || "",
+            amount: Number(pData.amount || data.planPrice || 0),
+            paymentMethod: pData.paymentMethod || data.paymentMethod || "Paid",
+            transactionId: pData.transactionId || data.transactionId || "",
+            screenshot: shot,
+            paymentScreenshotUrl: shot,
+            screenshots: shot ? [shot] : [],
+            paymentId: pDoc.id,
+            source: "onboarding",
+            renewedBy: "Admin",
+            status: "Completed",
+            createdAt: serverTimestamp()
+          });
+        }
+      }
+    }
+    if (!foundOnbPay && (data.paymentMethod === "Paid" || data.paymentMethod === "Paid (UPI)" || data.paymentMethod === "Paid (Cash)" || data.paymentMethod === "UPI" || data.paymentMethod === "Cash" || data.transactionId || data.paymentScreenshotUrl)) {
+      const { addDoc } = await import("firebase/firestore");
+      const shot = data.paymentScreenshotUrl || data.paymentScreenshot || "";
+      const pRef = await addDoc(collection(db, "payments"), {
+        studentId: id,
+        studentName: data.name || "",
+        planId: data.planId || "",
+        planName: data.planName || "",
+        amount: Number(data.planPrice || data.amount || 0),
+        paymentMethod: data.paymentMethod || "Paid",
+        transactionId: data.transactionId || "ADMISSION",
+        screenshot: shot,
+        paymentScreenshotUrl: shot,
+        screenshots: shot ? [shot] : [],
+        source: "onboarding",
+        status: "approved",
+        approvedBy: "Admin",
+        approvalDate: serverTimestamp(),
+        date: new Date().toISOString(),
+        createdAt: serverTimestamp()
+      });
+      await addDoc(collection(db, "renewals"), {
+        studentId: id,
+        studentName: data.name || "",
+        oldPlan: "",
+        newPlan: data.planName || "",
+        startDate: payload.startDate || data.startDate || "",
+        endDate: payload.endDate || data.paymentDueDate || data.endDate || "",
+        amount: Number(data.planPrice || data.amount || 0),
+        paymentMethod: data.paymentMethod || "Paid",
+        transactionId: data.transactionId || "",
+        screenshot: shot,
+        paymentScreenshotUrl: shot,
+        screenshots: shot ? [shot] : [],
+        paymentId: pRef.id,
+        source: "onboarding",
+        renewedBy: "Admin",
+        status: "Completed",
+        createdAt: serverTimestamp()
+      });
+    }
+  } catch (payApproveErr) {
+    console.warn("[approval] initial payment mirror skipped:", payApproveErr);
+  }
+
   return { success: true };
 };
 

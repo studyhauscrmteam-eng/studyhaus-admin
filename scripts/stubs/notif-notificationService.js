@@ -11,3 +11,6 @@ export const listenToAdminNotifications = (onData) => {
   setTimeout(() => onData(SYSTEM_NOTIFS.slice()), 0);
   return () => {};
 };
+
+export const markNotificationRead = async () => {};
+

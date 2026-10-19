@@ -10,15 +10,15 @@ export const validateStudentData = async (data) => {
   if (!data.name || data.name.trim() === "") throw new Error("Full Name is required.");
   if (!data.phone || data.phone.trim() === "") throw new Error("Phone Number is required.");
 
-  // Owner rule: the parent's mobile may NEVER be the student's own number —
-  // it is the fallback contact we use when the student cannot be reached, so
-  // it has to reach somebody else. Digits only, 10 like every other number.
+  // Parent's mobile, college, and address are completely optional.
+  // Only validate parent's phone format if a non-empty value was actually entered.
   const digits = (v) => String(v || "").replace(/\D/g, "");
   const ownPhone = digits(data.phone);
-  const parentPhone = digits(data.parentPhone);
-  if (parentPhone) {
+  const rawParent = String(data.parentPhone || "").trim();
+  const parentPhone = digits(rawParent);
+  if (rawParent && parentPhone && !["na", "none", "null", "-"].includes(rawParent.toLowerCase())) {
     if (parentPhone.length !== 10) {
-      throw new Error("Parent's mobile number must be exactly 10 digits.");
+      throw new Error("Parent's mobile number must be exactly 10 digits (or leave it blank).");
     }
     if (parentPhone === ownPhone) {
       throw new Error("Parent's mobile number cannot be the same as the student's own number.");

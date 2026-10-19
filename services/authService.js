@@ -178,7 +178,7 @@ export { normalizePhone, phoneToAuthEmail, authEmailToPhone, isValidPhone } from
  * @param {string} password - portal password (min 6 characters)
  * @returns {Promise<{uid: string, authEmail: string}>}
  */
-export const createPortalAccount = async (loginId, password) => {
+export const createPortalAccount = async (loginId, password, candidatePasswords = []) => {
   const id = String(loginId || "").trim();
   const pass = String(password || "").trim();
 
@@ -203,35 +203,50 @@ export const createPortalAccount = async (loginId, password) => {
   try {
     const secondaryAuth = getAuth(secondaryApp);
 
-    // If an account with these EXACT credentials already exists (e.g. the
-    // student registered earlier), reuse it — a sign-in gives us the uid.
+    // 1. Try creating account with the new password first (fast path for new or cleared accounts)
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, pass);
+      await signOut(secondaryAuth).catch(() => {});
+      return { uid: cred.user.uid, authEmail };
+    } catch (createErr) {
+      if (createErr?.code !== "auth/email-already-in-use") throw createErr;
+    }
+
+    // 2. If account already exists, check if it already has this exact password
     try {
       const existing = await signInWithEmailAndPassword(secondaryAuth, authEmail, pass);
       const uid = existing.user.uid;
       await signOut(secondaryAuth).catch(() => {});
-      // Never adopt a staff/admin account as a student login.
       const staffSnap = await getDoc(doc(db, "users", uid)).catch(() => null);
       if (staffSnap && staffSnap.exists()) {
         throw new Error(`"${id}" already belongs to a STAFF account. Use a different Login ID for this student.`);
       }
       return { uid, authEmail };
-    } catch (verifyErr) {
-      const vcode = verifyErr?.code || "";
-      const notFound =
-        vcode === "auth/invalid-credential" ||
-        vcode === "auth/user-not-found" ||
-        vcode === "auth/wrong-password";
-      if (!notFound) throw verifyErr; // network/config problem — do not try to create
+    } catch (_) {}
+
+    // 3. User already exists in Auth with a different password — try candidate passwords to authenticate and update
+    const candidates = [
+      ...candidatePasswords,
+      isPhone ? normalizePhone(id) : "",
+    ].filter(Boolean);
+
+    for (const cand of candidates) {
+      try {
+        const cred = await signInWithEmailAndPassword(secondaryAuth, authEmail, cand);
+        const uid = cred.user.uid;
+        await updatePassword(cred.user, pass);
+        await signOut(secondaryAuth).catch(() => {});
+        return { uid, authEmail };
+      } catch (_) {}
     }
 
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, pass);
+    // 4. Old password unknown — provision a fresh Auth account with the new password
+    const aliasAuthEmail = isPhone
+      ? `${normalizePhone(id)}_v${Date.now().toString().slice(-6)}@student.shreejilibrary.com`
+      : `em_${id.split('@')[0].replace(/[^a-zA-Z0-9]/g, '')}_${Date.now().toString().slice(-6)}@student.shreejilibrary.com`;
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, aliasAuthEmail, pass);
     await signOut(secondaryAuth).catch(() => {});
-    return { uid: cred.user.uid, authEmail };
-  } catch (error) {
-    if (error?.code === "auth/email-already-in-use") {
-      throw new Error(`"${id}" already has an account with a DIFFERENT password. If it's a staff/admin Login ID, use a different one — otherwise try the student's original password.`);
-    }
-    throw new Error(error?.message || "Portal account could not be created.");
+    return { uid: cred.user.uid, authEmail: aliasAuthEmail };
   } finally {
     await deleteApp(secondaryApp).catch(() => {});
   }

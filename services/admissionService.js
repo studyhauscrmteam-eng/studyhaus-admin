@@ -383,21 +383,8 @@ export const initAdmissionsUI = async () => {
   window.approveStudent = async (id) => {
     const confirmed = await window.showCustomConfirm("Approve Admission", "Are you sure you want to approve this student?", "Approve", false);
     if (confirmed) {
-      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
       const res = await approveAdmission(id);
       if (res.success) {
-        // Log the decision so it stays visible on the Notifications page
-        // after the item leaves the live pending queue.
-        if (typeof window.recordAdmissionDecision === "function") {
-          window.recordAdmissionDecision({
-            admissionId: id,
-            name: rec.name || "Admission",
-            phone: rec.phone || "",
-            planName: rec.planName || "",
-            seat: rec.seatAssigned || rec.seatNumber || "",
-            decision: "Approved",
-          });
-        }
         window.showToast("Admission Approved! Student is now Active.", "success");
       }
       else window.showToast("Error: " + res.error, "error");
@@ -407,20 +394,8 @@ export const initAdmissionsUI = async () => {
   window.rejectStudent = async (id) => {
     const reason = await window.showCustomPrompt("Reject Admission", "Please provide a reason for rejection (optional):", "Reject", true);
     if (reason !== null) {
-      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
       const res = await rejectAdmission(id, reason);
       if (res.success) {
-        if (typeof window.recordAdmissionDecision === "function") {
-          window.recordAdmissionDecision({
-            admissionId: id,
-            name: rec.name || "Admission",
-            phone: rec.phone || "",
-            planName: rec.planName || "",
-            seat: rec.seatAssigned || rec.seatNumber || "",
-            decision: "Rejected",
-            reason: reason || "",
-          });
-        }
         window.showToast("Admission Rejected.", "info");
       }
       else window.showToast("Error: " + res.error, "error");
@@ -440,19 +415,8 @@ export const initAdmissionsUI = async () => {
       false
     );
     if (confirmed) {
-      const rec = (window.__pendingAdmissions || []).find(r => r.id === id) || {};
       const res = await dismissAdmission(id);
       if (res.success) {
-        if (typeof window.recordAdmissionDecision === "function") {
-          window.recordAdmissionDecision({
-            admissionId: id,
-            name: rec.name || "Admission",
-            phone: rec.phone || "",
-            planName: rec.planName || "",
-            seat: rec.seatAssigned || rec.seatNumber || "",
-            decision: "Dismissed",
-          });
-        }
         window.showToast("Request dismissed — it is out of the queue.", "info");
       }
       else window.showToast("Error: " + res.error, "error");
@@ -774,6 +738,9 @@ export const initAdmissionsUI = async () => {
             <dl class="ad-grid">
               ${plain("Application no.", data.studentId || data.admissionNo)}
               ${plain("Plan", data.planName)}
+              ${plain("Start date", data.startDate)}
+              ${plain("End date", data.endDate)}
+              ${plain("Duration", data.duration ? `${data.duration} days` : "")}
               ${val(data.seatAssigned || data.seatNumber)
                 ? row("Preferred seat", esc(data.seatAssigned || data.seatNumber)) : ""}
               ${plain("Address", data.address)}
@@ -1168,42 +1135,200 @@ export const initAdmissionsUI = async () => {
     }
   };
 
-  window.updateSummary = () => {
-    const planId = document.getElementById("adm-plan").value;
-    if (!planId) {
-      document.getElementById("summary-plan").innerText = "—";
-      document.getElementById("summary-amount").innerText = "—";
-      document.getElementById("summary-start").innerText = "—";
-      document.getElementById("summary-ends").innerText = "—";
-      return;
-    }
-    
-    const plan = availablePlansList.find(p => p.id === planId);
-    if (plan) {
-      document.getElementById("summary-plan").innerText = plan.planName;
-      document.getElementById("summary-amount").innerText = `₹${plan.price}`;
-      
-      const today = new Date();
-      document.getElementById("summary-start").innerText = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
-      
-      if (typeof plan.duration === 'number') {
-        const endDate = new Date(today);
-        endDate.setDate(endDate.getDate() + plan.duration);
-        document.getElementById("summary-ends").innerText = endDate.toLocaleDateString('en-GB');
+  // ── Admission Duration & Dates Logic ─────────────────────────────
+  window.__admDurationMode = "month"; // "month", "days", "custom"
+
+  const getTodayStr = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const addDaysToDateStr = (dateStr, days) => {
+    if (!dateStr) return "";
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    date.setDate(date.getDate() + Number(days));
+    const ry = date.getFullYear();
+    const rm = String(date.getMonth() + 1).padStart(2, "0");
+    const rd = String(date.getDate()).padStart(2, "0");
+    return `${ry}-${rm}-${rd}`;
+  };
+
+  window.setAdmissionDurationMode = (mode) => {
+    window.__admDurationMode = mode || "month";
+    const modeInput = document.getElementById("adm-duration-mode");
+    if (modeInput) modeInput.value = window.__admDurationMode;
+
+    const monthPill = document.getElementById("adm-duration-pill-month");
+    const daysPill = document.getElementById("adm-duration-pill-days");
+    const customPill = document.getElementById("adm-duration-pill-custom");
+    if (monthPill) monthPill.classList.toggle("active", window.__admDurationMode === "month");
+    if (daysPill) daysPill.classList.toggle("active", window.__admDurationMode === "days");
+    if (customPill) customPill.classList.toggle("active", window.__admDurationMode === "custom");
+
+    const monthWrap = document.getElementById("adm-duration-month-wrap");
+    const daysWrap = document.getElementById("adm-duration-days-wrap");
+    if (monthWrap) monthWrap.style.display = window.__admDurationMode === "month" ? "block" : "none";
+    if (daysWrap) daysWrap.style.display = window.__admDurationMode === "days" ? "block" : "none";
+
+    const endEl = document.getElementById("adm-end-date");
+    if (endEl) {
+      if (window.__admDurationMode === "custom") {
+        endEl.removeAttribute("readonly");
+        endEl.focus();
       } else {
-        document.getElementById("summary-ends").innerText = "Custom";
+        endEl.setAttribute("readonly", "true");
+      }
+    }
+
+    window.recomputeAdmissionEndDate();
+  };
+
+  window.onStartDateChange = () => {
+    window.recomputeAdmissionEndDate();
+  };
+
+  window.onDurationMonthChange = () => {
+    window.recomputeAdmissionEndDate();
+  };
+
+  window.onDurationDaysChange = () => {
+    window.recomputeAdmissionEndDate();
+  };
+
+  window.onEndDateChange = () => {
+    const startEl = document.getElementById("adm-start-date");
+    const endEl = document.getElementById("adm-end-date");
+    if (startEl && endEl && startEl.value && endEl.value) {
+      if (endEl.value < startEl.value) {
+        if (typeof window.showToast === "function") {
+          window.showToast("End date cannot be earlier than start date", "warning");
+        }
+        endEl.value = startEl.value;
+      }
+    }
+    window.updateSummary();
+  };
+
+  window.recomputeAdmissionEndDate = () => {
+    const startEl = document.getElementById("adm-start-date");
+    const endEl = document.getElementById("adm-end-date");
+    if (!startEl || !endEl) return;
+    if (!startEl.value) {
+      startEl.value = getTodayStr();
+    }
+    const mode = window.__admDurationMode || document.getElementById("adm-duration-mode")?.value || "month";
+
+    if (mode === "month") {
+      const months = Number(document.getElementById("adm-duration-months")?.value || 1);
+      const totalDays = months * 30; // 30-day month
+      endEl.value = addDaysToDateStr(startEl.value, totalDays);
+    } else if (mode === "days") {
+      const days = Number(document.getElementById("adm-duration-days")?.value || 30);
+      endEl.value = addDaysToDateStr(startEl.value, days);
+    } else if (mode === "custom") {
+      if (!endEl.value) {
+        endEl.value = addDaysToDateStr(startEl.value, 30);
+      }
+    }
+    window.updateSummary();
+  };
+
+  window.updateSummary = () => {
+    const planId = document.getElementById("adm-plan")?.value;
+    const plan = availablePlansList.find(p => p.id === planId);
+    
+    const planEl = document.getElementById("summary-plan");
+    const amtEl = document.getElementById("summary-amount");
+    if (plan) {
+      if (planEl) planEl.innerText = plan.planName;
+      if (amtEl) amtEl.innerText = `₹${plan.price}`;
+    } else {
+      if (planEl) planEl.innerText = "—";
+      if (amtEl) amtEl.innerText = "—";
+    }
+
+    const startVal = document.getElementById("adm-start-date")?.value;
+    const endVal = document.getElementById("adm-end-date")?.value;
+    const mode = window.__admDurationMode || document.getElementById("adm-duration-mode")?.value || "month";
+
+    const startSummaryEl = document.getElementById("summary-start");
+    const endsSummaryEl = document.getElementById("summary-ends");
+    const durSummaryEl = document.getElementById("summary-duration");
+
+    if (startVal) {
+      const parts = startVal.split("-");
+      if (parts.length === 3 && startSummaryEl) {
+        startSummaryEl.innerText = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    } else if (startSummaryEl) {
+      startSummaryEl.innerText = "—";
+    }
+
+    if (endVal) {
+      const parts = endVal.split("-");
+      if (parts.length === 3 && endsSummaryEl) {
+        endsSummaryEl.innerText = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    } else if (endsSummaryEl) {
+      endsSummaryEl.innerText = "—";
+    }
+
+    if (durSummaryEl) {
+      if (startVal && endVal) {
+        const d1 = new Date(startVal);
+        const d2 = new Date(endVal);
+        const diffTime = d2.getTime() - d1.getTime();
+        const diffDays = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)));
+        if (mode === "month") {
+          const months = Number(document.getElementById("adm-duration-months")?.value || 1);
+          durSummaryEl.innerText = `${months} Month (${diffDays} days)`;
+        } else if (mode === "days") {
+          durSummaryEl.innerText = `${diffDays} Days`;
+        } else {
+          durSummaryEl.innerText = `${diffDays} Days (Custom)`;
+        }
+      } else {
+        durSummaryEl.innerText = "—";
       }
     }
   };
 
   window.resetAdmission = () => {
-    document.getElementById("admission-form").reset();
+    const form = document.getElementById("admission-form");
+    if (form) form.reset();
+    const startEl = document.getElementById("adm-start-date");
+    if (startEl) startEl.value = getTodayStr();
+    window.setAdmissionDurationMode("month");
+    window.recomputeAdmissionEndDate();
     window.updateSummary();
   };
 
   window.submitAdmissionForm = async (overridePaymentMethod = null, txnId = null, dueDate = null) => {
+    const formPaymentEl = document.getElementById("adm-payment-method");
+    const chosenFormMethod = formPaymentEl?.value || "";
+
+    // If operator chose Cash directly in the dropdown on the form
+    let effectiveOverride = overridePaymentMethod;
+    if (!effectiveOverride && chosenFormMethod) {
+      if (chosenFormMethod === "Paid (Cash)" || chosenFormMethod === "Cash") {
+        effectiveOverride = "Paid (Cash)";
+      } else if (chosenFormMethod === "Pay Later") {
+        const d = new Date();
+        d.setDate(d.getDate() + 3);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const dt = String(d.getDate()).padStart(2, "0");
+        dueDate = dueDate || `${y}-${m}-${dt}`;
+        effectiveOverride = "Pay Later";
+      }
+    }
+
     // If Admin/Manager and no payment method chosen yet, show popup
-    if (isAdminOrManager && !overridePaymentMethod) {
+    if (isAdminOrManager && !effectiveOverride) {
       if (!document.getElementById("admission-form").checkValidity()) {
         document.getElementById("admission-form").reportValidity();
         return;
@@ -1217,7 +1342,7 @@ export const initAdmissionsUI = async () => {
       window.processAdminPayment = (method) => {
         if (method === 'Paid (Cash)') {
           document.getElementById('admin-payment-modal').remove();
-          window.submitAdmissionForm('Paid', null, null);
+          window.submitAdmissionForm('Paid (Cash)', null, null);
         } else if (method === 'Paid (UPI)') {
           document.getElementById('admin-payment-step-1').style.display = 'none';
           document.getElementById('admin-payment-step-upi').style.display = 'block';
@@ -1248,7 +1373,7 @@ export const initAdmissionsUI = async () => {
           }
         }
         document.getElementById('admin-payment-modal').remove();
-        window.submitAdmissionForm(method === 'Paid (UPI)' ? 'Paid' : 'Pay Later', tId, dDate);
+        window.submitAdmissionForm(method === 'Paid (UPI)' ? 'Paid (UPI)' : 'Pay Later', tId, dDate);
       };
 
       const amountText = document.getElementById("summary-amount") ? document.getElementById("summary-amount").innerText : "Amount";
@@ -1263,8 +1388,8 @@ export const initAdmissionsUI = async () => {
           <div id="admin-payment-step-1" style="padding: 1.5rem; text-align: center;">
             <p style="margin-bottom: 1.5rem; color: var(--text-secondary); font-size: 0.95rem;">How is the student paying the admission fee?</p>
             <div style="display: flex; gap: 1rem; justify-content: center; flex-direction: column;">
-              <button type="button" class="btn btn-primary" onclick="window.processAdminPayment('Paid (UPI)')" style="width: 100%; padding: 12px; font-size: 15px;">Paid via UPI</button>
               <button type="button" class="btn btn-primary" onclick="window.processAdminPayment('Paid (Cash)')" style="width: 100%; padding: 12px; font-size: 15px; background: #16a34a; border: none;">Paid via Cash</button>
+              <button type="button" class="btn btn-primary" onclick="window.processAdminPayment('Paid (UPI)')" style="width: 100%; padding: 12px; font-size: 15px;">Paid via UPI</button>
               <button type="button" class="btn btn-ghost" onclick="window.processAdminPayment('Pay Later')" style="width: 100%; padding: 12px; font-size: 15px; border: 1px solid var(--borderBright);">Pay Later</button>
             </div>
           </div>
@@ -1340,6 +1465,29 @@ export const initAdmissionsUI = async () => {
         selectedSeatFloor = sd.floor || "Ground Floor";
       }
 
+      const startDateVal = document.getElementById("adm-start-date")?.value || getTodayStr();
+      const endDateVal = document.getElementById("adm-end-date")?.value || "";
+      const durationModeVal = window.__admDurationMode || document.getElementById("adm-duration-mode")?.value || "month";
+      let calcDurationDays = 30;
+      if (startDateVal && endDateVal) {
+        const d1 = new Date(startDateVal);
+        const d2 = new Date(endDateVal);
+        calcDurationDays = Math.max(0, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+      }
+
+      let finalPaymentMethod = "Pending";
+      if (isAdminOrManager) {
+        if (effectiveOverride === "Paid (Cash)" || effectiveOverride === "Cash") {
+          finalPaymentMethod = "Paid (Cash)";
+        } else if (effectiveOverride === "Paid (UPI)" || effectiveOverride === "Paid") {
+          finalPaymentMethod = "Paid (UPI)";
+        } else if (effectiveOverride === "Pay Later") {
+          finalPaymentMethod = "Pay Later";
+        } else {
+          finalPaymentMethod = effectiveOverride || "Admin Created";
+        }
+      }
+
       const data = {
         name: document.getElementById("adm-name").value,
         phone: document.getElementById("adm-phone").value,
@@ -1351,6 +1499,10 @@ export const initAdmissionsUI = async () => {
         course: document.getElementById("adm-course")?.value || "",
         address: document.getElementById("adm-address")?.value || "",
         remarks: document.getElementById("adm-remarks")?.value || "",
+        startDate: startDateVal,
+        endDate: endDateVal,
+        duration: calcDurationDays,
+        durationMode: durationModeVal,
         loginCredentials: (() => {
           const id = document.getElementById("adm-login-id")?.value?.trim() || "";
           const pass = document.getElementById("adm-login-pass")?.value?.trim() || "";
@@ -1368,17 +1520,18 @@ export const initAdmissionsUI = async () => {
         seatNumber: selectedSeatNumber,
         seatFloor: selectedSeatFloor,
         seatId: selectedSeatId || "",
-        paymentMethod: isAdminOrManager ? (overridePaymentMethod || "Admin Created") : "Pending",
+        paymentMethod: finalPaymentMethod,
         termsAccepted: true
       };
 
       if (txnId) data.transactionId = txnId;
       if (dueDate) data.paymentDueDate = dueDate;
+      else if (endDateVal) data.paymentDueDate = endDateVal;
 
       const res = await submitAdmission(data, isStudent);
       if (res.success) {
         if (isStudent) {
-            if (data.paymentMethod === "Paid") {
+            if (data.paymentMethod === "Paid" || data.paymentMethod === "Paid (Cash)" || data.paymentMethod === "Paid (UPI)") {
                 window.showToast("Payment verified! You are now admitted and will be redirected to your dashboard.", "success");
             } else {
                 window.showToast("Admission request submitted and is Pending Approval!", "success");
@@ -1394,6 +1547,65 @@ export const initAdmissionsUI = async () => {
                 lastUpdated: serverTimestamp()
               });
             }
+
+            // Create cash / UPI payment record in payments collection if paid
+            if (finalPaymentMethod === "Paid (Cash)" || finalPaymentMethod === "Cash" || finalPaymentMethod === "Paid (UPI)" || finalPaymentMethod === "Paid") {
+              try {
+                const isCash = finalPaymentMethod === "Paid (Cash)" || finalPaymentMethod === "Cash";
+                const payDoc = {
+                  studentId: res.studentId || "",
+                  studentName: data.name,
+                  planName: data.planName,
+                  amount: Number(plan?.price || 0),
+                  paymentMethod: isCash ? "Cash" : "UPI",
+                  transactionId: isCash ? "CASH" : (txnId || "UPI"),
+                  status: "approved",
+                  date: new Date().toISOString(),
+                  createdAt: serverTimestamp(),
+                  approvedBy: role || "Admin",
+                  approvalDate: serverTimestamp()
+                };
+                if (data.paymentScreenshotUrl) {
+                  payDoc.screenshot = data.paymentScreenshotUrl;
+                  payDoc.paymentScreenshotUrl = data.paymentScreenshotUrl;
+                  payDoc.screenshots = [data.paymentScreenshotUrl];
+                }
+                await addDoc(collection(db, "payments"), payDoc);
+
+                // Also record in renewals collection so renewal history is synchronized
+                try {
+                  const renDoc = {
+                    studentId: res.studentId || "",
+                    studentName: data.name,
+                    oldPlan: "",
+                    newPlan: data.planName || "",
+                    startDate: data.startDate || new Date().toISOString().split("T")[0],
+                    endDate: data.endDate || "",
+                    durationDays: Number(data.duration || 30),
+                    durationMode: data.durationMode || "monthly",
+                    amount: Number(plan?.price || 0),
+                    paymentMethod: isCash ? "Cash" : "UPI",
+                    transactionId: isCash ? "CASH" : (txnId || "UPI"),
+                    renewedBy: role || "Admin",
+                    renewalNotes: "Initial admission payment",
+                    status: "Completed",
+                    type: "Initial Admission",
+                    createdAt: serverTimestamp()
+                  };
+                  if (data.paymentScreenshotUrl) {
+                    renDoc.screenshot = data.paymentScreenshotUrl;
+                    renDoc.paymentScreenshotUrl = data.paymentScreenshotUrl;
+                    renDoc.screenshots = [data.paymentScreenshotUrl];
+                  }
+                  await addDoc(collection(db, "renewals"), renDoc);
+                } catch (renErr) {
+                  console.warn("[admission] Could not record initial renewal in renewals collection:", renErr);
+                }
+              } catch (payErr) {
+                console.warn("[admission] Could not record direct payment in payments collection:", payErr);
+              }
+            }
+
             window.showToast(
               res.accountCreated
                 ? `Student admitted! Portal login created — student signs in with: ${data.loginId}`
@@ -1412,4 +1624,15 @@ export const initAdmissionsUI = async () => {
       btn.disabled = false;
     }
   };
+
+  // Auto-init admission dates and mode
+  try {
+    const startEl = document.getElementById("adm-start-date");
+    if (startEl && !startEl.value) {
+      startEl.value = getTodayStr();
+    }
+    if (typeof window.setAdmissionDurationMode === "function") {
+      window.setAdmissionDurationMode("month");
+    }
+  } catch (_) {}
 };

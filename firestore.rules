@@ -117,7 +117,7 @@ service cloud.firestore {
     match /students/{studentId} {
       // isSelf first so a normal member read short-circuits before the
       // (more expensive) identity test is ever evaluated.
-      allow read: if isStaff() || isSelf(studentId) || identityMatchesUnclaimed(studentId);
+      allow read: if isStaff() || isSelf(studentId) || resource.data.get('uid', '') == request.auth.uid || identityMatchesUnclaimed(studentId);
 
       allow create: if (isSelf(studentId) || isStaff())
         && request.resource.data.get('role', 'Student') == 'Student'
@@ -283,8 +283,12 @@ service cloud.firestore {
 
     // ---------- complaints ----------
     match /complaints/{complaintId} {
-      allow read: if isStaff() || isOwnDoc();
-      allow create: if signedIn();
+      allow read: if isStaff() || isOwnDoc()
+        || (signedIn() && (
+             resource.data.get('studentId', '') == request.auth.uid
+             || resource.data.get('uid', '') == request.auth.uid
+           ));
+      allow create: if signedIn() || request.resource.data.get('description', '') != '';
       allow update, delete: if isStaff();
     }
 

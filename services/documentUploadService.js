@@ -1,4 +1,4 @@
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
 // ──────────────────────────────────────────────
@@ -471,17 +471,85 @@ export const renderStudentDocuments = async (studentId, containerId = "student-d
     return;
   }
 
+  // Fetch all payment screenshots across renewals and payments for this student
+  const isValidImg = (u) => typeof u === "string" && (u.startsWith("data:image/") || u.startsWith("http://") || u.startsWith("https://") || u.startsWith("blob:"));
+  const allPaymentShots = [];
+
+  // 1. Check primary student document paymentScreenshot
+  if (docs && docs.paymentScreenshot && isValidImg(docs.paymentScreenshot)) {
+    allPaymentShots.push({
+      id: "primary-doc",
+      label: "Admission Payment Proof",
+      subtext: "UPI / bank transfer proof",
+      date: "Initial Admission",
+      dataUrl: docs.paymentScreenshot,
+      isPrimary: true
+    });
+  }
+
+  // 2. Check renewals collection
+  try {
+    const rSnap = await getDocs(query(collection(db, "renewals"), where("studentId", "==", studentId)));
+    rSnap.forEach(d => {
+      const data = d.data() || {};
+      const shot = data.screenshot || data.paymentScreenshotUrl || (Array.isArray(data.screenshots) ? data.screenshots[0] : "");
+      if (isValidImg(shot) && !allPaymentShots.some(p => p.dataUrl === shot)) {
+        const dStr = data.startDate || (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleDateString() : "Renewal");
+        const amt = data.amount ? `₹${data.amount}` : "";
+        allPaymentShots.push({
+          id: d.id,
+          label: `Renewal Proof${amt ? ` · ${amt}` : ""}`,
+          subtext: `${data.newPlan || "Renewal"} (${dStr})`,
+          date: dStr,
+          dataUrl: shot,
+          isPrimary: false
+        });
+      }
+    });
+  } catch (rErr) {
+    console.warn("Could not load renewal proofs:", rErr);
+  }
+
+  // 3. Check payments collection
+  try {
+    const pSnap = await getDocs(query(collection(db, "payments"), where("studentId", "==", studentId)));
+    pSnap.forEach(d => {
+      const data = d.data() || {};
+      const shot = data.screenshot || data.paymentScreenshotUrl || (Array.isArray(data.screenshots) ? data.screenshots[0] : "");
+      if (isValidImg(shot) && !allPaymentShots.some(p => p.dataUrl === shot)) {
+        const dStr = data.date ? new Date(data.date).toLocaleDateString() : (data.startDate || "Payment");
+        const amt = data.amount ? `₹${data.amount}` : "";
+        allPaymentShots.push({
+          id: d.id,
+          label: `Payment Proof${amt ? ` · ${amt}` : ""}`,
+          subtext: `${data.planName || data.monthLabel || "Payment"} (${dStr})`,
+          date: dStr,
+          dataUrl: shot,
+          isPrimary: false
+        });
+      }
+    });
+  } catch (pErr) {
+    console.warn("Could not load payment proofs:", pErr);
+  }
+
+  if (typeof window !== "undefined") {
+    window.__studentPaymentShotsCache = allPaymentShots;
+  }
+
+  // Top section: Identity documents (Aadhaar Front, Aadhaar Back, Photo)
+  const identityFields = STUDENT_DOC_FIELDS.filter(f => f.key !== "paymentScreenshot");
   let html = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;">`;
 
-  for (const { key, label, accept, hint } of STUDENT_DOC_FIELDS) {
+  for (const { key, label, accept, hint } of identityFields) {
     const base64 = docs ? docs[key] : null;
     const isImage = typeof base64 === "string" && base64.startsWith("data:image");
     const hasFile = typeof base64 === "string" && base64.length > 0;
 
     const preview = hasFile
       ? (isImage
-        ? `<img src="${base64}" alt="${label}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:#000;">`
-        : `<div style="width:100%;height:110px;border-radius:8px;background:var(--bg-hover);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
+        ? `<img src="${base64}" alt="${label}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);">`
+        : `<div style="width:100%;height:110px;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
              <span style="font-size:11px;color:var(--text-muted);">File</span>
            </div>`)
@@ -510,39 +578,89 @@ export const renderStudentDocuments = async (studentId, containerId = "student-d
 
   html += `</div>`;
 
-  // ── Payment screenshots carried by the student's PAYMENTS ────────────────
-  // Every portal payment can hold up to 4 of its own screenshots in
-  // payments/{id}.screenshots[] — render them ALL here, newest first,
-  // labelled with the payment date, so history is never one-and-overwritten.
-  try {
-    const { collection: fsCollection, query: fsQuery, where: fsWhere, getDocs: fsGetDocs } = await import("firebase/firestore");
-    const paySnap = await fsGetDocs(fsQuery(fsCollection(db, "payments"), fsWhere("studentId", "==", studentId)));
-    const shots = [];
-    paySnap.forEach((d) => {
-      const v = d.data() || {};
-      const arr = Array.isArray(v.screenshots) ? v.screenshots : [];
-      const when = v.paymentDate || (v.date ? String(v.date).split("T")[0] : "");
-      arr.forEach((dataUrl, i) => shots.push({ dataUrl, when, n: arr.length > 1 ? ` ${i + 1}/${arr.length}` : "" }));
-    });
-    shots.sort((a, b) => String(b.when).localeCompare(String(a.when)));
-    if (shots.length) {
-      html += `<h3 style="margin:1.25rem 0 0.75rem; font-size:0.95rem; font-weight:600;">Payment Screenshots (${shots.length})</h3>`;
-      html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;">`;
-      shots.forEach((s, i) => {
-        html += `
-          <div style="border:1px solid var(--border);border-radius:12px;padding:.75rem;background:var(--bg-card);display:flex;flex-direction:column;gap:.5rem;">
-            <img src="${s.dataUrl}" alt="Payment screenshot" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:#000;">
-            <div style="font-weight:600;font-size:12px;">Payment Screenshot${s.n}</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:-4px;">Paid on ${s.when || "—"}</div>
-            <div style="margin-top:auto;">
-              <a class="btn btn-primary" style="width:100%;font-size:12px;padding:7px;text-align:center;text-decoration:none;" download="payment-screenshot-${s.when || i}.jpg" href="${s.dataUrl}">Download</a>
+  // Payment Proofs Section (Multi-Screenshot support)
+  html += `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin: 1.5rem 0 0.75rem; flex-wrap:wrap; gap:8px;">
+      <div>
+        <strong style="font-size:13px; color:var(--text-primary);">Payment Screenshots & Proofs</strong>
+        <div style="font-size:11px; color:var(--text-muted);">All payment proofs uploaded for admission and renewals (${allPaymentShots.length} found).</div>
+      </div>
+      ${allPaymentShots.length > 1 ? `<button type="button" class="btn btn-secondary btn-sm" onclick="window.__downloadAllPaymentShots('${studentId}')" style="font-size:11.5px; padding:4px 12px; font-weight:600;">⬇ Download All (${allPaymentShots.length})</button>` : ""}
+    </div>
+  `;
+
+  if (allPaymentShots.length === 0) {
+    // Show standard upload card when no screenshot exists yet
+    html += `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;">
+        <div style="border:1px solid var(--border);border-radius:12px;padding:.75rem;background:var(--bg-card);display:flex;flex-direction:column;gap:.5rem;">
+          <div style="overflow:hidden;border-radius:8px;">
+            <div style="width:100%;height:110px;border-radius:8px;border:2px dashed var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12px;text-align:center;padding:8px;">
+              No payment proof yet
             </div>
-          </div>`;
-      });
-      html += `</div>`;
-    }
-  } catch (e) {
-    console.warn("[docs] payment screenshots load skipped:", e);
+          </div>
+          <div style="font-weight:600;font-size:12px;">Payment Screenshot</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:-4px;">UPI / bank transfer proof</div>
+          <div style="display:flex;flex-direction:column;gap:.4rem;margin-top:auto;">
+            <label class="btn btn-primary" style="width:100%;font-size:12px;padding:7px;margin:0;cursor:pointer;text-align:center;">
+              Upload Proof
+              <input type="file" accept="image/*,.pdf" style="display:none;"
+                onchange="window.__uploadStudentDoc('${studentId}', 'paymentScreenshot', this, '${containerId}')" />
+            </label>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1rem;">`;
+    allPaymentShots.forEach((shot) => {
+      const isImg = isValidImg(shot.dataUrl);
+      const preview = isImg
+        ? `<img src="${shot.dataUrl}" alt="${shot.label}" onclick="window.viewAdminProofModal('${shot.dataUrl.replace(/'/g, "\\'")}', '${shot.label.replace(/'/g, "\\'")}')" title="Click to enlarge" style="width:100%;height:110px;object-fit:contain;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);cursor:pointer;display:block;">`
+        : `<div style="width:100%;height:110px;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
+             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+             <span style="font-size:11px;color:var(--text-muted);">PDF Proof</span>
+           </div>`;
+
+      html += `
+        <div style="border:1px solid var(--border);border-radius:12px;padding:.75rem;background:var(--bg-card);display:flex;flex-direction:column;gap:.5rem;">
+          <div style="overflow:hidden;border-radius:8px;">${preview}</div>
+          <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${shot.label}">${shot.label}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:-4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${shot.subtext}</div>
+          <div style="display:flex;flex-direction:column;gap:.4rem;margin-top:auto;">
+            <button type="button" class="btn btn-primary" style="width:100%;font-size:12px;padding:7px;"
+              onclick="window.__downloadPaymentProofItem('${shot.id}')">Download</button>
+            <button type="button" class="btn btn-secondary" style="width:100%;font-size:11.5px;padding:6px;"
+              onclick="window.viewAdminProofModal('${shot.dataUrl.replace(/'/g, "\\'")}', '${shot.label.replace(/'/g, "\\'")}')">👁 View Large</button>
+            ${shot.isPrimary ? `
+              <label class="btn btn-ghost" style="width:100%;font-size:11px;padding:5px;margin:0;cursor:pointer;text-align:center;color:var(--text-secondary);">
+                Replace
+                <input type="file" accept="image/*,.pdf" style="display:none;"
+                  onchange="window.__uploadStudentDoc('${studentId}', 'paymentScreenshot', this, '${containerId}')" />
+              </label>
+              <button type="button" class="btn btn-ghost" style="width:100%;font-size:11px;padding:5px;color:#ef4444;"
+                onclick="window.__removeStudentDoc('${studentId}', 'paymentScreenshot', '${containerId}')">Remove</button>
+            ` : ""}
+          </div>
+        </div>
+      `;
+    });
+
+    // Also add card to upload another proof
+    html += `
+      <div style="border:1px dashed var(--border);border-radius:12px;padding:.75rem;background:var(--bg-card);display:flex;flex-direction:column;gap:.5rem;justify-content:center;align-items:center;text-align:center;min-height:220px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--primary);margin-bottom:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div style="font-weight:600;font-size:12px;">Add Another Proof</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Upload extra payment screenshot</div>
+        <label class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin:0;cursor:pointer;">
+          Upload New
+          <input type="file" accept="image/*,.pdf" style="display:none;"
+            onchange="window.__uploadStudentDoc('${studentId}', 'paymentScreenshot', this, '${containerId}')" />
+        </label>
+      </div>
+    `;
+
+    html += `</div>`;
   }
 
   container.innerHTML = html;
@@ -557,7 +675,31 @@ if (typeof window !== "undefined") {
       notify("No file uploaded for this item yet.", "error");
       return;
     }
-    downloadBase64File(base64, `${key}_${lastDocRender.studentId || "student"}`);
+    downloadBase64File(base64, `${key}_${lastDocRender.studentId || "student"}.jpg`);
+  };
+
+  window.__downloadPaymentProofItem = (shotId) => {
+    const shots = window.__studentPaymentShotsCache || [];
+    const item = shots.find(s => s.id === shotId);
+    if (!item || !item.dataUrl) {
+      notify("Screenshot not found.", "error");
+      return;
+    }
+    downloadBase64File(item.dataUrl, `payment_proof_${item.id}_${lastDocRender.studentId || "student"}.jpg`);
+  };
+
+  window.__downloadAllPaymentShots = (studentId) => {
+    const shots = window.__studentPaymentShotsCache || [];
+    if (!shots.length) {
+      notify("No payment screenshots to download.", "warning");
+      return;
+    }
+    shots.forEach((s, idx) => {
+      setTimeout(() => {
+        downloadBase64File(s.dataUrl, `payment_proof_${idx + 1}_${studentId || "student"}.jpg`);
+      }, idx * 350);
+    });
+    notify(`Downloading ${shots.length} screenshot${shots.length > 1 ? "s" : ""}...`, "success");
   };
 
   window.__uploadStudentDoc = async (studentId, key, input, containerId) => {
@@ -569,8 +711,6 @@ if (typeof window !== "undefined") {
       notify("Document uploaded successfully!", "success");
       if (input) input.value = "";
       await renderStudentDocuments(studentId, containerId || lastDocRender.containerId);
-      // Instant reflection: paint the new photo on the open profile card
-      // right away (the main list follows via the live listener).
       if (key === "photo" || key === "profilePhoto" || key === "selfie") {
         const avatarEl = document.getElementById(`sp-avatar-${studentId}`);
         if (avatarEl && file.type.startsWith("image/")) {
@@ -605,10 +745,18 @@ if (typeof window !== "undefined") {
  */
 export const downloadBase64File = (base64Data, fileName) => {
   try {
-    // Extract mime type and data
+    if (typeof base64Data === "string" && (base64Data.startsWith("http://") || base64Data.startsWith("https://") || base64Data.startsWith("blob:"))) {
+      const link = document.createElement('a');
+      link.href = base64Data;
+      link.download = fileName;
+      link.target = "_blank";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
     const matches = base64Data.match(/^data:([^;]+);base64,(.+)$/);
     if (!matches) {
-      // Try direct base64
       const link = document.createElement('a');
       link.href = base64Data;
       link.download = fileName;
@@ -638,7 +786,6 @@ export const downloadBase64File = (base64Data, fileName) => {
     URL.revokeObjectURL(url);
   } catch (e) {
     console.error("Download failed:", e);
-    // Fallback
     const link = document.createElement('a');
     link.href = base64Data;
     link.download = fileName;

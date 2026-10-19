@@ -310,9 +310,17 @@ const renderLiveMap = () => {
   const grid = document.getElementById("live-seat-grid");
   if (!grid) return;
 
+  const floorSeats = allSeats.filter(s => (s.floor || "Ground Floor") === currentFloor);
   const presentCount = activeAttendance.length;
+  const occupiedCount = floorSeats.filter(s => s.status === "Occupied").length;
+  const availableCount = floorSeats.filter(s => s.status === "Available").length;
+  const reservedCount = floorSeats.filter(s => s.status === "Reserved").length;
+  const maintCount = floorSeats.filter(s => s.status === "Maintenance").length;
+  const totalCount = floorSeats.length;
   const subtitle = document.getElementById("live-subtitle");
-  if (subtitle) subtitle.innerText = `${presentCount} present · live`;
+  if (subtitle) {
+    subtitle.innerText = `${presentCount} present · ${occupiedCount} occupied · ${availableCount} available · ${reservedCount} chosen · ${maintCount} under maintenance · ${totalCount} total on ${currentFloor}`;
+  }
 
   // ── Single seat card — attendance wins, else live seat status shows ──
   const renderSeatCard = (seat) => {
@@ -407,7 +415,7 @@ const renderLiveMap = () => {
   };
 
   // ── Data-driven room: seat positions come from backend col/row ───────────
-  const floorSeats = allSeats.filter(s => (s.floor || "Ground Floor") === currentFloor);
+  // (floorSeats is computed above)
 
   // Generic grid for non-A/B floors
   if (!shouldUseABLayout(floorSeats)) {

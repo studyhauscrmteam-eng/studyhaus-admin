@@ -36,6 +36,17 @@ export const listenToStudentPortalData = (onDataUpdate, onError) => {
           return;
         }
 
+        // 1b. Fallback: check students collection by uid field (if doc ID is an auto-id)
+        try {
+          const q = query(collection(db, "students"), where("uid", "==", user.uid));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            const matched = qSnap.docs[0];
+            onDataUpdate({ id: matched.id, ...matched.data() });
+            return;
+          }
+        } catch (_) {}
+
         // 2. Fallback: check the users collection (registered via register.html)
         try {
           const userDocRef = doc(db, "users", user.uid);

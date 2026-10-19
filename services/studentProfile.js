@@ -1,3 +1,4 @@
+import { deleteField } from "firebase/firestore";
 import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials, resetPortalPassword, permanentlyDeleteStudent } from "./studentService.js";
 import { searchStudents, filterStudents, sortStudents, paginateStudents } from "./studentDataProcessing.js";
 import { fetchPlansForDropdown } from "./admissionService.js";
@@ -460,7 +461,7 @@ const renderProfileModal = (s, role) => {
 
   // ── Portal login state (Owner sets/creates it from this popup) ──────────
   // Split into two fields: prefer raw fields, fall back to legacy "id / pass"
-  let portalId = s.loginId || "";
+  let portalId = s.loginId || s.phone || s.email || "";
   let portalPass = s.loginPassword || "";
   if (!portalId && !portalPass && s.loginCredentials) {
     const rawCred = String(s.loginCredentials);
@@ -472,9 +473,17 @@ const renderProfileModal = (s, role) => {
       portalId = rawCred.trim();
     }
   }
-  // "Login active" ONLY when the credential pair is actually on file.
-  // (Declared after portalId/portalPass — referencing them earlier throws.)
-  const hasPortalAccount = !!(portalId && portalPass);
+
+  // Fallback: student might sign in with phone, authEmail, or email
+  if (!portalId) {
+    portalId = s.phone || s.authEmail || s.email || s.studentId || "";
+  }
+
+  // "Login active / account exists": true if the student has a portal account linked or registered
+  // (has Firebase Auth UID, authEmail, loginId, phone, or stored credentials).
+  const hasPortalAccount = Boolean(
+    s.uid || s.authEmail || portalPass || s.loginCredentials || s.loginId || s.phone
+  );
 
   let planOptions = `<option value="">Select Plan...</option>`;
   availablePlans.forEach(p => {
@@ -482,15 +491,23 @@ const renderProfileModal = (s, role) => {
     planOptions += `<option value="${p.id}" ${selected}>${p.planName}</option>`;
   });
 
-  // Payment method the student picked in the portal (or the admin wrote):
-  // shown round-trippable so staff can correct a typo without losing it.
-  const PAYMENT_METHODS = ["Pay Later", "Paid", "Admin Created", "Pending"];
-  let payOptions = `<option value="">Not set</option>`;
-  PAYMENT_METHODS.forEach(m => {
-    payOptions += `<option value="${m}" ${s.paymentMethod === m ? "selected" : ""}>${m}</option>`;
-  });
-  if (s.paymentMethod && PAYMENT_METHODS.indexOf(s.paymentMethod) === -1) {
-    payOptions += `<option value="${escAttr(s.paymentMethod)}" selected>${escAttr(s.paymentMethod)}</option>`;
+  // Clean, standard Payment Method options (no confusing duplicates)
+  const curMethod = (s.paymentMethod || "").trim();
+  const isCash = curMethod === "Cash" || curMethod === "Paid (Cash)";
+  const isUpi = curMethod === "UPI" || curMethod === "Paid (UPI)" || curMethod === "Paid";
+  const isPayLater = curMethod === "Pay Later";
+  const isPending = curMethod === "Pending";
+  const isStandard = isCash || isUpi || isPayLater || isPending || !curMethod;
+
+  let payOptions = `
+    <option value="" ${!curMethod ? "selected" : ""}>Not set</option>
+    <option value="Cash" ${isCash ? "selected" : ""}>Cash</option>
+    <option value="UPI" ${isUpi ? "selected" : ""}>UPI</option>
+    <option value="Pay Later" ${isPayLater ? "selected" : ""}>Pay Later</option>
+    <option value="Pending" ${isPending ? "selected" : ""}>Pending</option>
+  `;
+  if (!isStandard) {
+    payOptions += `<option value="${escAttr(curMethod)}" selected>${escAttr(curMethod)}</option>`;
   }
 
   modal.innerHTML = `
@@ -642,14 +659,12 @@ const renderProfileModal = (s, role) => {
             <div class="form-group" style="grid-column: span 2;">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:8px 12px; flex-wrap:wrap; padding:10px 12px; border:1px solid var(--border, #e2e8f0); border-radius:10px; background:var(--bg-hover, #f1f5f9);">
                 <div style="display:flex; flex-direction:column; gap:3px; min-width:0;">
-                  <small id="login-status-text" style="font-size:12px; font-weight:700; letter-spacing:0.2px; ${hasPortalAccount ? "color:#166534;" : "color:#b91c1c;"}">${hasPortalAccount ? "🟢 Login active" : "🔴 Login not created"}</small>
-                  <small id="login-status-hint" style="font-size:10.5px; font-weight:500; color:var(--text-muted); line-height:1.4;">${hasPortalAccount
-                    ? "Student signs in with the Login ID above — the password is never shown here."
-                    : "Enter a Login ID → Set password → Save Changes."}</small>
+                  <small id="login-status-text" style="font-size:12px; font-weight:700; letter-spacing:0.2px; ${s.loginRevoked === true ? "color:#b91c1c;" : (hasPortalAccount ? "color:#166534;" : "color:#b91c1c;")}">${s.loginRevoked === true ? "🔴 Login revoked" : (hasPortalAccount ? "🟢 Login active" : "🔴 Login not created")}</small>
+                  ${s.loginRevoked === true ? `<small id="login-status-hint" style="font-size:10.5px; font-weight:500; color:var(--text-muted); line-height:1.4;">Login is blocked. Click 'Set password' to set a new password and restore access.</small>` : (!hasPortalAccount ? `<small id="login-status-hint" style="font-size:10.5px; font-weight:500; color:var(--text-muted); line-height:1.4;">Enter a Login ID → Set password → Save Changes.</small>` : "")}
                 </div>
                 <div style="display:flex; gap:8px; flex-shrink:0; margin-left:auto;">
-                  <button type="button" id="btn-set-pass" class="btn ${hasPortalAccount ? "btn-secondary" : "btn-primary"}" title="Portal passwords are never displayed on this card — choose a new one instead"
-                    style="padding:6px 14px; font-size:11.5px; font-weight:600; border-radius:8px; white-space:nowrap;">${hasPortalAccount ? "Set new password" : "Set password"}</button>
+                  <button type="button" id="btn-set-pass" class="btn ${s.loginRevoked === true ? "btn-primary" : (hasPortalAccount ? "btn-secondary" : "btn-primary")}" title="Portal passwords are never displayed on this card — choose a new one instead"
+                    style="padding:6px 14px; font-size:11.5px; font-weight:600; border-radius:8px; white-space:nowrap;">${s.loginRevoked === true ? "Set password" : (hasPortalAccount ? "Set new password" : "Set password")}</button>
                   ${hasPortalAccount || portalId || portalPass || s.uid || s.authEmail
                     ? `<button type="button" id="btn-clear-login" class="btn btn-ghost" title="Remove only the stored Login ID / Password — nothing else"
                         style="padding:6px 14px; font-size:11.5px; font-weight:600; border-radius:8px; white-space:nowrap;">Clear login</button>`
@@ -696,6 +711,14 @@ const renderProfileModal = (s, role) => {
             <div class="form-group">
               <label>Payment Due Date</label>
               <input type="date" id="edit-payment-due" value="${escAttr(s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} />
+            </div>
+            <div class="form-group">
+              <label>Admission Start Date</label>
+              <input type="date" id="edit-start-date" value="${escAttr(s.startDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split('T')[0] : (typeof s.createdAt === 'string' && s.createdAt.includes('T') ? s.createdAt.split('T')[0] : (s.createdAt || ''))))}" ${!canEdit ? 'disabled' : ''} />
+            </div>
+            <div class="form-group">
+              <label>Admission End Date</label>
+              <input type="date" id="edit-end-date" value="${escAttr(s.endDate || s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} onchange="const p = document.getElementById('edit-payment-due'); if (p && !p.disabled) p.value = this.value;" />
             </div>
           </div>
 
@@ -746,9 +769,18 @@ const renderProfileModal = (s, role) => {
       }
       setPassBtn.disabled = true;
       try {
-        await resetPortalPassword(s.id, np);
+        const res = await resetPortalPassword(s.id, np);
+        if (res && res.uid) s.uid = res.uid;
         pendingPortalPassword = null;
-        if (window.showToast) window.showToast(`Password updated — student signs in with: ${portalId}`, "success");
+        if (window.showToast) window.showToast(`Password updated — student signs in with: ${portalId || s.phone || 'their Login ID'}`, "success");
+        const statusEl = document.getElementById("login-status-text");
+        if (statusEl) {
+          statusEl.textContent = "🟢 Login active";
+          statusEl.style.color = "#166534";
+        }
+        const hintEl = document.getElementById("login-status-hint");
+        if (hintEl) hintEl.textContent = "";
+        setPassBtn.textContent = "Set new password";
       } catch (e) {
         if (window.showToast) window.showToast(e.message || "Could not update the password.", "error");
       } finally {
@@ -757,24 +789,24 @@ const renderProfileModal = (s, role) => {
     });
   }
 
-  // "Clear login" — removes ONLY the credential fields from the student doc.
+  // "Clear login" — revokes login access and clears stored credentials.
   const clearBtn = document.getElementById("btn-clear-login");
   if (clearBtn) {
     clearBtn.addEventListener("click", async () => {
       const ok = await window.showCustomConfirm(
-        "Remove Portal Login",
-        "Remove this student's portal login? Stored ID / Password deleted — sign-in stops working. Profile and everything else stay untouched.",
-        "Remove",
+        "Clear Portal Login",
+        "Revoke and clear this student's portal login? Sign-in will be blocked immediately. Profile, seat and payments stay untouched.",
+        "Clear login",
         false
       );
       if (!ok) return;
       clearBtn.disabled = true;
       try {
         await clearPortalCredentials(s.id);
-        window.showToast("Login removed — credentials deleted, sign-in blocked.", "success");
+        window.showToast("Login cleared — sign-in blocked.", "success");
         window.closeStudentProfile();
       } catch (e) {
-        window.showToast("Could not remove credentials: " + e.message, "error");
+        window.showToast("Could not clear credentials: " + e.message, "error");
         clearBtn.disabled = false;
       }
     });
@@ -904,13 +936,21 @@ window.submitStudentEdit = async (id) => {
     const payMethodEl = document.getElementById("edit-payment-method");
     const txnEl = document.getElementById("edit-txn-id");
     const dueEl = document.getElementById("edit-payment-due");
+    const startEl = document.getElementById("edit-start-date");
+    const endEl = document.getElementById("edit-end-date");
     if (seatEl && !seatEl.disabled) updates.seatNumber = seatEl.value.trim();
     if (payMethodEl && !payMethodEl.disabled) updates.paymentMethod = payMethodEl.value;
     if (txnEl && !txnEl.disabled) updates.transactionId = txnEl.value.trim();
     if (dueEl && !dueEl.disabled) updates.paymentDueDate = dueEl.value;
+    if (startEl && !startEl.disabled) updates.startDate = startEl.value;
+    if (endEl && !endEl.disabled) {
+      updates.endDate = endEl.value;
+      if (!updates.paymentDueDate && endEl.value) updates.paymentDueDate = endEl.value;
+    }
 
     // ── Owner: create the Student Portal login. The password is never typed
     // into this card — it comes from the hidden "Set password" prompt only.
+    const s = allStudents.find(st => st.id === id) || {};
     let targetId = id;
     let portalMsg = "";
     const idInput = document.getElementById("view-login-id");
@@ -927,12 +967,18 @@ window.submitStudentEdit = async (id) => {
         updates.loginId = "";
         updates.loginPassword = "";
       } else if (!loginPassword) {
-        // Keep the ID draft so it isn't lost on reload; supply the password
-        // through the hidden prompt before saving.
-        updates.loginId = loginId;
-        updates.loginPassword = "";
-        updates.loginCredentials = "";
-        window.showToast("Choose 'Set password', then Save Changes to create the portal login.", "warning");
+        // If the student already has an active portal login (uid, authEmail, or existing account),
+        // keep the login intact instead of wiping credentials
+        if (s.uid || s.authEmail || s.loginCredentials || s.loginId) {
+          if (loginId) updates.loginId = loginId;
+        } else {
+          // Keep the ID draft so it isn't lost on reload; supply the password
+          // through the hidden prompt before saving.
+          updates.loginId = loginId;
+          updates.loginPassword = "";
+          updates.loginCredentials = "";
+          window.showToast("Choose 'Set password', then Save Changes to create the portal login.", "warning");
+        }
       } else {
         // ── Same rules the account system enforces — check BEFORE creating
         // so the toast tells you exactly what to fix.
@@ -963,6 +1009,7 @@ window.submitStudentEdit = async (id) => {
           updates.loginId = loginId;
           updates.loginPassword = loginPassword;
           updates.loginCredentials = acc.loginCredentials;
+          updates.loginRevoked = deleteField();
           portalMsg = ` Portal login created — student signs in with: ${loginId}`;
         } catch (acctErr) {
           window.showToast("Portal login NOT created: " + acctErr.message, "error");
@@ -1020,10 +1067,10 @@ window.openRenewalModal = (studentId) => {
   
   const modal = document.getElementById("renewal-modal");
   modal.innerHTML = `
-    <div style="padding: 1.5rem; min-width: 400px; max-width: 500px; max-height: 85vh; overflow-y: auto;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-        <h2 style="margin: 0;">Renew Membership</h2>
-        <button class="btn btn-ghost" onclick="document.getElementById('renewal-modal').close()" style="padding: 0.25rem 0.5rem;">✕</button>
+    <div style="padding: 1.5rem; width: 100%; min-width: 320px; max-width: 540px; max-height: 88vh; overflow-y: auto; box-sizing: border-box;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h2 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--text-primary);">Renew Membership</h2>
+        <button class="btn btn-ghost" onclick="document.getElementById('renewal-modal').close()" style="padding: 0.25rem 0.5rem; font-size: 1.2rem; line-height: 1;">✕</button>
       </div>
       <div id="renewal-modal-body"></div>
     </div>

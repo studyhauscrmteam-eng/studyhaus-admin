@@ -46,26 +46,40 @@ export const processRenewal = async (data) => {
       const studentDoc = await transaction.get(studentRef);
       if (!studentDoc.exists()) throw new Error("Student not found.");
 
+      const ssUrl = data.screenshot || data.paymentScreenshotUrl || (data.screenshots && data.screenshots[0]) || "";
+      const txnId = data.transactionId || "";
+
       // 2. Write Renewal Record
-      transaction.set(renewalRef, {
+      const renRecord = {
         studentId: data.studentId,
         studentName: studentDoc.data().name,
-        oldPlan: data.oldPlanName,
-        newPlan: data.newPlanName,
+        oldPlan: data.oldPlanName || "",
+        newPlan: data.newPlanName || "",
         startDate: data.startDate,
         endDate: data.endDate,
+        durationDays: Number(data.durationDays || 30),
+        durationMode: data.durationMode || "monthly",
         amount: Number(data.amount),
         paymentMethod: data.paymentMethod,
-        renewedBy: data.renewedBy,
+        transactionId: txnId,
+        renewedBy: data.renewedBy || "Admin",
         renewalNotes: data.renewalNotes || "",
         status: "Completed",
         createdAt: serverTimestamp()
-      });
+      };
+      if (ssUrl) {
+        renRecord.screenshot = ssUrl;
+        renRecord.paymentScreenshotUrl = ssUrl;
+        renRecord.screenshots = [ssUrl];
+      }
+      transaction.set(renewalRef, renRecord);
 
       // 3. Update Student Record
       transaction.update(studentRef, {
         planId: data.newPlanId,
         planName: data.newPlanName,
+        startDate: data.startDate,
+        endDate: data.endDate,
         paymentDueDate: data.endDate, // The new due date is the end of this renewal period
         status: "Active", // Ensure they are active
         updatedAt: serverTimestamp()
@@ -74,20 +88,32 @@ export const processRenewal = async (data) => {
       // 4. Generate Completed Payment Record
       if (Number(data.amount) >= 0) {
         const paymentRef = doc(collection(db, "payments"));
-        transaction.set(paymentRef, {
+        const payRecord = {
           studentId: data.studentId,
           studentName: studentDoc.data().name,
           planName: data.newPlanName,
           amount: Number(data.amount),
           paymentMethod: data.paymentMethod,
+          transactionId: txnId,
           paymentDate: new Date().toISOString().split("T")[0],
+          startDate: data.startDate,
+          endDate: data.endDate,
+          durationDays: Number(data.durationDays || 30),
+          durationMode: data.durationMode || "monthly",
+          source: "renewal",
           // MUST be one of pending|approved|rejected: firestore.rules rejects
           // any other value on create (and the canonical schema forbids
           // "Completed" on payments — it is money that was collected).
           status: "approved",
-          recordedBy: data.renewedBy,
+          recordedBy: data.renewedBy || "Admin",
           createdAt: serverTimestamp()
-        });
+        };
+        if (ssUrl) {
+          payRecord.screenshot = ssUrl;
+          payRecord.paymentScreenshotUrl = ssUrl;
+          payRecord.screenshots = [ssUrl];
+        }
+        transaction.set(paymentRef, payRecord);
       }
     });
 

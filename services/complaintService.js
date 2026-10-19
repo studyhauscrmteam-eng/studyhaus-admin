@@ -1,4 +1,5 @@
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, getDoc, getDocs } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 import { db } from "../firebase/firebase.js";
 import { validateComplaint } from "./complaintValidation.js";
 
@@ -10,32 +11,54 @@ export const submitComplaint = async (student, category, description) => {
   try {
     validateComplaint(category, description);
 
+    let authUser = null;
+    try {
+      authUser = getAuth().currentUser;
+    } catch (_) {}
+
+    const studentObj = (typeof student === "object" && student !== null) ? student : {};
+    const studentId = studentObj.id || studentObj.studentId || studentObj.uid || (typeof student === "string" ? student : "") || (authUser ? authUser.uid : "unknown");
+    const studentName = studentObj.name || studentObj.studentName || (authUser ? (authUser.displayName || authUser.email) : "") || "Student";
+    const studentPhone = studentObj.phone || studentObj.studentPhone || "";
+    const planName = studentObj.planName || studentObj.plan || "Unknown";
+
     // Seat the student is sitting in RIGHT NOW (the one they chose at
     // check-in today). Uses the indexed studentId+status query.
-    let seatNumber = "";
-    try {
-      const activeQ = query(collection(db, "attendance"),
-        where("studentId", "==", student.id), where("status", "==", "Active"));
-      const activeSnap = await getDocs(activeQ);
-      if (!activeSnap.empty) seatNumber = activeSnap.docs[0].data().seatNumber || "";
-    } catch (_) { /* seat is optional context on a complaint */ }
+    let seatNumber = studentObj.seatNumber || studentObj.seatAssigned || "";
+    if (!seatNumber && studentId && studentId !== "unknown") {
+      try {
+        const activeQ = query(collection(db, "attendance"),
+          where("studentId", "==", studentId), where("status", "==", "Active"));
+        const activeSnap = await getDocs(activeQ);
+        if (!activeSnap.empty) seatNumber = activeSnap.docs[0].data().seatNumber || "";
+      } catch (_) { /* seat is optional context on a complaint */ }
+    }
 
-    await addDoc(collection(db, "complaints"), {
-      studentId: student.id,
-      studentName: student.name,
-      studentPhone: student.phone || "",
-      seatNumber: seatNumber,
-      planName: student.planName || "Unknown",
-      category: category,
-      description: description.trim(),
+    const payload = {
+      studentId: String(studentId || "").trim(),
+      uid: authUser ? authUser.uid : String(studentId || "").trim(),
+      studentName: String(studentName || "Student").trim(),
+      studentPhone: String(studentPhone || "").trim(),
+      seatNumber: String(seatNumber || "").trim(),
+      planName: String(planName || "Unknown").trim(),
+      category: String(category || "Others").trim(),
+      description: String(description || "").trim(),
       status: "Pending", // Pending, In Progress, Resolved, Closed
       date: new Date().toISOString(),
       createdAt: serverTimestamp()
+    };
+
+    // Guarantee no undefined fields are passed into Firestore
+    Object.keys(payload).forEach(k => {
+      if (payload[k] === undefined) payload[k] = "";
     });
+
+    await addDoc(collection(db, "complaints"), payload);
     
     return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    console.error("[complaints] submitComplaint failed:", error);
+    return { success: false, error: error.message || "Failed to submit complaint" };
   }
 };
 

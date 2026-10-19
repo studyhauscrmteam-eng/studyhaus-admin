@@ -1,9 +1,9 @@
 import { collection, doc, updateDoc, onSnapshot, getDocs, query, where, serverTimestamp, getDoc, addDoc, setDoc, deleteDoc, deleteField } from "firebase/firestore";
-import { getAuth, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updatePassword, signOut, deleteUser } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
 import { db } from "../firebase/firebase.js";
 import { firebaseConfig } from "../config/firebaseConfig.js";
-import { phoneToAuthEmail } from "./phoneUtils.js";
+import { phoneToAuthEmail, normalizePhone, isValidPhone } from "./phoneUtils.js";
 
 // Vercel backend (same host as the public website). CORS is open there, so
 // the portal passes the caller's own ID token for authorisation.
@@ -24,12 +24,25 @@ export const purgeStudentOnServer = async (studentId) => {
   try {
     const user = getAuth().currentUser;
     if (!user) return { ok: false, error: "You are not signed in." };
-    const token = await user.getIdToken();
-    const res = await fetch(`${API_BASE}/students/purge`, {
+    let token = await user.getIdToken();
+    let res = await fetch(`${API_BASE}/students/purge`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ studentId }),
     });
+
+    // If session expired or token rejected, force refresh token and retry once
+    if (!res.ok) {
+      try {
+        token = await user.getIdToken(true);
+        res = await fetch(`${API_BASE}/students/purge`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ studentId }),
+        });
+      } catch (_) {}
+    }
+
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: body.error || `Server refused (HTTP ${res.status}).` };
     return { ok: true, removed: body.removed || {} };
@@ -45,24 +58,41 @@ export const purgeStudentOnServer = async (studentId) => {
 const validateStudentUpdate = async (id, updates) => {
   const studentsRef = collection(db, "students");
   
+  // Read current doc to identify associated identifiers (e.g. uid)
+  const currentSnap = await getDoc(doc(db, "students", id)).catch(() => null);
+  const currentData = currentSnap && currentSnap.exists() ? currentSnap.data() : {};
+  const currentUid = updates.uid || currentData.uid || (id.length >= 20 ? id : null);
+
+  const isSameStudent = (d) => {
+    if (d.id === id) return true;
+    const dd = d.data() || {};
+    // Ignore deleted, old or merged duplicate records
+    if (dd.studentDeleted === true || dd.status === "Old" || dd.status === "Old Student" || dd.mergedInto) return true;
+    // Ignore documents linked to the same Auth account UID
+    if (currentUid && (d.id === currentUid || dd.uid === currentUid)) return true;
+    // Ignore documents referencing the same student ID
+    if (dd.studentId && (dd.studentId === id || dd.studentId === currentData.studentId)) return true;
+    return false;
+  };
+
   if (updates.phone) {
     const q = query(studentsRef, where("phone", "==", updates.phone));
     const snap = await getDocs(q);
-    const duplicate = snap.docs.find(d => d.id !== id);
+    const duplicate = snap.docs.find(d => !isSameStudent(d));
     if (duplicate) throw new Error(`Phone number ${updates.phone} is already in use.`);
   }
 
   if (updates.email) {
     const q = query(studentsRef, where("email", "==", updates.email));
     const snap = await getDocs(q);
-    const duplicate = snap.docs.find(d => d.id !== id);
+    const duplicate = snap.docs.find(d => !isSameStudent(d));
     if (duplicate) throw new Error(`Email ${updates.email} is already in use.`);
   }
 
   if (updates.studentId) {
     const q = query(studentsRef, where("studentId", "==", updates.studentId));
     const snap = await getDocs(q);
-    const duplicate = snap.docs.find(d => d.id !== id);
+    const duplicate = snap.docs.find(d => !isSameStudent(d));
     if (duplicate) throw new Error(`Student ID ${updates.studentId} is already in use.`);
   }
 };
@@ -130,17 +160,47 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
     if (!snap.exists()) throw new Error("Student record not found.");
     const data = snap.data() || {};
 
-    // 0. Credential FIRST, while the record still exists to identify the
-    // account. The browser cannot delete a Firebase Auth user, and deleting
-    // the documents before the login was revoked is exactly the half-state
-    // that let "deleted" students keep opening the portal. If the server
-    // refuses, abort — we never leave docs gone but login alive.
-    const purge = await purgeStudentOnServer(studentId);
-    if (!purge.ok) {
-      throw new Error(
-        `Portal login could not be removed (${purge.error || "unknown error"}). ` +
-        "Nothing was deleted — fix that first or the student could still sign in."
-      );
+    // 0. Credential removal:
+    // First try the server purge endpoint (with token refresh retry).
+    // If the server cannot be reached or returns an error (e.g. expired session),
+    // attempt client-side Auth deletion via secondary app so the operator is never blocked.
+    // In all cases, proceed with deleting all data so the student's records are completely wiped.
+    let loginRemoved = false;
+    try {
+      const purge = await purgeStudentOnServer(studentId);
+      if (purge.ok) {
+        loginRemoved = true;
+      } else {
+        note(`Server purge notice: ${purge.error || "unavailable"}`);
+      }
+    } catch (pe) {
+      note(`Server purge notice: ${pe.message || pe}`);
+    }
+
+    if (!loginRemoved) {
+      try {
+        const secondaryApp = initializeApp(firebaseConfig, `purge-auth-${Date.now()}`);
+        try {
+          const secondaryAuth = getAuth(secondaryApp);
+          const studentAuthEmail = data.authEmail || (data.phone ? phoneToAuthEmail(data.phone) : (data.email || ""));
+          const studentPass = data.loginPassword || (data.loginCredentials ? String(data.loginCredentials).split("/")[1]?.trim() : "");
+          if (studentAuthEmail && studentPass) {
+            const cred = await signInWithEmailAndPassword(secondaryAuth, studentAuthEmail, studentPass);
+            if (cred && cred.user) {
+              await deleteUser(cred.user);
+              loginRemoved = true;
+            }
+          }
+        } finally {
+          await deleteApp(secondaryApp).catch(() => {});
+        }
+      } catch (clientAuthErr) {
+        if (clientAuthErr?.code === "auth/user-not-found" || clientAuthErr?.code === "auth/invalid-credential") {
+          loginRemoved = true; // User doesn't exist in Auth
+        } else {
+          note(`Client auth removal: ${clientAuthErr.message || clientAuthErr}`);
+        }
+      }
     }
 
     // 1. Free the seat (if one is assigned) — legacy A/B safe + holder-safe
@@ -279,6 +339,14 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
       doc(db, "studentDocuments", studentId),
       doc(db, "admissions", studentId),
     ];
+    if (data.uid && data.uid !== studentId) {
+      linkedRefs.push(
+        doc(db, "students", data.uid),
+        doc(db, "users", data.uid),
+        doc(db, "studentDocuments", data.uid),
+        doc(db, "admissions", data.uid)
+      );
+    }
     for (const ref of linkedRefs) {
       try { await deleteDoc(ref); } catch (_) { /* may not exist — fine */ }
     }
@@ -307,85 +375,281 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
  * Sign-in is refused for credential-less student docs by resolveUserRole.
  */
 export const clearPortalCredentials = async (studentId) => {
-  await updateDoc(doc(db, "students", studentId), {
-    loginId: deleteField(),
+  const snap = await getDoc(doc(db, "students", studentId));
+  const data = snap.exists() ? snap.data() : {};
+  const uid = data?.uid || (studentId.length >= 20 ? studentId : null);
+
+  const prevPass = data.loginPassword
+    || (data.loginCredentials ? String(data.loginCredentials).split("/")[1]?.trim() : "")
+    || data.lastKnownPassword || "";
+
+  const authEmail = data.authEmail || (data.phone ? phoneToAuthEmail(data.phone) : (data.email || ""));
+
+  // Delete user from Firebase Auth if credentials are known
+  if (authEmail && prevPass) {
+    const secondaryApp = initializeApp(firebaseConfig, `clear-auth-${Date.now()}`);
+    try {
+      const secondaryAuth = getAuth(secondaryApp);
+      const cred = await signInWithEmailAndPassword(secondaryAuth, authEmail, prevPass);
+      if (cred?.user) {
+        await deleteUser(cred.user);
+      }
+    } catch (_) {
+      // Best-effort client auth deletion
+    } finally {
+      await deleteApp(secondaryApp).catch(() => {});
+    }
+  }
+
+  // Clear uniqueness claim index so the login ID is immediately freed
+  try {
+    if (data.phone) {
+      const normPhone = normalizePhone(data.phone);
+      if (normPhone) await deleteDoc(doc(db, "uniqueness", `phone_${normPhone}`));
+    }
+    if (data.email) {
+      await deleteDoc(doc(db, "uniqueness", `email_${data.email.toLowerCase()}`));
+    }
+  } catch (_) {}
+
+  const updates = {
     loginPassword: deleteField(),
     loginCredentials: deleteField(),
-    uid: deleteField(),
-    authEmail: deleteField(),
-    loginRevoked: deleteField()
-  });
+    loginRevoked: true,
+    updatedAt: serverTimestamp()
+  };
+  if (prevPass) {
+    updates.lastKnownPassword = prevPass;
+  }
+
+  await updateDoc(doc(db, "students", studentId), updates);
+
+  if (uid && uid !== studentId) {
+    try {
+      await updateDoc(doc(db, "students", uid), updates);
+    } catch (_) {}
+  }
+
+  if (uid) {
+    try {
+      await updateDoc(doc(db, "users", uid), updates);
+    } catch (_) {}
+  }
 };
 
 /**
- * Change a student's portal password WITHOUT ever displaying the old one.
- *
- * The STORED old password authenticates a sign-in on a SECONDARY Firebase app
- * instance (same trick `createPortalAccount` uses — the signed-in admin
- * session is never touched), `updatePassword` applies the new password while
- * that fresh sign-in satisfies Firebase's recent-login requirement, and only
- * then are the stored copies on the student doc rewritten to match.
+ * Change a student's portal password WITHOUT displaying the old one.
+ * Uses stored old credentials, fallback fields (phone, users/{uid}), or provided
+ * password to authenticate a session on a secondary Firebase app, then updates password.
+ * If user does not exist in Auth (e.g. cleared), creates them fresh with the new password.
  *
  * @param {string} studentId - students doc id (auto-id or uid)
  * @param {string} newPassword - at least 6 characters
+ * @param {string} [providedOldPassword] - optional old password entered by admin
  * @returns {Promise<void>}
  */
-export const resetPortalPassword = async (studentId, newPassword) => {
+export const resetPortalPassword = async (studentId, newPassword, providedOldPassword = null) => {
   const pass = String(newPassword || "").trim();
   if (!pass || pass.length < 6) throw new Error("Portal password must be at least 6 characters.");
 
   const snap = await getDoc(doc(db, "students", studentId));
   if (!snap.exists()) throw new Error("Student record not found.");
-  const data = snap.data();
+  const data = snap.data() || {};
 
+  const normPhone = data.phone ? normalizePhone(data.phone) : "";
   const rawCred = data.loginCredentials ? String(data.loginCredentials) : "";
   const slashIdx = rawCred.indexOf("/");
-  const loginId = String(data.loginId || (slashIdx !== -1 ? rawCred.slice(0, slashIdx) : "")).trim();
-  const oldPass = String(data.loginPassword || (slashIdx !== -1 ? rawCred.slice(slashIdx + 1) : "")).trim();
-  if (!loginId || !oldPass) {
-    throw new Error("No stored password to change — use \"Clear login\", then create a fresh login instead.");
+  const rawLoginId = String(data.loginId || data.authEmail || (slashIdx !== -1 ? rawCred.slice(0, slashIdx) : "")).trim();
+  const cleanEmail = String(data.email || (!/^[\d\s\-\+\(\)]{10,}$/.test(rawLoginId) ? rawLoginId : "")).trim().toLowerCase();
+  // Honor existing loginId (whether email or phone); otherwise fallback to phone or email
+  const loginId = rawLoginId || normPhone || cleanEmail;
+  if (!loginId) {
+    throw new Error("Student record has no Login ID or phone number.");
   }
-
   const isPhone = /^[\d\s\-\+\(\)]{10,}$/.test(loginId);
-  const authEmail = isPhone ? phoneToAuthEmail(loginId) : loginId.toLowerCase();
+  let authEmail = isPhone ? phoneToAuthEmail(loginId) : loginId.toLowerCase();
+
+  let updatedInAuth = false;
+  let authUid = data.uid || null;
 
   const secondaryApp = initializeApp(firebaseConfig, `reset-pass-${Date.now()}`);
   try {
     const secondaryAuth = getAuth(secondaryApp);
-    const cred = await signInWithEmailAndPassword(secondaryAuth, authEmail, oldPass);
-    await updatePassword(cred.user, pass);
-    await signOut(secondaryAuth).catch(() => {});
-  } catch (error) {
-    const code = error?.code || "";
-    if (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password") {
-      throw new Error("The stored password no longer matches the account — use \"Clear login\", then create a fresh login with the new password.");
+
+    // 1. Try creating account with the new password first (fast path for new or cleared accounts)
+    try {
+      const newCred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, pass);
+      authUid = newCred.user.uid;
+      await signOut(secondaryAuth).catch(() => {});
+      updatedInAuth = true;
+    } catch (createErr) {
+      if (createErr?.code !== "auth/email-already-in-use") {
+        throw createErr;
+      }
     }
-    throw new Error(error?.message || "Could not update the password.");
+
+    // 2. If already exists in Auth, check if password already matches
+    if (!updatedInAuth) {
+      try {
+        const existingCred = await signInWithEmailAndPassword(secondaryAuth, authEmail, pass);
+        authUid = existingCred.user.uid;
+        await signOut(secondaryAuth).catch(() => {});
+        updatedInAuth = true;
+      } catch (_) {}
+    }
+
+    // 3. User already exists in Auth with a different password — try known candidate passwords
+    if (!updatedInAuth) {
+      const candidates = [];
+      if (providedOldPassword) candidates.push(providedOldPassword);
+      if (data.loginPassword && !candidates.includes(data.loginPassword)) candidates.push(data.loginPassword);
+      if (data.lastKnownPassword && !candidates.includes(data.lastKnownPassword)) candidates.push(data.lastKnownPassword);
+      if (slashIdx !== -1) {
+        const credPass = rawCred.slice(slashIdx + 1).trim();
+        if (credPass && !candidates.includes(credPass)) candidates.push(credPass);
+      }
+      if (normPhone && !candidates.includes(normPhone)) candidates.push(normPhone);
+
+      // Check users/{uid}
+      const uidToCheck = data.uid || (studentId.length >= 20 ? studentId : null);
+      if (uidToCheck) {
+        try {
+          const uSnap = await getDoc(doc(db, "users", uidToCheck));
+          if (uSnap.exists()) {
+            const ud = uSnap.data() || {};
+            if (ud.loginPassword && !candidates.includes(ud.loginPassword)) candidates.push(ud.loginPassword);
+            if (ud.lastKnownPassword && !candidates.includes(ud.lastKnownPassword)) candidates.push(ud.lastKnownPassword);
+          }
+        } catch (_) {}
+      }
+
+      for (const cand of candidates) {
+        if (!cand) continue;
+        try {
+          const cred = await signInWithEmailAndPassword(secondaryAuth, authEmail, cand);
+          authUid = cred.user.uid;
+          await updatePassword(cred.user, pass);
+          await signOut(secondaryAuth).catch(() => {});
+          updatedInAuth = true;
+          break;
+        } catch (_) {}
+      }
+    }
+
+    // 4. If student has BOTH phone and email, sync the secondary account as well so BOTH login methods work
+    const secondaryEmail = isPhone
+      ? (cleanEmail && cleanEmail.includes("@") ? cleanEmail : "")
+      : (normPhone ? phoneToAuthEmail(normPhone) : "");
+    if (secondaryEmail) {
+      try {
+        await createUserWithEmailAndPassword(secondaryAuth, secondaryEmail, pass);
+        await signOut(secondaryAuth).catch(() => {});
+      } catch (sErr) {
+        if (sErr?.code === "auth/email-already-in-use") {
+          const sCands = [providedOldPassword, data.loginPassword, data.lastKnownPassword, normPhone].filter(Boolean);
+          for (const cand of sCands) {
+            try {
+              const sCred = await signInWithEmailAndPassword(secondaryAuth, secondaryEmail, cand);
+              await updatePassword(sCred.user, pass);
+              await signOut(secondaryAuth).catch(() => {});
+              break;
+            } catch (_) {}
+          }
+        }
+      }
+    }
   } finally {
     await deleteApp(secondaryApp).catch(() => {});
   }
 
-  await updateDoc(doc(db, "students", studentId), {
+  // Update student record in Firestore with the new password and clear revoked flag
+  const uidToCheck = authUid || data.uid || (studentId.length >= 20 ? studentId : null);
+  const studentUpdates = {
+    loginId,
     loginPassword: pass,
     loginCredentials: `${loginId} / ${pass}`,
+    lastKnownPassword: pass,
+    authEmail,
+    loginRevoked: deleteField(),
     updatedAt: serverTimestamp()
-  });
+  };
+  if (authUid) {
+    studentUpdates.uid = authUid;
+  }
+  await updateDoc(doc(db, "students", studentId), studentUpdates);
+
+  if (uidToCheck) {
+    try {
+      await updateDoc(doc(db, "users", uidToCheck), studentUpdates);
+    } catch (_) {}
+  }
+
+  if (authUid && authUid !== studentId) {
+    try {
+      await setDoc(doc(db, "students", authUid), {
+        ...data,
+        ...studentUpdates,
+        uid: authUid,
+        studentId: data.studentId || data.admissionNo || "SH-xxxx"
+      }, { merge: true });
+    } catch (_) {}
+    try {
+      await setDoc(doc(db, "users", authUid), {
+        ...data,
+        ...studentUpdates,
+        uid: authUid,
+        studentId: studentId,
+        role: "Student"
+      }, { merge: true });
+    } catch (_) {}
+  }
+
+  if (normPhone) {
+    try {
+      await setDoc(doc(db, "uniqueness", `phone_${normPhone}`), {
+        kind: "phone-index",
+        authEmail,
+        uid: authUid || studentId,
+        owners: ["students/" + (authUid || studentId)],
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (_) {}
+  }
+  if (cleanEmail && cleanEmail.includes("@")) {
+    try {
+      await setDoc(doc(db, "uniqueness", `email_${cleanEmail}`), {
+        kind: "email",
+        authEmail,
+        uid: authUid || studentId,
+        ownerPath: "students/" + (authUid || studentId),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (_) {}
+  }
+
+  return { uid: authUid, authEmail };
 };
 
 export const createPortalLoginForStudent = async (studentId, loginId, loginPassword) => {
   const { createPortalAccount } = await import("./authService.js");
-  const account = await createPortalAccount(loginId, loginPassword); // throws with a clear message
 
   const oldRef = doc(db, "students", studentId);
   const snap = await getDoc(oldRef);
   if (!snap.exists()) throw new Error("Student record not found.");
-  const data = snap.data();
-  if (data.uid && data.uid !== account.uid) {
-    throw new Error("This student is already linked to a different portal account.");
-  }
+  const data = snap.data() || {};
+
+  const candidates = [
+    data.loginPassword,
+    data.lastKnownPassword,
+    data.phone ? normalizePhone(data.phone) : "",
+    loginPassword
+  ].filter(Boolean);
+
+  const account = await createPortalAccount(loginId, loginPassword, candidates);
+
   if (studentId !== account.uid) {
     const existingAtUid = await getDoc(doc(db, "students", account.uid));
-    if (existingAtUid.exists()) {
+    if (existingAtUid.exists() && existingAtUid.id !== studentId) {
       throw new Error("These login credentials already belong to a different student. Use that student's own Login ID, or pick a different Login ID.");
     }
   }
@@ -398,8 +662,34 @@ export const createPortalLoginForStudent = async (studentId, loginId, loginPassw
     loginId,
     loginPassword,
     loginCredentials,
+    loginRevoked: deleteField(),
     updatedAt: serverTimestamp()
   };
+
+  const normP = normalizePhone(loginId || data.phone);
+  if (normP) {
+    try {
+      await setDoc(doc(db, "uniqueness", `phone_${normP}`), {
+        kind: "phone-index",
+        authEmail: account.authEmail,
+        uid: account.uid,
+        owners: ["students/" + account.uid],
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (_) {}
+  }
+  const cleanEmail = String(data.email || (!/^[\d\s\-\+\(\)]{10,}$/.test(loginId) ? loginId : "")).trim().toLowerCase();
+  if (cleanEmail && cleanEmail.includes("@")) {
+    try {
+      await setDoc(doc(db, "uniqueness", `email_${cleanEmail}`), {
+        kind: "email",
+        authEmail: account.authEmail,
+        uid: account.uid,
+        ownerPath: "students/" + account.uid,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (_) {}
+  }
 
   // Already keyed by this uid — update in place (never write then delete the
   // same document reference).

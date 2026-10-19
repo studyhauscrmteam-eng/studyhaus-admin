@@ -89,84 +89,15 @@ const fmtWhen = (r) => {
   }
 };
 
-// ---------- Decision history (Approve / Reject log) ----------
-// The ADMISSION ALERTS block above is the LIVE pending queue, so an item
-// necessarily disappears the moment it is decided. This log keeps a local
-// record of each decision so the Notifications page still shows what
-// happened afterwards. Local-only on purpose: no DB writes, no new
-// collections, firestore.rules untouched.
-const HISTORY_KEY = "sh_admission_decision_history_v1";
-
-const readDecisionHistory = () => {
-  try {
-    const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    return Array.isArray(list) ? list : [];
-  } catch (_) {
-    return [];
+// Clear any legacy decision history from local storage immediately so it does not linger
+try {
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem("sh_admission_decision_history_v1");
   }
-};
+} catch (_) {}
 
-/** Called by approveStudent / rejectStudent after a successful decision. */
-window.recordAdmissionDecision = (entry) => {
-  try {
-    const list = readDecisionHistory();
-    list.unshift({
-      admissionId: (entry && entry.admissionId) || "",
-      name: (entry && entry.name) || "Admission",
-      phone: (entry && entry.phone) || "",
-      planName: (entry && entry.planName) || "",
-      seat: (entry && entry.seat) || "",
-      decision: (entry && entry.decision) || "",
-      reason: (entry && entry.reason) || "",
-      by: localStorage.getItem("userRole") || "Staff",
-      at: Date.now(),
-    });
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 50)));
-    if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
-  } catch (_) { /* storage blocked/full — the decision itself still stands */ }
-};
-
-window.clearAdmissionDecisionHistory = () => {
-  try { localStorage.removeItem(HISTORY_KEY); } catch (_) {}
-  if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
-};
-
-const historyHtml = () => {
-  const list = readDecisionHistory();
-  if (list.length === 0) return "";
-  const items = list.slice(0, 15).map((h) => {
-    // Approved / Rejected / Dismissed / Expired — show what actually happened.
-    const decision = h.decision || "Rejected";
-    const approved = decision === "Approved";
-    const neutral = decision === "Dismissed" || decision === "Expired";
-    const icon = approved
-      ? `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>`
-      : neutral
-        ? `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`
-        : `<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>`;
-    const meta = [
-      h.planName ? esc(h.planName) : "",
-      h.seat ? `Seat ${esc(h.seat)}` : "",
-      h.reason ? `Reason: ${esc(h.reason)}` : "",
-    ].filter(Boolean).join(" · ");
-    return `
-      <div class="notif-item">
-        <div class="notif-icon ${approved ? "green" : neutral ? "amber" : "red"}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">${icon}</svg>
-        </div>
-        <div class="notif-content" style="flex:1;">
-          <div class="notif-title">${esc(h.name || "Admission")} — ${esc(decision)}</div>
-          <div class="notif-body">${meta || (h.phone ? esc(h.phone) : "Admission decision recorded")}</div>
-          <div class="notif-time">${new Date(h.at).toLocaleString()}${h.by ? ` · ${esc(h.by)}` : ""}</div>
-        </div>
-      </div>`;
-  }).join("");
-  return `
-    <div style="font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--text-muted); padding:.75rem .25rem .5rem;">
-      RECENT DECISIONS · ${list.length} (last 50 kept on this device)
-    </div>
-    ${items}`;
-};
+window.recordAdmissionDecision = () => {};
+window.clearAdmissionDecisionHistory = () => {};
 
 /**
  * HTML block for the Notifications page (rendered above announcements).
@@ -180,8 +111,7 @@ const alertsHtml = () => {
   // the badges (seen-state) and never dismisses alerts. The applicant is
   // untouched until Approved/Rejected in Pending approval.
   const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`));
-  const decided = historyHtml();
-  if (pending.length === 0) return decided;
+  if (pending.length === 0) return "";
   // Plain cards like every other notification: no Review button, the whole
   // card is the click target and it disappears when tapped.
   const items = pending.slice(0, 10).map((r) => `
@@ -199,7 +129,7 @@ const alertsHtml = () => {
     <div style="font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--text-muted); padding:.25rem .25rem .5rem;">
       ADMISSION ALERTS · ${pending.length} WAITING
     </div>
-    ${items}${decided}`;
+    ${items}`;
 };
 
 /**

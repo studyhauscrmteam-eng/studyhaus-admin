@@ -682,9 +682,8 @@
               </div>
               <div class="form-group" style="margin:0;">
                 <label
-                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Parent
-                  mobile</label>
-                <input type="tel" pattern="[0-9]{10}" id="adm-parent-phone"
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Parent mobile <span style="font-size: 11px; font-weight: 400; color: var(--text-muted);">(Optional)</span></label>
+                <input type="tel" id="adm-parent-phone" placeholder="10-digit mobile (optional)"
                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
               </div>
               <div class="form-group" style="margin:0;">
@@ -697,10 +696,9 @@
               <div class="form-group" style="margin:0;">
                 <label
                   style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
-                  data-i18n="form.dob">Date of birth </label>
+                  data-i18n="form.dob">Date of birth *</label>
                 <input type="date" id="adm-dob" required
-                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary);"
-                  / required>
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary);" />
               </div>
               <div class="form-group" style="margin:0;">
                 <label
@@ -717,8 +715,8 @@
               <div class="form-group" style="margin:0;">
                 <label
                   style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">College
-                  / Institute</label>
-                <input type="text" id="adm-college"
+                  / Institute <span style="font-size: 11px; font-weight: 400; color: var(--text-muted);">(Optional)</span></label>
+                <input type="text" id="adm-college" placeholder="College or Institute name"
                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;" />
               </div>
               <div class="form-group" style="margin:0;">
@@ -730,8 +728,8 @@
               <div class="form-group" style="grid-column: 1 / -1; margin:0;">
                 <label
                   style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;"
-                  data-i18n="form.address" data-i18n="form.address">Address</label>
-                <textarea id="adm-address" rows="2"
+                  data-i18n="form.address">Address <span style="font-size: 11px; font-weight: 400; color: var(--text-muted);">(Optional)</span></label>
+                <textarea id="adm-address" rows="2" placeholder="Local address (optional)"
                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;"></textarea>
               </div>
               <div class="form-group" style="margin:0;">
@@ -750,6 +748,90 @@
                 <select id="adm-seat"
                   style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary); background: var(--bg-card);">
                   <option value="">Loading...</option>
+                </select>
+              </div>
+
+              <!-- Admission Period & Duration Section -->
+              <div style="grid-column: 1 / -1; padding: 1.25rem; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-hover, #f8fafc); margin: 0.5rem 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+                  <span style="font-size: 13px; font-weight: 700; color: var(--text-primary);">Admission Period & Duration</span>
+                  <span id="adm-duration-badge" style="font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--primary); color: #fff;">30 Days (1 Mo)</span>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin:0;">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">Admission Start Date *</label>
+                    <input type="date" id="adm-start-date" required onchange="window.onStartDateChange()"
+                      style="width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px; color: var(--text-primary); background: var(--bg-card);" />
+                  </div>
+                  <div class="form-group" style="margin:0;">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; display: block;">Admission End Date *</label>
+                    <input type="date" id="adm-end-date" required onchange="window.onEndDateChange()"
+                      style="width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px; color: var(--text-primary); background: var(--bg-card);" />
+                  </div>
+                </div>
+
+                <div style="margin-bottom: 0.75rem;">
+                  <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; display: block;">Select Duration Option:</label>
+                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button type="button" class="btn-duration-mode is-active" data-mode="month" onclick="window.setAdmissionDurationMode('month')"
+                      style="flex: 1; min-width: 110px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--primary); background: var(--primary); color: #fff; transition: all 0.2s;">
+                      📅 30-Day Month
+                    </button>
+                    <button type="button" class="btn-duration-mode" data-mode="days" onclick="window.setAdmissionDurationMode('days')"
+                      style="flex: 1; min-width: 110px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); transition: all 0.2s;">
+                      🔢 Specific Days
+                    </button>
+                    <button type="button" class="btn-duration-mode" data-mode="custom" onclick="window.setAdmissionDurationMode('custom')"
+                      style="flex: 1; min-width: 110px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); transition: all 0.2s;">
+                      🗓️ Random Date
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Sub-option: Month Selection -->
+                <div id="adm-duration-month-wrap" style="display: block;">
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap;">Duration (Months):</label>
+                    <select id="adm-duration-months" onchange="window.onDurationMonthChange()"
+                      style="flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; color: var(--text-primary); background: var(--bg-card);">
+                      <option value="1" selected>1 Month (30 days)</option>
+                      <option value="2">2 Months (60 days)</option>
+                      <option value="3">3 Months (90 days)</option>
+                      <option value="4">4 Months (120 days)</option>
+                      <option value="5">5 Months (150 days)</option>
+                      <option value="6">6 Months (180 days)</option>
+                      <option value="12">12 Months (360 days / 1 Year)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Sub-option: Days Input -->
+                <div id="adm-duration-days-wrap" style="display: none;">
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary); white-space: nowrap;">Number of Days:</label>
+                    <input type="number" id="adm-duration-days" min="1" max="1095" value="30" placeholder="e.g. 15, 30, 45, 60" oninput="window.onDurationDaysChange()"
+                      style="flex: 1; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; color: var(--text-primary); background: var(--bg-card);" />
+                  </div>
+                </div>
+
+                <!-- Sub-option: Random Date Hint -->
+                <div id="adm-duration-custom-wrap" style="display: none;">
+                  <p style="font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4;">
+                    💡 Select any start date and end date using the date pickers above. The duration will adjust automatically.
+                  </p>
+                </div>
+              </div>
+
+              <!-- Payment Method Selection -->
+              <div class="form-group" style="margin:0; grid-column: 1 / -1;">
+                <label
+                  style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; display: block;">Payment option *</label>
+                <select id="adm-payment-method" required
+                  style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--text-primary); background: var(--bg-card);">
+                  <option value="Cash" selected>Paid via Cash (Instant admission)</option>
+                  <option value="Paid (UPI)">Paid via UPI</option>
+                  <option value="Pay Later">Pay Later</option>
                 </select>
               </div>
             </div>
@@ -774,8 +856,12 @@
               style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary); margin-bottom: 12px;">
               <span>Start</span><span id="summary-start" style="color:var(--text-primary); font-weight: 600;">—</span>
             </div>
-            <div style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary);">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary); margin-bottom: 12px;">
               <span>Ends</span><span id="summary-ends" style="color:var(--text-primary); font-weight: 600;">—</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color:var(--text-secondary);">
+              <span>Duration</span><span id="summary-duration" style="color:var(--text-primary); font-weight: 600;">30 Days</span>
             </div>
           </div>
           <button class="btn btn-primary" id="btn-submit-admission"

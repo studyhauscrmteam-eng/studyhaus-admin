@@ -10,35 +10,51 @@ window.viewPaymentScreenshots = async (paymentId) => {
   let shots = [];
   try {
     const snap = await getDoc(doc(db, "payments", paymentId));
-    if (snap.exists()) shots = (snap.data().screenshots || []).filter(s => typeof s === "string" && s.startsWith("data:image/"));
+    if (snap.exists()) {
+      const d = snap.data() || {};
+      if (Array.isArray(d.screenshots) && d.screenshots.length) {
+        shots = d.screenshots.filter(s => typeof s === "string" && s.startsWith("data:image/"));
+      }
+      if (!shots.length && d.screenshot && typeof d.screenshot === "string" && d.screenshot.startsWith("data:image/")) {
+        shots = [d.screenshot];
+      }
+      if (!shots.length && d.paymentScreenshotUrl && typeof d.paymentScreenshotUrl === "string" && d.paymentScreenshotUrl.startsWith("data:image/")) {
+        shots = [d.paymentScreenshotUrl];
+      }
+    }
   } catch (e) {
     return window.showToast("Could not load screenshots: " + e.message, "error");
   }
-  if (!shots.length) return window.showToast("No screenshots attached to this payment.", "warning");
+  if (!shots.length) return window.showToast("No screenshot proof attached to this payment.", "warning");
 
   let idx = 0;
   const dialog = document.createElement("dialog");
   dialog.className = "card smooth-modal";
-  dialog.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 18px 45px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(560px, 94vw);";
+  dialog.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 18px 45px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(560px, 94vw); margin:auto;";
   dialog.innerHTML = `
     <div style="padding:1.25rem 1.5rem;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
-        <h3 style="margin:0; font-size:1.05rem;">Payment Screenshots</h3>
-        <button class="btn btn-ghost" id="pss-close" style="padding:0.15rem 0.5rem;">✕</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+        <h3 style="margin:0; font-size:1.05rem; font-weight:700;">Payment Screenshot Proof</h3>
+        <button class="btn btn-ghost" id="pss-close" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer;">✕</button>
       </div>
-      <div id="pss-stage" style="text-align:center;"></div>
-      ${shots.length > 1 ? `
+      <div id="pss-stage" style="text-align:center; background:var(--bg-hover); border-radius:10px; overflow:hidden; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; min-height:220px; max-height:65vh; padding:10px;"></div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.75rem;">
-        <button class="btn btn-secondary" id="pss-prev" style="padding:0.35rem 1rem;">← Prev</button>
-        <span id="pss-count" style="font-size:12px; color:var(--text-muted);"></span>
-        <button class="btn btn-secondary" id="pss-next" style="padding:0.35rem 1rem;">Next →</button>
-      </div>` : ""}
+        ${shots.length > 1 ? `
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <button class="btn btn-secondary" id="pss-prev" style="padding:0.35rem 0.75rem; font-size:12px;">← Prev</button>
+          <span id="pss-count" style="font-size:12px; color:var(--text-muted);"></span>
+          <button class="btn btn-secondary" id="pss-next" style="padding:0.35rem 0.75rem; font-size:12px;">Next →</button>
+        </div>` : `<div></div>`}
+        <a class="btn btn-primary" id="pss-download" download="payment-proof.jpg" href="${shots[0]}" style="text-decoration:none; padding:7px 16px; font-size:12.5px;">Download Proof</a>
+      </div>
     </div>
   `;
   document.body.appendChild(dialog);
   const stage = dialog.querySelector("#pss-stage");
+  const dl = dialog.querySelector("#pss-download");
   const paint = () => {
-    stage.innerHTML = `<img src="${shots[idx]}" alt="Payment screenshot ${idx + 1}" style="width:100%; max-height:60vh; object-fit:contain; border-radius:10px; border:1px solid var(--border);" />`;
+    stage.innerHTML = `<img src="${shots[idx]}" alt="Payment screenshot ${idx + 1}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'padding:2.5rem; color:var(--text-muted); font-size:13px; text-align:center;\\'>⚠️ Screenshot proof could not be loaded</div>';" style="width:100%; height:auto; max-height:65vh; object-fit:contain; display:block; border-radius:8px;" />`;
+    if (dl) dl.href = shots[idx];
     const c = dialog.querySelector("#pss-count");
     if (c) c.textContent = `${idx + 1} of ${shots.length}`;
     const prev = dialog.querySelector("#pss-prev");
@@ -378,7 +394,7 @@ const renderPaymentAdminTable = () => {
     html += `
       <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:16px;">${/rc-imp/i.test(r.transactionId || "") ? "—" : (r.transactionId || "RC-N/A")}
-          ${(r.screenshots || []).length ? `<div style="margin-top:4px;"><span class="badge" onclick="event.stopPropagation(); window.viewPaymentScreenshots('${r.id}')" style="cursor:pointer; background:rgba(0,113,227,0.12); color:var(--primary); font-size:0.7rem; padding:2px 8px; border-radius:999px; font-weight:600;">📎 ${(r.screenshots).length} SS</span></div>` : ""}
+          ${((r.screenshots && r.screenshots.length) || r.screenshot || r.paymentScreenshotUrl) ? `<div style="margin-top:4px;"><span class="badge" onclick="event.stopPropagation(); window.viewPaymentScreenshots('${r.id}')" style="cursor:pointer; background:rgba(0,113,227,0.12); color:var(--primary); font-size:0.72rem; padding:3px 9px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">📎 View Proof</span></div>` : ""}
         </td>
         <td style="padding:16px; font-weight:600; color:var(--text-primary);">${r.studentName || "Unknown"}</td>
         <td style="padding:16px;">${r.planName || "Unknown Plan"}</td>

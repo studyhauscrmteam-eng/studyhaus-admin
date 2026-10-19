@@ -160,21 +160,27 @@ export const approvePayment = async (paymentId, approverName) => {
     let currentDue = new Date(studentData.paymentDueDate || new Date());
     if (isNaN(currentDue.getTime())) currentDue = new Date();
     
-    // Add the renewal months (day-safe: avoids Jan 31 + 1 month = Mar 3)
-    const renewalMonths = Number(paymentData.renewalPeriod);
-    currentDue.setDate(1); // Reset to 1st to avoid month-end overflow
-    currentDue.setMonth(currentDue.getMonth() + renewalMonths);
-    // Move to last day of that month if original was end-of-month
-    const lastDay = new Date(currentDue.getFullYear(), currentDue.getMonth() + 1, 0).getDate();
-    currentDue.setDate(Math.min(lastDay, currentDue.getDate()));
-    const newDueDateStr = currentDue.toISOString().split("T")[0];
+    let newDueDateStr = paymentData.endDate;
+    if (!newDueDateStr) {
+      // Fallback calculation if endDate wasn't stored on the payment
+      const renewalMonths = Number(paymentData.renewalPeriod) || 1;
+      currentDue.setDate(1); // Reset to 1st to avoid month-end overflow
+      currentDue.setMonth(currentDue.getMonth() + renewalMonths);
+      const lastDay = new Date(currentDue.getFullYear(), currentDue.getMonth() + 1, 0).getDate();
+      currentDue.setDate(Math.min(lastDay, currentDue.getDate()));
+      newDueDateStr = currentDue.toISOString().split("T")[0];
+    }
 
-    // 1. Update Student Due Date
-    await updateDoc(studentRef, {
+    // 1. Update Student Record
+    const studentUpdates = {
       paymentDueDate: newDueDateStr,
       status: "Active",
       updatedAt: serverTimestamp()
-    });
+    };
+    if (paymentData.startDate) studentUpdates.startDate = paymentData.startDate;
+    if (paymentData.endDate) studentUpdates.endDate = paymentData.endDate;
+
+    await updateDoc(studentRef, studentUpdates);
 
     // 2. Update payment document to approved
     await updateDoc(paymentRef, {
@@ -182,6 +188,34 @@ export const approvePayment = async (paymentId, approverName) => {
       approvedBy: approverName,
       approvalDate: serverTimestamp()
     });
+
+    // 3. Record in renewals collection
+    try {
+      const renDoc = {
+        studentId: paymentData.studentId,
+        studentName: paymentData.studentName || studentData.name,
+        oldPlan: studentData.planName || "",
+        newPlan: paymentData.planName || studentData.planName || "",
+        startDate: paymentData.startDate || studentData.startDate || "",
+        endDate: paymentData.endDate || newDueDateStr,
+        durationDays: Number(paymentData.durationDays || 30),
+        durationMode: paymentData.durationMode || "monthly",
+        amount: Number(paymentData.amount),
+        paymentMethod: paymentData.paymentMethod || "UPI",
+        transactionId: paymentData.transactionId || "",
+        renewedBy: approverName,
+        renewalNotes: "Approved online payment renewal",
+        status: "Completed",
+        createdAt: serverTimestamp()
+      };
+      const ssUrl = paymentData.screenshot || paymentData.paymentScreenshotUrl || (paymentData.screenshots && paymentData.screenshots[0]) || "";
+      if (ssUrl) {
+        renDoc.screenshot = ssUrl;
+        renDoc.paymentScreenshotUrl = ssUrl;
+        renDoc.screenshots = [ssUrl];
+      }
+      await addDoc(collection(db, "renewals"), renDoc);
+    } catch (_) {}
     
     return { success: true };
   } catch (error) {
