@@ -65,6 +65,9 @@ function navigate(page) {
   });
 
   // Load dynamic data for specific pages
+  if (page === 'students' && typeof window.renderStudentTable === 'function') {
+    window.renderStudentTable();
+  }
   if (page === 'documents' && typeof window.renderGlobalDocuments === 'function') {
     window.renderGlobalDocuments();
   }

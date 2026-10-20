@@ -8,7 +8,10 @@ export const replacePlaceholders = (templateString, studentData) => {
   
   let result = templateString;
   result = result.replace(/{StudentName}/g, studentData.fullName || "Student");
-  result = result.replace(/{SeatNumber}/g, studentData.seatNumber || "N/A");
+  const seatNum = studentData.seatNumber || studentData.seatAssigned || "";
+  const seatFloor = studentData.seatFloor || studentData.floor || (seatNum ? "Ground Floor" : "");
+  const seatDisplay = seatNum ? (seatNum.includes("(") ? seatNum : `${seatNum} (${seatFloor})`) : "N/A";
+  result = result.replace(/{SeatNumber}/g, seatDisplay);
   result = result.replace(/{MembershipPlan}/g, studentData.planName || "Plan");
   result = result.replace(/{PendingAmount}/g, studentData.pendingAmount || "0");
   result = result.replace(/{RenewalDate}/g, studentData.endDate || "Date");

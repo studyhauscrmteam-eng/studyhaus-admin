@@ -63,7 +63,7 @@ window.__seatHoverShow = async (seatOrId, el) => {
     <div id="seat-hover-photo" style="width:60px; height:60px; border-radius:14px; background:var(--bg-hover); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; overflow:hidden; flex-shrink:0;">${initials}</div>
     <div style="min-width:0;">
       <div style="font-weight:700; font-size:15px; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;">${name}</div>
-      <div style="font-size:12px; color:var(--text-secondary); margin-top:3px; white-space:nowrap;">Seat ${seat.seatNumber || "?"} · ${seatHoverStatusLabel(statusLabel) === statusLabel ? statusLabel : statusLabel}</div>
+      <div style="font-size:12px; color:var(--text-secondary); margin-top:3px; white-space:nowrap;">Seat ${seat.seatNumber || "?"} (${seat.floor || currentFilters.floor || "Ground Floor"}) · ${statusLabel}</div>
       <div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px; letter-spacing:0.3px;">${statusLabel.toUpperCase()}</div>
     </div>`;
   card.style.display = "flex";
@@ -241,7 +241,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
 
         return `
           <div
-            onclick="window._signupSelectSeat('${seat.id}', '${seat.seatNumber}', ${isPickable})"
+            onclick="window._signupSelectSeat('${seat.id}', '${seat.seatNumber}', ${isPickable}, '${seat.floor || signupCurrentFloor}')"
             title="${seat.status}${!isPickable ? ' – not selectable' : ''}"
             style="background:${bg}; border:${border}; color:${color}; opacity:${opacity};
                    border-radius:8px; height:46px; display:flex; align-items:center;
@@ -301,7 +301,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
 
           return `
             <div
-              onclick="window._signupSelectSeat('${seat.id}', '${seat.seatNumber}', ${isPickable})"
+              onclick="window._signupSelectSeat('${seat.id}', '${seat.seatNumber}', ${isPickable}, '${seat.floor || signupCurrentFloor}')"
               title="${seat.status}${!isPickable ? ' – not selectable' : ''}"
               style="background:${bg}; border:${border}; color:${color}; opacity:${opacity};
                      border-radius:8px; height:46px; display:flex; align-items:center;
@@ -405,7 +405,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
       renderSignupSeats();
     };
 
-    window._signupSelectSeat = (seatId, seatNumber, isPickable) => {
+    window._signupSelectSeat = (seatId, seatNumber, isPickable, floor) => {
       if (!isPickable) {
         window.showToast && window.showToast(
         isCheckinContext
@@ -415,12 +415,16 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
         return;
       }
       signupSelectedId = seatId;
+      const pickedFloor = floor || signupCurrentFloor || "Ground Floor";
       const numInput = document.getElementById("selectedSeatNumber");
       const idInput  = document.getElementById("selectedSeatId");
+      const floorInput = document.getElementById("selectedSeatFloor") || document.getElementById("seatFloor");
       if (numInput) numInput.value = seatNumber;
       if (idInput)  idInput.value  = seatId;
+      if (floorInput) floorInput.value = pickedFloor;
+      window.selectedSeatFloor = pickedFloor;
       const label = document.getElementById("signup-selected-label");
-      if (label) label.innerHTML = `<span style="color:#166534; font-weight:600;">✓ Seat ${seatNumber} selected</span>`;
+      if (label) label.innerHTML = `<span style="color:#166534; font-weight:600;">✓ Seat ${seatNumber} (${pickedFloor}) selected</span>`;
       renderSignupSeats();
     };
 
@@ -778,7 +782,7 @@ export const initSeatMapUI = async (mode, containerId, opts = {}) => {
     if (!seat) return;
     currentSelectedSeat = seat;
 
-    modalTitle.innerText = `Seat ${seat.seatNumber} (${seat.status})`;
+    modalTitle.innerText = `Seat ${seat.seatNumber} (${seat.floor || currentFilters.floor || 'Ground Floor'}) — ${seat.status}`;
     optionsDiv.innerHTML = "";
     optionsDiv.style.display = "flex";
     assignForm.style.display = "none";
@@ -913,11 +917,11 @@ const triggerAssignSeat = async (seat, studentEmailOrId) => {
     const studentData = { id: studentDoc.id, ...studentDoc.data() };
     
     if (studentData.status !== "Active") return window.showToast("Cannot assign seat to inactive student.", "warning");
-    if (studentData.seatNumber) return window.showToast(`Student already has a seat assigned: ${studentData.seatNumber}`, "warning");
+    if (studentData.seatNumber) return window.showToast(`Student already has a seat assigned: Seat ${studentData.seatNumber} (${studentData.seatFloor || 'Ground Floor'})`, "warning");
 
     const res = await assignSeat(seat.id, studentData);
     if (!res.success) window.showToast("Failed to assign seat: " + res.error, "error");
-    else window.showToast(`Successfully assigned ${studentData.name} to ${seat.seatNumber}`, "success");
+    else window.showToast(`Successfully assigned ${studentData.name} to Seat ${seat.seatNumber} (${seat.floor || currentFilters.floor || 'Ground Floor'})`, "success");
 
   } catch (err) {
     window.showToast("Error finding student: " + err.message, "error");

@@ -117,7 +117,7 @@ const validateCheckIn = async (student, selectedSeatNumber) => {
   return finalSeat;
 };
 
-export const checkIn = async (student, selectedSeatNumber = null) => {
+export const checkIn = async (student, selectedSeatNumber = null, selectedSeatFloor = null) => {
   let finalSeat = null;
   try {
     finalSeat = await validateCheckIn(student, selectedSeatNumber);
@@ -125,17 +125,28 @@ export const checkIn = async (student, selectedSeatNumber = null) => {
     return { success: false, error: error.message };
   }
 
+  // Floor hint: explicit floor param, prefix B -> First Floor, prefix A -> Ground Floor, else student's stored floor.
+  const rawSel = String(selectedSeatNumber || "").trim().toUpperCase();
+  const seatFloorHint = selectedSeatFloor || (rawSel.startsWith("B") || rawSel.endsWith("B")
+    ? "First Floor"
+    : (rawSel.startsWith("A") || rawSel.endsWith("A")
+        ? "Ground Floor"
+        : ((student && student.seatFloor) || "Ground Floor")));
+
   try {
     // Verify seat is available (or reserved — first come, first served).
     // Floor-aware: duplicate plain numbers exist on both floors.
     const pickSeatDoc = (snap, floorHint) => {
       if (snap.empty) return null;
       if (snap.docs.length === 1) return snap.docs[0];
-      if (floorHint) {
-        const hit = snap.docs.find(d => ((d.data() || {}).floor || "Ground Floor") === floorHint);
-        if (hit) return hit;
-      }
-      return snap.docs[0];
+      const normHint = (floorHint || "").toLowerCase();
+      const isFirst = normHint.includes("first") || normHint.includes("1st") || normHint.startsWith("b");
+      const hit = snap.docs.find(d => {
+        const df = String((d.data() || {}).floor || "").toLowerCase();
+        return isFirst ? (df.includes("first") || df.includes("1st") || d.id.startsWith("b") || d.id.startsWith("first"))
+                       : (df.includes("ground") || d.id.startsWith("a") || d.id.startsWith("ground"));
+      });
+      return hit || snap.docs[0];
     };
     let seatSnap;
     try {
@@ -151,12 +162,13 @@ export const checkIn = async (student, selectedSeatNumber = null) => {
       throw e;
     }
     const seatDoc = pickSeatDoc(seatSnap, seatFloorHint);
-    if (!seatDoc) return { success: false, error: `Seat ${finalSeat} not found. Please pick another seat.` };
+    if (!seatDoc) return { success: false, error: `Seat ${finalSeat} (${seatFloorHint}) not found. Please pick another seat.` };
 
-    const seatData = seatDoc.data();
+    const seatData = seatDoc.data() || {};
+    const resolvedFloor = seatData.floor || seatFloorHint || (student && student.seatFloor) || "Ground Floor";
 
-    if (seatData.status === "Occupied") return { success: false, error: `Seat ${finalSeat} is already occupied. Please pick another seat.` };
-    if (seatData.status === "Maintenance" || seatData.status === "Inactive") return { success: false, error: `Seat ${finalSeat} is under maintenance. Please pick another seat.` };
+    if (seatData.status === "Occupied") return { success: false, error: `Seat ${finalSeat} (${resolvedFloor}) is already occupied. Please pick another seat.` };
+    if (seatData.status === "Maintenance" || seatData.status === "Inactive") return { success: false, error: `Seat ${finalSeat} (${resolvedFloor}) is under maintenance. Please pick another seat.` };
     // Reserved seats are freely pickable — first come, first served. The
     // assignment only decides which status the seat reverts to on check-out.
 
@@ -165,7 +177,7 @@ export const checkIn = async (student, selectedSeatNumber = null) => {
       studentId: student.id,
       studentName: student.name,
       seatNumber: finalSeat, // plain number — the actual seat they are taking
-      seatFloor: (seatData || {}).floor || seatFloorHint || student.seatFloor || "Ground Floor",
+      seatFloor: resolvedFloor,
       planName: student.planName || "",
       date: getTodayStr(),
       checkIn: now.getTime(),

@@ -15,7 +15,7 @@ let portalCreated = { oldId: null, uid: null };
 let pendingPortalPassword = null;
 let currentQuery = "";
 let currentFilters = { status: "All", plan: "All" };
-let currentSort = { by: "name", order: "asc" };
+let currentSort = { by: "createdAt", order: "desc" };
 let currentPage = 1;
 let pageSize = 10;
 let availablePlans = [];
@@ -66,14 +66,15 @@ const DENIED_STATE = ["rejected", "old", "old student"];
 const normState = (v) => String(v == null ? "" : v).trim().toLowerCase();
 
 export const isAdmitted = (s) => {
-  // A portal sign-up that has not been filed yet is not a student at all:
-  // no form, no documents, no payment, nothing for staff to act on (owner:
-  // "no admission, no approval, still seen"). The record is untouched in
-  // Firestore and appears the moment the student finishes the wizard.
-  if (s && s.applicationReady === false) return false;
-  const a = normState(s && s.approvalStatus);
-  const st = normState(s && s.status);
+  if (!s) return false;
+  const a = normState(s.approvalStatus);
+  const st = normState(s.status);
   if (DENIED_STATE.indexOf(a) !== -1 || DENIED_STATE.indexOf(st) !== -1) return false;
+  // An approved or active student is always admitted (approved by admin)
+  if (a === "approved" || st === "active") return true;
+  // A portal sign-up that has not been filed yet is not a student at all:
+  // no form, no documents, no payment, nothing for staff to act on.
+  if (s.applicationReady === false) return false;
   if (a) return LISTED_APPROVAL.indexOf(a) !== -1;
   if (!st) return false;
   return LISTED_STATUS.indexOf(st) !== -1;
@@ -228,6 +229,13 @@ export const initStudentManagementUI = async () => {
   window.closeStudentProfile = () => {
     const modal = document.getElementById("student-profile-modal");
     if (modal) modal.close();
+  };
+
+  window.renderStudentTable = () => {
+    renderTable();
+  };
+  window.refreshStudents = () => {
+    renderTable();
   };
 
   /**
@@ -397,7 +405,7 @@ const renderTable = () => {
               : `<div class="avatar-sm avatar-tint" style="background:${avBg}; color:${avFg}; margin-top: 2px;">${initials}</div>`; })()}
             <div>
               ${nameHtml}
-              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}</div>
+              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}${(s.seatNumber || s.seatAssigned) ? ` · <span style="font-weight:600; color:var(--primary);">Seat ${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})</span>` : ""}</div>
               ${flagsHtml}
             </div>
           </div>
@@ -563,7 +571,7 @@ const renderProfileModal = (s, role) => {
         </div>`; })()}
         <div>
           <h3 style="margin: 0; font-size: 1.25rem;">${s.name}</h3>
-          <div style="color: var(--text-muted);">${s.studentId || s.admissionNo || "No ID"} · ${s.status || "Active"}${s.approvalStatus ? ` · ${s.approvalStatus}` : ""}</div>
+          <div style="color: var(--text-muted);">${s.studentId || s.admissionNo || "No ID"} · ${s.status || "Active"}${s.approvalStatus ? ` · ${s.approvalStatus}` : ""}${(s.seatNumber || s.seatAssigned) ? ` · <b style="color:var(--text-primary);">Seat ${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})</b>` : ""}</div>
           <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
             ${buildFlagBadges(s)}
             ${s.mergedInto ? `<button type="button" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;" onclick="window.openStudentProfileById('${escAttr(mergedTargetId(s))}')">Open merged record</button>` : ""}
@@ -694,8 +702,15 @@ const renderProfileModal = (s, role) => {
             </div>
 
             <div class="form-group">
-              <label>Seat</label>
+              <label>Seat Number</label>
               <input type="text" id="edit-seat" value="${escAttr(s.seatNumber || s.seatAssigned || '')}" placeholder="e.g. 20" ${!canEdit ? 'disabled' : ''} />
+            </div>
+            <div class="form-group">
+              <label>Floor</label>
+              <select id="edit-seat-floor" class="sp-input" ${!canEdit ? 'disabled' : ''}>
+                <option value="Ground Floor" ${(s.seatFloor || s.floor || 'Ground Floor') === 'Ground Floor' ? 'selected' : ''}>Ground Floor</option>
+                <option value="First Floor" ${(s.seatFloor || s.floor || '') === 'First Floor' ? 'selected' : ''}>First Floor</option>
+              </select>
             </div>
             <div class="form-group">
               <label>Payment Method</label>
@@ -933,12 +948,20 @@ window.submitStudentEdit = async (id) => {
     // creates a document), so this can't spawn a second student record.
     // Missing elements (old cached markup) are simply skipped.
     const seatEl = document.getElementById("edit-seat");
+    const seatFloorEl = document.getElementById("edit-seat-floor");
     const payMethodEl = document.getElementById("edit-payment-method");
     const txnEl = document.getElementById("edit-txn-id");
     const dueEl = document.getElementById("edit-payment-due");
     const startEl = document.getElementById("edit-start-date");
     const endEl = document.getElementById("edit-end-date");
-    if (seatEl && !seatEl.disabled) updates.seatNumber = seatEl.value.trim();
+    if (seatEl && !seatEl.disabled) {
+      updates.seatNumber = seatEl.value.trim();
+      updates.seatAssigned = seatEl.value.trim();
+    }
+    if (seatFloorEl && !seatFloorEl.disabled) {
+      updates.seatFloor = seatFloorEl.value;
+      updates.floor = seatFloorEl.value;
+    }
     if (payMethodEl && !payMethodEl.disabled) updates.paymentMethod = payMethodEl.value;
     if (txnEl && !txnEl.disabled) updates.transactionId = txnEl.value.trim();
     if (dueEl && !dueEl.disabled) updates.paymentDueDate = dueEl.value;
@@ -1113,7 +1136,7 @@ window.triggerWhatsAppModal = (id) => {
     id: s.id,
     fullName: s.name,
     phone: s.phone,
-    seatNumber: s.seatNumber,
+    seatNumber: (s.seatNumber || s.seatAssigned) ? `${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})` : '',
     planName: s.planName,
     endDate: s.paymentDueDate
   };

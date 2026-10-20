@@ -605,7 +605,7 @@ export const unassignSeat = async (seatId) => {
       // Clear from student profile (best effort — doc may not exist yet)
       try {
         const studentRef = doc(db, "students", data.assignedStudentId);
-        await updateDoc(studentRef, { seatNumber: null });
+        await updateDoc(studentRef, { seatNumber: null, seatFloor: null });
       } catch (_) {}
     }
 

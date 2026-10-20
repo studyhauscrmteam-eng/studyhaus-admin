@@ -218,6 +218,7 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
   const payload = {
     approvalStatus: "Approved",
     status: "Active",
+    applicationReady: true,
     updatedAt: serverTimestamp(),
   };
   if (allocatedNumber) {
@@ -387,6 +388,7 @@ const approveLegacyAdmission = async (admissionId) => {
   const data = docSnap.data();
   data.approvalStatus = "Approved";
   data.status = "Active";
+  data.applicationReady = true;
   data.updatedAt = new Date().toISOString();
   // Pending admissions from logged-in portal students are written at
   // admissions/{authUid} — carry the uid onto the student doc so the

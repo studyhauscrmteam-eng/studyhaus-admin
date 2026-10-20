@@ -740,12 +740,17 @@ export const updateStudentProfile = async (studentId, updates) => {
     updates.updatedAt = serverTimestamp();
     const docRef = doc(db, "students", studentId);
     
-    // Check if seatNumber is being updated
-    if (updates.seatNumber !== undefined) {
+    // Check if seatNumber or seatFloor is being updated
+    if (updates.seatNumber !== undefined || updates.seatFloor !== undefined) {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const oldData = snap.data();
-        if (oldData.seatNumber !== updates.seatNumber) {
+        const effectiveNewSeat = updates.seatNumber !== undefined ? updates.seatNumber : oldData.seatNumber;
+        const effectiveNewFloor = updates.seatFloor !== undefined ? updates.seatFloor : oldData.seatFloor;
+        const seatChanged = oldData.seatNumber !== effectiveNewSeat;
+        const floorChanged = (oldData.seatFloor || "Ground Floor") !== (effectiveNewFloor || "Ground Floor");
+
+        if (seatChanged || floorChanged) {
           const seatsRef = collection(db, "seats");
           
           // 1. Release old seat (floor-aware)
@@ -770,7 +775,7 @@ export const updateStudentProfile = async (studentId, updates) => {
           
           // 2. Reserve new seat (plain numbers: "A20" -> "20"; floor-aware so
           // duplicate 20s on different floors don't collide)
-          if (updates.seatNumber) {
+          if (effectiveNewSeat) {
             const stripPlain = (v) => {
               const raw = String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
               const m = raw.match(/^[AB]?0*(\d+)[AB]?$/);
@@ -779,13 +784,13 @@ export const updateStudentProfile = async (studentId, updates) => {
               if (m2) return String(Number(m2[2]));
               return raw;
             };
-            const normedSeat = stripPlain(updates.seatNumber);
+            const normedSeat = stripPlain(effectiveNewSeat);
             const legacyFloor = (() => {
-              const raw = String(updates.seatNumber).trim().toUpperCase().replace(/\s+/g, "");
+              const raw = String(effectiveNewSeat).trim().toUpperCase().replace(/\s+/g, "");
               if (/^B\d/.test(raw) || /\dB$/.test(raw)) return "First Floor";
               return null;
             })();
-            const floor = updates.seatFloor || oldData.seatFloor || legacyFloor || "Ground Floor";
+            const floor = effectiveNewFloor || legacyFloor || "Ground Floor";
             const qNew = query(
               seatsRef,
               where("seatNumber", "==", normedSeat),

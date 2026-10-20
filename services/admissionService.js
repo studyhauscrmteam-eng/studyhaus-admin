@@ -386,6 +386,9 @@ export const initAdmissionsUI = async () => {
       const res = await approveAdmission(id);
       if (res.success) {
         window.showToast("Admission Approved! Student is now Active.", "success");
+        if (typeof window.renderStudentTable === 'function') {
+          try { window.renderStudentTable(); } catch (_) {}
+        }
       }
       else window.showToast("Error: " + res.error, "error");
     }
@@ -742,7 +745,7 @@ export const initAdmissionsUI = async () => {
               ${plain("End date", data.endDate)}
               ${plain("Duration", data.duration ? `${data.duration} days` : "")}
               ${val(data.seatAssigned || data.seatNumber)
-                ? row("Preferred seat", esc(data.seatAssigned || data.seatNumber)) : ""}
+                ? row("Preferred seat", `${esc(data.seatAssigned || data.seatNumber)} (${esc(data.seatFloor || data.floor || "Ground Floor")})`) : ""}
               ${plain("Address", data.address)}
               <dt>Status</dt><dd>${esc(data.approvalStatus || data.status || "Pending")}</dd>
             </dl>
@@ -988,8 +991,9 @@ export const initAdmissionsUI = async () => {
         // and one was picked (plans without seat preference strip the field
         // at submit/approve, so nothing renders there).
         const seatValue = String(r.seatAssigned || r.seatNumber || "").trim();
+        const seatFloor = r.seatFloor || r.floor || "Ground Floor";
         const seatInfo = (seatValue && seatValue !== "undefined")
-          ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${escHtml(seatValue)}</div>`
+          ? `<div style="font-size:11px; color:var(--primary); font-weight:600; margin-top:4px;">Seat: ${escHtml(seatValue)} (${escHtml(seatFloor)})</div>`
           : "";
 
         // Source tag removed on request — no chip, no pill, nothing here.
@@ -1101,7 +1105,7 @@ export const initAdmissionsUI = async () => {
         if (!arr.length) continue;
         html += `<optgroup label="${floor} — ${arr.length} free">`;
         arr.forEach(({ id, num }) => {
-          html += `<option value="${id}">${num}</option>`;
+          html += `<option value="${id}">${floor} · Seat ${num}</option>`;
         });
         html += `</optgroup>`;
       }

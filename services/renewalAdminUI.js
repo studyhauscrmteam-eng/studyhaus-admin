@@ -89,6 +89,9 @@ export const renderRenewalForm = async (student, containerId, userRole) => {
 
   const photoUrl = student.photoUrl || student.selfieUrl || student.photo || "";
   const initials = (student.name || "S").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const seatVal = student.seatNumber || student.seatAssigned || "";
+  const seatFloorVal = student.seatFloor || student.floor || (seatVal ? "Ground Floor" : "");
+  const seatDisplay = seatVal ? `${seatVal} (${seatFloorVal})` : "None";
 
   container.innerHTML = `
     <style>
@@ -201,7 +204,7 @@ export const renderRenewalForm = async (student, containerId, userRole) => {
           <h3>${student.name || "Student"}</h3>
           <div class="rn-student-meta">
             <span><strong>Phone:</strong> ${student.phone || "—"}</span>
-            <span><strong>Seat:</strong> ${student.seatNumber || student.seatAssigned || "None"}</span>
+            <span><strong>Seat:</strong> ${seatDisplay}</span>
           </div>
         </div>
       </div>

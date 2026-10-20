@@ -4,11 +4,12 @@ import { db } from "../firebase/firebase.js";
 // Hover card bridge — the shared photo+name card lives in seatMapUI.js.
 // Pass-through with JS-safe string escaping for inline attributes.
 const escJs = (v) => String(v == null ? "" : v).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-window.__liveSeatHoverShow = (studentId, studentName, seatNumber, status, el) => {
+window.__liveSeatHoverShow = (studentId, studentName, seatNumber, status, el, floor) => {
   window.__seatHoverShow({
     assignedStudentId: studentId,
     assignedStudentName: studentName,
     seatNumber: seatNumber,
+    floor: floor || currentFloor,
     status: status,
   }, el);
 };
@@ -73,6 +74,15 @@ const normalizeSeatNumber = (value) => {
   const m2 = raw.match(/^([A-Z]+)-?0*(\d+)$/);
   if (m2) return String(Number(m2[2]));
   return raw;
+};
+
+// Floor normalizer so "Ground", "ground-floor", "First Floor", etc. match reliably
+const normalizeFloor = (value) => {
+  const raw = String(value == null ? "" : value).trim().toLowerCase();
+  if (raw.includes("first") || raw.includes("1st") || raw === "1" || raw.startsWith("b")) {
+    return "First Floor";
+  }
+  return "Ground Floor";
 };
 
 // Theme-aware status colors — mirrors seatMapUI's palette so the live map
@@ -326,12 +336,22 @@ const renderLiveMap = () => {
   const renderSeatCard = (seat) => {
     const seatNumStr = seat.seatNumber;
     const seatFloor = seat.floor || currentFloor;
+    const targetFloorNorm = normalizeFloor(seatFloor);
+    const normSeat = normalizeSeatNumber(seatNumStr);
+
     const att = activeAttendance.find(a => {
-      if (normalizeSeatNumber(a.seatNumber) !== normalizeSeatNumber(seatNumStr)) return false;
-      // When the attendance record carries a floor, it must match the seat's
-      // floor — otherwise duplicate plain numbers (20 on both floors) collide.
-      if (a.seatFloor) return (a.seatFloor || "") === seatFloor;
-      return true;
+      if (normalizeSeatNumber(a.seatNumber) !== normSeat) return false;
+      // Resolve floor for this attendance record:
+      // 1. From attendance record itself
+      // 2. From student's assigned seat in allSeats
+      // 3. Defaults to Ground Floor
+      let attFloor = a.seatFloor;
+      if (!attFloor && a.studentId) {
+        const assignedSeat = allSeats.find(s => (s.assignedStudentId && s.assignedStudentId === a.studentId) || (s.studentId && s.studentId === a.studentId));
+        if (assignedSeat && assignedSeat.floor) attFloor = assignedSeat.floor;
+      }
+      if (!attFloor) attFloor = "Ground Floor";
+      return normalizeFloor(attFloor) === targetFloorNorm;
     });
 
     if (att) {
@@ -374,7 +394,7 @@ const renderLiveMap = () => {
                  display:flex; flex-direction:column; align-items:center;
                  justify-content:center; gap:2px; cursor:default; overflow:hidden; padding:4px;
                  box-shadow:0 1px 3px rgba(239,68,68,0.12); position:relative;"
-             onmouseenter="window.__liveSeatHoverShow('${escJs(att.studentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this)"
+             onmouseenter="window.__liveSeatHoverShow('${escJs(att.studentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this, '${escJs(seatFloor)}')"
              onmouseleave="window.__seatHoverHide()">
           <div style="position:absolute; top:4px; left:4px; font-size:9px; font-weight:700; color:${ps.sub}; line-height:1;">${seatNumStr}</div>
           <div style="display:flex; align-items:center; justify-content:center; position:relative; margin-top:6px;">
@@ -399,7 +419,7 @@ const renderLiveMap = () => {
       ? `<div style="position:absolute; top:4px; left:4px; font-size:8px; font-weight:700; line-height:1; opacity:0.8;">${seat.status}</div>`
       : "";
     const hoverAttrs = seat.assignedStudentId
-      ? `onmouseenter="window.__liveSeatHoverShow('${escJs(seat.assignedStudentId)}', '${escJs(seat.assignedStudentName)}', '${escJs(seatNumStr)}', '${escJs(seat.status)}', this)" onmouseleave="window.__seatHoverHide()"`
+      ? `onmouseenter="window.__liveSeatHoverShow('${escJs(seat.assignedStudentId)}', '${escJs(seat.assignedStudentName)}', '${escJs(seatNumStr)}', '${escJs(seat.status)}', this, '${escJs(seatFloor)}')" onmouseleave="window.__seatHoverHide()"`
       : "";
     return `
       <div style="background:${st.bg}; border:${st.border}; color:${st.color}; border-radius:10px;

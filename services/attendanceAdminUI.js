@@ -175,9 +175,10 @@ export const initAttendanceAdminUI = () => {
       let finalSeatNumber = seatNumber;
       if (!finalSeatNumber) {
         document.getElementById("qr-scan-modal").close();
+        const currentFloorHint = studentData.seatFloor || "Ground Floor";
         finalSeatNumber = await window.showCustomPrompt(
           "Seat Required",
-          `Enter seat number for ${studentData.name} (e.g. 20):`,
+          `Enter seat number for ${studentData.name} (Assigned: ${studentData.seatNumber ? `Seat ${studentData.seatNumber} on ${currentFloorHint}` : 'None'}):`,
           "Check-In",
           false,
           studentData.seatNumber || ""
@@ -339,11 +340,15 @@ const renderTable = () => {
     const nameStr = student.name || "Unknown";
     const initials = nameStr.split(" ").map(n => n[0] || "").join("").substring(0, 2).toUpperCase();
     const shortId = (student.studentId || "").substring(0, 8);
-    const assignedSeat = student.seatNumber || "-";
+    const assignedSeat = student.seatNumber ? `${student.seatNumber} (${student.seatFloor || 'Ground Floor'})` : "-";
     
     const inTime = (record && record.checkIn) ? new Date(record.checkIn).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "-";
     const outTime = (record && record.checkOut) ? new Date(record.checkOut).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "-";
     const hrs = (record && record.duration) ? record.duration + "h" : "-";
+
+    const displaySeat = (record && record.seatNumber)
+      ? `${record.seatNumber} (${record.seatFloor || student.seatFloor || 'Ground Floor'})`
+      : assignedSeat;
 
     html += `
       <tr style="border-bottom:1px solid var(--border); transition:0.2s; cursor:pointer;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
@@ -354,7 +359,7 @@ const renderTable = () => {
             <div style="font-size:11px; color:var(--text-muted); font-family:monospace;">${shortId}...</div>
           </div>
         </td>
-        <td style="padding:16px; font-weight:600; color:var(--text-primary);">${record && record.seatNumber ? record.seatNumber : assignedSeat}</td>
+        <td style="padding:16px; font-weight:600; color:var(--text-primary);">${displaySeat}</td>
         <td style="padding:16px; color:var(--text-secondary);">${inTime}</td>
         <td style="padding:16px; color:var(--text-secondary);">${outTime}</td>
         <td style="padding:16px; font-weight:500; color:var(--text-secondary);">${hrs}</td>
@@ -406,9 +411,10 @@ const renderTable = () => {
     
     try {
       const defaultSeat = student.seatNumber || "";
+      const currentFloorHint = student.seatFloor || "Ground Floor";
       let seatNumber = await window.showCustomPrompt(
         "Seat Required",
-        `Enter seat number for ${student.name} (e.g. 20):`,
+        `Enter seat number for ${student.name} (Assigned: ${student.seatNumber ? `Seat ${student.seatNumber} on ${currentFloorHint}` : 'None'}):`,
         "Check-In",
         false,
         defaultSeat

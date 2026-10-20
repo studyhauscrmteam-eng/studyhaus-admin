@@ -91,7 +91,7 @@ const renderCurrentReminders = (reminders) => {
         <div class="avatar-sm" style="background:#9ca3af; min-width:32px;">${initials}</div>
         <div class="att-info" style="flex:1;">
           <div class="att-name">${r.name}</div>
-          <div class="att-time">${r.type} · Seat: ${r.seatNumber || "N/A"}</div>
+          <div class="att-time">${r.type} · Seat: ${r.seatNumber ? `${r.seatNumber} (${r.seatFloor || 'Ground Floor'})` : "N/A"}</div>
         </div>
         <div style="text-align:right; margin-right: 1rem;">
           <span class="badge ${r.badgeClass}">${formatDaysRemaining(r.daysRemaining)}</span>

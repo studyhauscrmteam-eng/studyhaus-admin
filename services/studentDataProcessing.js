@@ -5,10 +5,15 @@ export const searchStudents = (students, query) => {
   if (!query) return students;
   const q = query.toLowerCase().trim();
   return students.filter(s => {
+    const seatStr = (s.seatNumber || "").toLowerCase();
+    const floorStr = (s.seatFloor || "").toLowerCase();
     return (s.name || "").toLowerCase().includes(q) ||
            (s.phone || "").toLowerCase().includes(q) ||
            (s.studentId || "").toLowerCase().includes(q) ||
-           (s.seatNumber || "").toLowerCase().includes(q);
+           seatStr.includes(q) ||
+           floorStr.includes(q) ||
+           `${seatStr} ${floorStr}`.includes(q) ||
+           `${floorStr} ${seatStr}`.includes(q);
   });
 };
 
@@ -39,16 +44,30 @@ export const filterStudents = (students, filters) => {
  * Sort students
  */
 export const sortStudents = (students, sortBy, sortOrder) => {
+  const toMs = (val) => {
+    if (!val) return 0;
+    if (typeof val.toMillis === "function") return val.toMillis();
+    if (typeof val.toDate === "function") return val.toDate().getTime();
+    if (val._seconds != null) return val._seconds * 1000;
+    if (typeof val === "number") return val;
+    const t = new Date(val).getTime();
+    return isNaN(t) ? 0 : t;
+  };
+
+  const isDateSort = sortBy === "createdAt" || sortBy === "updatedAt" || sortBy === "joined" ||
+                     sortBy === "renewalDate" || sortBy === "paymentDueDate" || sortBy === "plannedExitDate" ||
+                     sortBy === "startDate" || sortBy === "endDate";
+
   return [...students].sort((a, b) => {
     let valA = a[sortBy] || "";
     let valB = b[sortBy] || "";
 
-    // Convert dates
-    if (sortBy === "createdAt" || sortBy === "renewalDate" || sortBy === "paymentDueDate" || sortBy === "plannedExitDate") {
-      valA = (valA && typeof valA.toDate === 'function') ? valA.toDate().getTime() : (valA ? new Date(valA).getTime() : 0);
-      valB = (valB && typeof valB.toDate === 'function') ? valB.toDate().getTime() : (valB ? new Date(valB).getTime() : 0);
-      if (isNaN(valA)) valA = 0;
-      if (isNaN(valB)) valB = 0;
+    if (isDateSort) {
+      valA = toMs(valA);
+      valB = toMs(valB);
+    } else if (typeof valA === "string" && typeof valB === "string") {
+      const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: "base" });
+      return sortOrder === "asc" ? cmp : -cmp;
     }
 
     if (valA < valB) return sortOrder === "asc" ? -1 : 1;
