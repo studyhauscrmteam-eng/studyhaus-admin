@@ -75,14 +75,17 @@ function navigate(page) {
     window.__renderAnalytics();
   }
 
-  // Notifications: entering the page marks everything on sight as seen
-  // (bell, sidebar and tab badges drop — the renderer does the ack).
-  // Cards are dismissed ONLY by tapping them one by one, so leaving the page
-  // must not clear anything — untapped cards stay until tapped. No buttons.
+  // Entering a page clears its unread badge on sight
   try {
     if (page === 'notifications') {
-      if (typeof window.__refreshNotifBadges === 'function') {
+      if (typeof window.__onNotificationsPageOpened === 'function') {
+        window.__onNotificationsPageOpened();
+      } else if (typeof window.__refreshNotifBadges === 'function') {
         setTimeout(() => { try { window.__refreshNotifBadges(); } catch (_) {} }, 0);
+      }
+    } else if (page === 'complaints') {
+      if (typeof window.__onComplaintsPageOpened === 'function') {
+        window.__onComplaintsPageOpened();
       }
     }
   } catch (_) {}

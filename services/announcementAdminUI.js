@@ -1,108 +1,15 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
-import { markNotificationRead } from "./notificationService.js";
-import { isNotifRead, markNotifRead, countUnread } from "./notificationReadState.js";
+import { discardNotification, discardAllNotifications } from "./notificationService.js";
 
-// OWN copy of the tab title. This used to reference BASE_TITLE from
-// adminNotificationUI.js — a module-scoped const that is NOT in scope here —
-// so every render while the Notifications page was open threw
-// "ReferenceError: BASE_TITLE is not defined" BEFORE the list was written and
-// the page froze on "Loading announcements..." for ever.
 const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
-
-// Cache of the latest announcements + whether read items are shown.
-// Clicking a notification marks it read (persisted per user) so it stays
-// gone; the badge counts only unread items.
 let lastAnnouncements = [];
-let showReadAdmin = false;
-// Set by the announcements listener's error callback. Kept separate from the
-// list so a failing feed can show WHY while the rest of the page keeps
-// rendering (it used to replace the whole list and freeze every badge).
 let annError = null;
+let currentNotifTab = "alerts"; // 'alerts' | 'broadcasts'
 
-/** Ids of every admission alert currently in the live pending queue. */
-const admissionIds = () =>
-  (Array.isArray(window.__pendingAdmissions) ? window.__pendingAdmissions : [])
-    .map((r) => `adm_${r.id}`);
-
-/**
- * Badge-seen state (NOT card-dismiss state). Opening the Notifications page
- * marks everything on sight as seen so the bell pill, sidebar pill and
- * browser-tab counter all drop to zero — no clicking, no Clear button.
- * Cards themselves stay on screen until each one is individually tapped
- * (or its action is performed) — tapping one card must NEVER dismiss the
- * others. Seen ids persist on this device (like read-state) so the badges
- * stay cleared across reloads; only genuinely new arrivals light them again.
- */
-const SEEN_KEY = "sh_notif_seen_v1";
-const getSeen = () => {
-  try {
-    const raw = localStorage.getItem(SEEN_KEY) || "[]";
-    const arr = JSON.parse(raw);
-    return new Set(Array.isArray(arr) ? arr.map(String) : []);
-  } catch (_) {
-    return new Set();
-  }
-};
-const isSeen = (key) => getSeen().has(String(key));
-
-/** Ids of every seat-change request in the live pending queue. */
-const seatReqIds = () =>
-  (Array.isArray(window.__pendingSeatRequests) ? window.__pendingSeatRequests : [])
-    .map((r) => `req_${r.id}`);
-
-/** Every known notification id across all five sources. */
-const allKnownIds = () => {
-  const ids = (lastAnnouncements || []).map((a) => `ann_${a.id}`);
-  for (const n of systemNotifs()) ids.push(`sys_${n.id}`);
-  for (const k of admissionIds()) ids.push(k);
-  for (const k of seatReqIds()) ids.push(k);
-  return ids;
-};
-
-/**
- * Mark the whole page as SEEN at once (badges only — cards untouched).
- * Called automatically while the Notifications page is open (see
- * renderAnnouncementList) — never wired to any button. Cards are dismissed
- * exclusively by tapping them (see the delegated click handler below, which
- * also flips the server `read` flag for system items). Server state is never
- * touched here, so a visit can never wipe cards that were never tapped.
- */
-window.__ackNotificationsPage = () => {
-  try {
-    const ids = allKnownIds();
-    if (ids.length === 0) return;
-    const s = getSeen();
-    for (const id of ids) s.add(String(id));
-    localStorage.setItem(SEEN_KEY, JSON.stringify([...s].slice(-500)));
-  } catch (_) { /* storage blocked — badges just stay until clicked */ }
-};
-
-const isNotifPageActive = () => {
-  try {
-    const el = document.getElementById("page-notifications");
-    return !!(el && el.classList.contains("active"));
-  } catch (_) {
-    return false;
-  }
-};
-
-/**
- * System notifications (approval decisions, new admission requests) are written
- * to the `notifications` collection by notifyAdmins(), but nothing ever
- * subscribed to that collection — so those events produced no visible message.
- * adminNotificationUI.js pushes the live list here; we render it above the
- * announcements so both share one bell and one list.
- */
-const systemNotifs = () => {
-  const a = Array.isArray(window.__systemNotifs) ? window.__systemNotifs : [];
-  const b = Array.isArray(window.__leadNotifs) ? window.__leadNotifs : [];
-  const all = b.length === 0 ? a : [...a, ...b].sort(
-    (x, y) => (y.createdAt?.seconds || 0) - (x.createdAt?.seconds || 0)
-  );
-  // Server-acknowledged items stay gone on every device and every sign-in —
-  // the listener keeps delivering them (latest-20 query), so drop them here.
-  return all.filter((n) => n && n.read !== true);
-};
+const esc = (v) =>
+  String(v == null ? "" : v).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
 
 /** Normalise a Firestore Timestamp / ISO string / {value} into epoch ms. */
 const tsMs = (v) => {
@@ -114,92 +21,208 @@ const tsMs = (v) => {
   return null;
 };
 
-/**
- * Clicking a notification must TAKE YOU THERE (owner: "if an admission alert
- * comes I click on it so it takes me to the Pending approval") and then the
- * item disappears.
- *
- * Each kind maps to the page that actually owns it:
- *   new admission request / admission alert -> Admissions → Pending approval,
- *        with that applicant's Details panel already open,
- *   website enquiry                        -> Visitors,
- *   approved student                       -> Students,
- *   rejected applicant                     -> nothing left to open (the record
- *        is purged); its entry lives in the decision log right here,
- *   announcement                           -> nothing to open; it just clears.
- */
 const gotoPage = (page) => {
   if (typeof window.navigate === "function") window.navigate(page);
 };
 
 const openPendingApplicant = (id) => {
   gotoPage("admissions");
-  // navigate() mounts synchronously, but the admissions page is lazily
-  // initialised — give it a frame before driving its tab switcher.
   const run = () => {
     try {
       if (typeof window.switchAdmissionTab === "function") window.switchAdmissionTab("pending");
       if (id && typeof window.viewApplicantDetails === "function") window.viewApplicantDetails(id);
       const view = document.getElementById("view-pending-approval");
       if (view) view.scrollIntoView({ behavior: "smooth", block: "start" });
-    } catch (_) { /* navigation already succeeded */ }
+    } catch (_) {}
   };
   requestAnimationFrame(() => setTimeout(run, 60));
 };
 
-const routeNotification = (key) => {
+/** System notifications loaded from Firestore collection `notifications` */
+const systemNotifs = () => {
+  const sys = Array.isArray(window.__systemNotifs) ? window.__systemNotifs : [];
+  return [...sys]
+    .filter((n) => n && n.read !== true && n.discarded !== true)
+    .sort((x, y) => (tsMs(y.createdAt) || 0) - (tsMs(x.createdAt) || 0));
+};
+
+const routeNotification = (key, item) => {
   try {
-    const n = systemNotifs().find((x) => `sys_${x.id}` === key);
+    const all = systemNotifs();
+    const cleanId = key.startsWith("sys_") ? key.slice(4) : key;
+    const n = item || all.find((x) => x.id === cleanId || `sys_${x.id}` === key || x.id === key);
     if (n) {
       const t = n.type || "";
       if (t === "new-lead") return gotoPage("visitors");
       if (t === "new-admission") return openPendingApplicant(n.admissionId || n.studentId || "");
       if (t === "admission-approved") return gotoPage("students");
-      if (t === "admission-rejected") return null; // record is gone; log stays here
+      if (t === "admission-rejected") return null;
+      if (t === "complaint") return gotoPage("complaints");
       return null;
     }
     if (key.indexOf("adm_") === 0) return openPendingApplicant(key.slice(4));
     if (key.indexOf("lead_") === 0) return gotoPage("visitors");
-    return null; // announcements and the decision log have no target page
+    if (key.indexOf("comp_") === 0) return gotoPage("complaints");
+    return null;
   } catch (_) {
     return null;
   }
 };
 
+window.switchNotifTab = (tab) => {
+  currentNotifTab = tab;
+  renderAnnouncementList();
+};
+
 const renderSystemNotifs = () => {
-  const items = systemNotifs();
-  // Clicked = read = GONE from the list (the owner's rule: click it and it
-  // disappears — and ONLY the clicked one). Merely opening the page clears
-  // the badges (seen-state) but never dismisses cards.
-  const live = items.filter((n) => !isNotifRead(`sys_${n.id}`));
-  if (live.length === 0) return { html: "", unread: 0 };
-
-  // Badge counts only what arrived since the last page visit; the list above
-  // keeps every untapped card.
-  let unread = 0;
-  const html =
-    `<div style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); padding:0.4rem 0.2rem 0.5rem;">Activity</div>` +
-    live.map((n) => {
-      const key = `sys_${n.id}`;
-      if (!isSeen(key)) unread++;
-      const ms = tsMs(n.createdAt);
-      // Never claim "Just now" for a record we couldn't read a date from —
-      // that made a page of old entries look like they all just fired.
-      const when = ms ? new Date(ms).toLocaleString() : "Date unavailable";
-      return `
-        <div class="notif-item" data-notif-id="${key}" title="Click to open">
-          <div class="notif-icon ${n.type === "new-admission" || n.type === "new-lead" ? "amber" : "green"}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+  const unreadItems = systemNotifs();
+  if (unreadItems.length === 0) {
+    return {
+      html: `
+        <div style="text-align:center; padding:4rem 1.5rem; color:var(--text-muted);">
+          <div style="width:44px; height:44px; border-radius:50%; background:var(--bg-hover, #f1f5f9); border:1px solid var(--border, #e2e8f0); display:inline-flex; align-items:center; justify-content:center; margin-bottom:0.85rem; color:var(--text-muted);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              <line x1="2" y1="2" x2="22" y2="22"/>
+            </svg>
           </div>
-          <div class="notif-content" style="flex:1;">
-            <div class="notif-title">${n.title || "Notification"}</div>
-            <div class="notif-body">${n.body || ""}</div>
-            <div class="notif-time">${when}</div>
+          <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:4px;">No unread notifications</div>
+          <div style="font-size:12.5px; color:var(--text-muted); max-width:320px; margin:0 auto; line-height:1.45;">
+            When new activity occurs, alerts will appear here. Clicking an alert navigates to the page and marks it done.
           </div>
-        </div>`;
-    }).join("");
+        </div>`,
+      unread: 0
+    };
+  }
 
-  return { html, unread };
+  const header = `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:0.2rem 0.2rem 0.75rem; margin-bottom:0.25rem;">
+      <div style="font-size:11.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--text-muted);">
+        Active Alerts (${unreadItems.length})
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="window.handleMarkAllNotifsRead()" style="font-size:11.5px; padding:3px 10px; color:var(--primary); font-weight:600; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg>
+        Clear all
+      </button>
+    </div>`;
+
+  const cards = unreadItems.map((n) => {
+    const key = `sys_${n.id}`;
+    const ms = tsMs(n.createdAt);
+    const when = ms ? new Date(ms).toLocaleString() : "Just now";
+    const isComplaint = n.type === "complaint";
+    const isLead = n.type === "new-lead";
+    const isAdmission = n.type === "new-admission";
+
+    let iconSvg = "";
+    let iconClass = "amber";
+    let tagLabel = "Alert";
+    let tagBg = "rgba(245,158,11,0.12)";
+    let tagColor = "var(--accent-amber, #d97706)";
+
+    if (isComplaint) {
+      iconClass = "red";
+      tagLabel = "Complaint";
+      tagBg = "rgba(239,68,68,0.12)";
+      tagColor = "var(--danger, #ef4444)";
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+    } else if (isLead) {
+      iconClass = "blue";
+      tagLabel = "Website Lead";
+      tagBg = "rgba(59,130,246,0.12)";
+      tagColor = "#2563eb";
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
+    } else if (isAdmission) {
+      iconClass = "amber";
+      tagLabel = "Admission";
+      tagBg = "rgba(245,158,11,0.12)";
+      tagColor = "var(--accent-amber, #d97706)";
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>`;
+    } else if (n.type === "admission-approved") {
+      iconClass = "green";
+      tagLabel = "Approved";
+      tagBg = "rgba(16,185,129,0.12)";
+      tagColor = "var(--success, #10b981)";
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+    } else {
+      iconClass = "amber";
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+    }
+
+    return `
+      <div class="notif-item unread" data-notif-id="${key}" title="Click to view & discard" style="
+        cursor:pointer; display:flex; align-items:flex-start; justify-content:space-between; gap:0.85rem;
+        padding:0.9rem 1rem; margin-bottom:0.5rem; border:1px solid var(--border, #e2e8f0);
+        border-radius:8px; background:var(--card-bg, #ffffff); transition:background 0.15s, border-color 0.15s;
+      ">
+        <div style="display:flex; gap:0.85rem; flex:1; align-items:flex-start; min-width:0;">
+          <div class="notif-icon ${iconClass}" style="flex-shrink:0; margin-top:1px; width:32px; height:32px; border-radius:7px;">
+            ${iconSvg}
+          </div>
+          <div class="notif-content" style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:3px;">
+              <span style="font-size:13px; font-weight:600; ${isComplaint ? 'color:var(--danger, #ef4444);' : 'color:var(--text-primary);'}">
+                ${esc(n.title || "Notification")}
+              </span>
+              <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; padding:1px 6px; border-radius:4px; background:${tagBg}; color:${tagColor};">
+                ${tagLabel}
+              </span>
+            </div>
+            <div class="notif-body" style="font-size:12.5px; color:var(--text-secondary); line-height:1.45; word-break:break-word;">
+              ${esc(n.body || "")}
+            </div>
+            <div class="notif-time" style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+              ${when}
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); window.handleDiscardNotification('${n.id}', event)" title="Dismiss alert" style="
+          padding:4px 8px; font-size:11.5px; color:var(--text-muted); flex-shrink:0; border-radius:6px; display:inline-flex; align-items:center; gap:3px;
+        ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          Dismiss
+        </button>
+      </div>`;
+  }).join("");
+
+  return { html: header + cards, unread: unreadItems.length };
+};
+
+/**
+ * Discard a single notification immediately without saving
+ */
+window.handleDiscardNotification = async (docId, event) => {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const cleanId = docId.startsWith("sys_") ? docId.slice(4) : docId;
+
+  if (Array.isArray(window.__systemNotifs)) {
+    window.__systemNotifs = window.__systemNotifs.filter(x => x.id !== cleanId && x.id !== docId);
+  }
+  renderAnnouncementList();
+
+  if (cleanId) {
+    discardNotification(cleanId).catch(() => {});
+  }
+};
+
+/**
+ * Global helper to mark all Firestore notifications read/discarded permanently
+ */
+window.handleMarkAllNotifsRead = async () => {
+  try {
+    window.__systemNotifs = [];
+    renderAnnouncementList();
+    await discardAllNotifications();
+    if (typeof window.showToast === "function") {
+      window.showToast("All notifications cleared", "success");
+    }
+  } catch (e) {
+    console.error("[notifications] mark all read failed:", e);
+  }
 };
 
 /**
@@ -209,10 +232,9 @@ export const initAnnouncementAdminUI = () => {
   const notifList = document.querySelector("#page-notifications .notif-list");
   if (!notifList) return; // not on a dashboard with notifications
 
-  notifList.innerHTML = `<div style="text-align:center; padding: 2rem;">Loading announcements...</div>`;
+  notifList.innerHTML = `<div style="text-align:center; padding: 2rem;">Loading notifications...</div>`;
 
-  // One delegated click handler: clicking a notification (not its buttons)
-  // marks it read so it disappears, THEN takes you to the page that owns it.
+  // Delegated click handler: clicking a notification card takes action & discards it immediately
   if (!notifList.dataset.wired) {
     notifList.dataset.wired = "1";
     notifList.addEventListener("click", (e) => {
@@ -220,20 +242,24 @@ export const initAnnouncementAdminUI = () => {
       const item = e.target.closest("[data-notif-id]");
       if (!item) return;
       const key = item.dataset.notifId;
-      markNotifRead(key);
-      // System items also flip the server `read` flag so the tap stays
-      // gone on other devices and after re-login. (In-memory lead pings
-      // have no server doc — local state is their only home.)
-      try {
-        if (key.indexOf("sys_") === 0 && key.indexOf("sys_lead_") !== 0) {
-          const p = markNotificationRead(key.slice(4));
-          if (p && typeof p.catch === "function") p.catch(() => {});
-        }
-      } catch (_) {}
-      // Clicked means gone — ONLY this card, immediately, whether it
-      // navigates away or just clears in place. Nothing else is touched.
+      if (!key || key.startsWith("ann_")) return; // broadcast announcements do not route or discard on click
+
+      const cleanId = key.startsWith("sys_") ? key.slice(4) : key;
+      const all = systemNotifs();
+      const notifObj = all.find(x => x.id === cleanId || `sys_${x.id}` === key || x.id === key);
+
+      // Discard immediately from memory & UI before navigating
+      if (Array.isArray(window.__systemNotifs)) {
+        window.__systemNotifs = window.__systemNotifs.filter(x => x.id !== cleanId && `sys_${x.id}` !== key);
+      }
+
+      // Discard from Firestore
+      if (cleanId) {
+        discardNotification(cleanId).catch(() => {});
+      }
+
       renderAnnouncementList();
-      routeNotification(key);
+      routeNotification(key, notifObj);
     });
   }
 
@@ -245,9 +271,6 @@ export const initAnnouncementAdminUI = () => {
     },
     (error) => {
       lastAnnouncements = [];
-      // The announcement feed failing must NOT freeze the page. The other
-      // sources (activity, website leads, admission alerts) and every badge
-      // still have to render — so record the message and keep going.
       annError = `Announcements could not load (${error?.code || "permission denied"}). ` +
         `Check Firestore rules or the composite index. Everything else below is live.`;
       renderAnnouncementList();
@@ -259,52 +282,25 @@ const renderAnnouncementList = () => {
   const notifList = document.querySelector("#page-notifications .notif-list");
   if (!notifList) return;
 
-  // Badges clear on sight: while the Notifications page is open, everything
-  // on screen is marked SEEN so the bell pill, sidebar pill and tab counter
-  // drop to zero with no clicking and no buttons. Cards are NOT dismissed by
-  // this — each card stays until it is individually tapped.
-  if (isNotifPageActive()) {
-    try {
-      window.__ackNotificationsPage();
-    } catch (_) {}
-  }
-
   const announcements = lastAnnouncements;
-  const unreadIds = announcements.map(a => `ann_${a.id}`);
-  const unread = countUnread(unreadIds);
-  const readCount = announcements.length - unread;
-  // Badge counts only arrivals since the last page visit — tapping one card
-  // must never clear the badges (or cards) of the others.
-  const annBadge = unreadIds.filter((id) => !isNotifRead(id) && !isSeen(id)).length;
-
-  // Approval decisions / new admission requests written to `notifications`
-  // by notifyAdmins().
   const sys = renderSystemNotifs();
-  const alertsBlock = typeof window.__renderAdmissionAlerts === "function"
-    ? window.__renderAdmissionAlerts()
-    : "";
-  // Admission alerts are counted by their own read-state, NOT by the raw
-  // queue length — that is what made the badge impossible to clear.
-  const admissionUnread = admissionIds().filter((id) => !isNotifRead(id) && !isSeen(id)).length;
-  // Seat-change requests: live queue length, seen-filtered like the rest.
-  // Decided requests leave the queue (Approve/Reject), so no read-state needed.
-  const seatReqBadge = seatReqIds().filter((id) => !isSeen(id)).length;
-  const seatBlock = typeof window.__renderSeatAlerts === "function"
-    ? window.__renderSeatAlerts()
-    : "";
 
-  // ── ONE number for every surface. ────────────────────────────────────────
-  // Visiting this page marks everything seen (badges drop), and tapping any
-  // single item dismisses ONLY that item and takes you to its page.
-  // No Save, no Clear button, nothing else to press — ever.
-  const total = annBadge + admissionUnread + sys.unread + seatReqBadge;
+  const isNotifActive = document.getElementById("page-notifications")?.classList.contains("active");
+  const isComplaintsActive = document.getElementById("page-complaints")?.classList.contains("active");
 
-  // Sidebar pill (and every other .nav-badge in the shell).
-  document.querySelectorAll('.nav-badge').forEach(badge => {
+  if (isNotifActive) window.__notificationsSeen = true;
+  if (isComplaintsActive) window.__complaintsSeen = true;
+
+  // Real-time unread actionable notifications
+  const total = isNotifActive ? 0 : sys.unread;
+
+  // Update notifications nav badges
+  document.querySelectorAll('[data-page="notifications"] .nav-badge, .nav-badge:not(.complaints-nav-badge)').forEach(badge => {
     badge.textContent = total > 9 ? "9+" : String(total);
     badge.style.display = total > 0 ? 'inline-block' : 'none';
   });
-  // Topbar bell pill + browser-tab counter — same number, one writer.
+
+  // Topbar bell pill + browser tab title
   if (typeof window.__paintNotifBadges === "function") {
     window.__paintNotifBadges(total);
   } else if (!window.__admissionBadgesLive) {
@@ -312,100 +308,144 @@ const renderAnnouncementList = () => {
     if (bellDot) bellDot.style.display = total > 0 ? "" : "none";
   }
 
-  // A broken announcements feed is reported ABOVE the list, never instead of
-  // it — activity, leads, admission alerts and every badge stay live.
   const errBlock = annError
     ? `<div style="margin:0 0 .8rem; padding:.7rem .9rem; border:1px solid var(--danger); border-radius:9px; background:rgba(244,63,94,.08); color:var(--danger); font-size:12.5px; line-height:1.5;">` +
-      `${String(annError).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</div>`
+      `${esc(annError)}</div>`
     : "";
 
-  if (announcements.length === 0 && !alertsBlock && !sys.html && !seatBlock) {
-    notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">No announcements scheduled.</div>`;
-    renderDashboardBanner([]);
-    return;
-  }
+  const unreadCount = sys.unread;
+  const annCount = announcements.length;
 
-  // Read items are hidden — tapping a notification dismisses ONLY that one.
-  // Visiting the page clears badges (seen-state) but never dismisses cards.
-  // The toggle below brings read items back deliberately.
-  const visible = showReadAdmin
-    ? announcements
-    : announcements.filter(a => !isNotifRead(`ann_${a.id}`));
-  const toggle = readCount > 0
-    ? `<div style="text-align:center; padding:0.5rem;"><button class="btn btn-ghost btn-sm" onclick="window.toggleReadAnnouncements()">${showReadAdmin ? "Hide read" : `Show read (${readCount})`}</button></div>`
-    : "";
+  // Sleek Segmented Switcher: Alerts vs Broadcast Announcements (No Emojis, Crisp SVGs)
+  const tabsHtml = `
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; border-bottom:1px solid var(--border, #e2e8f0); padding-bottom:0.85rem; flex-wrap:wrap; gap:0.75rem;">
+      <div style="display:inline-flex; background:var(--bg-hover, #f1f5f9); padding:3px; border-radius:8px; gap:2px; border:1px solid var(--border, #e2e8f0);">
+        <button type="button" onclick="window.switchNotifTab('alerts')" style="
+          display:inline-flex; align-items:center; gap:6px; padding:6px 14px; font-size:12.5px; font-weight:${currentNotifTab === 'alerts' ? '600' : '500'};
+          border:none; border-radius:6px; cursor:pointer; transition:all 0.15s ease; font-family:inherit;
+          background:${currentNotifTab === 'alerts' ? 'var(--card-bg, #ffffff)' : 'transparent'};
+          color:${currentNotifTab === 'alerts' ? 'var(--text-primary, #0f172a)' : 'var(--text-secondary, #64748b)'};
+          ${currentNotifTab === 'alerts' ? 'box-shadow:0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);' : ''}
+        ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="flex-shrink:0;">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span>Alerts</span>
+          ${unreadCount > 0 ? `
+            <span style="font-size:10px; font-weight:700; padding:1px 6px; border-radius:999px; line-height:1.3; background:var(--danger, #ef4444); color:#ffffff;">
+              ${unreadCount}
+            </span>
+          ` : ''}
+        </button>
+        <button type="button" onclick="window.switchNotifTab('broadcasts')" style="
+          display:inline-flex; align-items:center; gap:6px; padding:6px 14px; font-size:12.5px; font-weight:${currentNotifTab === 'broadcasts' ? '600' : '500'};
+          border:none; border-radius:6px; cursor:pointer; transition:all 0.15s ease; font-family:inherit;
+          background:${currentNotifTab === 'broadcasts' ? 'var(--card-bg, #ffffff)' : 'transparent'};
+          color:${currentNotifTab === 'broadcasts' ? 'var(--text-primary, #0f172a)' : 'var(--text-secondary, #64748b)'};
+          ${currentNotifTab === 'broadcasts' ? 'box-shadow:0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);' : ''}
+        ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="flex-shrink:0;">
+            <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+          </svg>
+          <span>Broadcast Announcements</span>
+          ${annCount > 0 ? `
+            <span style="font-size:10px; font-weight:600; padding:1px 6px; border-radius:999px; line-height:1.3; background:rgba(100,116,139,0.18); color:var(--text-secondary, #475569);">
+              ${annCount}
+            </span>
+          ` : ''}
+        </button>
+      </div>
+    </div>`;
 
-  if (visible.length === 0 && !alertsBlock && !sys.html && !seatBlock) {
-    notifList.innerHTML = errBlock + `<div style="text-align:center; padding: 2rem; color: var(--text-muted);">All caught up — no unread announcements.</div>` + toggle;
-    return;
-  }
+  let contentHtml = "";
 
-    let html = "";
-    visible.forEach(a => {
-      // Icon depending on type
-      let iconHtml = "";
-      let iconClass = "";
-      if (a.type === "warning") {
-        iconClass = "red";
-        iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
-      } else if (a.type === "success") {
-        iconClass = "green";
-        iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
-      } else {
-        iconClass = "amber";
-        iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
-      }
-
-      const dateStr = a.createdAt?.seconds
-        ? new Date(a.createdAt.seconds * 1000).toLocaleString()
-        : "Date unavailable";
-
-      const scheduledStr = a.scheduledFor ? `Scheduled for: ${new Date(a.scheduledFor).toLocaleString()}` : "";
-      // Admins see everything (they manage the schedule); future items get a
-      // chip so it's obvious they are NOT live for students yet.
-      const live = isAnnouncementLive(a);
-      const schedChip = !live
-        ? `<span style="font-size:10px; font-weight:700; padding:2px 8px; background:rgba(245,158,11,.15); color:var(--accent-amber); border:1px solid rgba(245,158,11,.4); border-radius:999px; margin-left:6px;">⏳ SCHEDULED</span>`
-        : "";
-
-      html += `
-        <div class="notif-item" data-notif-id="ann_${a.id}" title="Click to dismiss">
-          <div class="notif-icon ${iconClass}">${iconHtml}</div>
-          <div class="notif-content" style="flex: 1;">
-            <div style="display:flex; justify-content:space-between;">
-              <div class="notif-title">${a.title}</div>
-              <button class="btn btn-ghost" style="padding:2px 5px; color:var(--danger);" onclick="event.stopPropagation(); window.deleteAnnouncementHandler('${a.id}')" data-i18n="btn.delete">${window.t ? window.t("btn.delete") : "Delete"}</button>
-            </div>
-            <div class="notif-body">${a.message}</div>
-            <div class="notif-time">${scheduledStr ? scheduledStr : 'Sent: ' + dateStr} · Audience: ${a.audience}${schedChip}</div>
+  if (currentNotifTab === "alerts") {
+    // Only real actionable notifications are displayed here!
+    contentHtml = sys.html;
+  } else {
+    // Broadcast Announcements tab
+    if (announcements.length === 0) {
+      contentHtml = `
+        <div style="text-align:center; padding:3.5rem 1.5rem; color:var(--text-muted);">
+          <div style="width:44px; height:44px; border-radius:50%; background:var(--bg-hover, #f1f5f9); border:1px solid var(--border, #e2e8f0); display:inline-flex; align-items:center; justify-content:center; margin-bottom:0.85rem; color:var(--text-muted);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20">
+              <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
           </div>
-        </div>
-      `;
-    });
-    notifList.innerHTML = errBlock + alertsBlock + seatBlock + sys.html + html + toggle;
+          <div style="font-weight:600; font-size:14px; color:var(--text-primary); margin-bottom:4px;">No broadcast announcements</div>
+          <div style="font-size:12.5px; color:var(--text-muted); max-width:320px; margin:0 auto; line-height:1.45;">
+            Use "+ Schedule Announcement" to post notices to students.
+          </div>
+        </div>`;
+    } else {
+      contentHtml = `
+        <div style="font-size:11.5px; font-weight:700; letter-spacing:.05em; color:var(--text-muted); padding:0.2rem 0.2rem 0.75rem; text-transform:uppercase;">
+          Broadcast Announcements (${announcements.length})
+        </div>` + announcements.map(a => {
+          let iconHtml = "";
+          let iconClass = "";
+          if (a.type === "warning") {
+            iconClass = "red";
+            iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+          } else if (a.type === "success") {
+            iconClass = "green";
+            iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+          } else {
+            iconClass = "amber";
+            iconHtml = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+          }
+
+          const dateStr = a.createdAt?.seconds
+            ? new Date(a.createdAt.seconds * 1000).toLocaleString()
+            : "Date unavailable";
+
+          const scheduledStr = a.scheduledFor ? `Scheduled for: ${new Date(a.scheduledFor).toLocaleString()}` : "";
+          const live = isAnnouncementLive(a);
+          const schedChip = !live
+            ? `<span style="font-size:10px; font-weight:600; padding:2px 7px; background:rgba(245,158,11,.12); color:var(--accent-amber); border:1px solid rgba(245,158,11,.3); border-radius:999px; margin-left:6px; display:inline-flex; align-items:center; gap:4px; vertical-align:middle;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="10" height="10"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>SCHEDULED</span>`
+            : "";
+
+          return `
+            <div class="notif-item" data-notif-id="ann_${a.id}" style="border:1px solid var(--border, #e2e8f0); border-radius:8px; background:var(--card-bg, #ffffff); padding:0.9rem 1rem; margin-bottom:0.5rem;">
+              <div class="notif-icon ${iconClass}" style="width:32px; height:32px; border-radius:7px;">${iconHtml}</div>
+              <div class="notif-content" style="flex: 1; min-width:0;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem;">
+                  <div class="notif-title" style="font-size:13px; font-weight:600;">${esc(a.title)}</div>
+                  <button class="btn btn-ghost" style="padding:2px 8px; color:var(--danger); font-size:11.5px; border-radius:5px;" onclick="event.stopPropagation(); window.deleteAnnouncementHandler('${a.id}')" data-i18n="btn.delete">Delete</button>
+                </div>
+                <div class="notif-body" style="font-size:12.5px; color:var(--text-secondary); line-height:1.45; word-break:break-word; margin-top:2px;">${esc(a.message)}</div>
+                <div class="notif-time" style="font-size:11px; color:var(--text-muted); margin-top:4px;">${scheduledStr ? scheduledStr : 'Sent: ' + dateStr} · Audience: ${esc(a.audience)}${schedChip}</div>
+              </div>
+            </div>
+          `;
+        }).join("");
+    }
+  }
+
+  notifList.innerHTML = errBlock + tabsHtml + contentHtml;
   renderDashboardBanner(announcements);
 };
 
-// Single entry point for badge/list refresh (called by adminNotificationUI
-// when admission alerts change, so two listeners never fight over badges).
+// Single entry point for badge/list refresh
 window.__refreshNotifBadges = () => { try { renderAnnouncementList(); } catch (_) {} };
 
 /**
- * Dashboard banner shows the latest LIVE announcement, or hides entirely
- * when there is nothing to show (no more hardcoded "Diwali" text).
+ * Dashboard banner shows the latest LIVE announcement, or hides entirely when none.
  */
 const renderDashboardBanner = (announcements) => {
   const card = document.getElementById("dashboard-announcement");
   if (!card) return;
-  // Dismissed announcements stay dismissed — the banner must never resurrect
-  // an item already seen/clicked on the Notifications page.
-  const live = (announcements || []).filter(a => isAnnouncementLive(a) && !isNotifRead(`ann_${a.id}`));
+  const live = (announcements || []).filter(a => isAnnouncementLive(a));
   if (live.length === 0) {
     card.style.display = "none";
     return;
   }
   const latest = live[0];
-  // textContent (not innerHTML) so announcement text can never inject markup.
   const titleEl = document.getElementById("dash-ann-title");
   const textEl = document.getElementById("dash-ann-text");
   if (titleEl) titleEl.textContent = latest.title || "Announcement";
@@ -413,12 +453,7 @@ const renderDashboardBanner = (announcements) => {
   card.style.display = "";
 };
 
-window.toggleReadAnnouncements = () => {
-  showReadAdmin = !showReadAdmin;
-  renderAnnouncementList();
-};
-
-// Re-render once a minute so ⏳ SCHEDULED chips clear on time without refresh.
+// Re-render once a minute so scheduled announcements chips update on time
 if (typeof window !== "undefined" && !window.__adminAnnTimer) {
   window.__adminAnnTimer = setInterval(() => { try { renderAnnouncementList(); } catch (_) {} }, 60000);
 }
@@ -444,7 +479,7 @@ window.handleAudienceChange = async () => {
           checkboxesHtml += `
             <div style="display:flex; align-items:center; margin-bottom:8px;">
               <input type="checkbox" id="ann-std-${s.id}" value="${s.id}" class="ann-student-cb" style="margin-right:10px; width:18px; height:18px; cursor:pointer; -webkit-appearance:checkbox; appearance:checkbox;" />
-              <label for="ann-std-${s.id}" style="cursor:pointer; display:block; margin:0; line-height:1.2;">${s.name} ${s.phone ? `(${s.phone})` : ''}</label>
+              <label for="ann-std-${s.id}" style="cursor:pointer; display:block; margin:0; line-height:1.2;">${esc(s.name)} ${s.phone ? `(${esc(s.phone)})` : ''}</label>
             </div>
           `;
         });

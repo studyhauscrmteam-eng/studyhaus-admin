@@ -29,12 +29,42 @@ export const createAnnouncement = async (data) => {
   }
 };
 
+export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Normalizes timestamp when announcement was announced/published
+ */
+export const getAnnouncementAnnounceTime = (a) => {
+  if (!a) return null;
+  if (a.scheduledFor) {
+    const t = new Date(a.scheduledFor).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  if (a.createdAt?.seconds) return a.createdAt.seconds * 1000;
+  if (typeof a.createdAt === "string") {
+    const t = Date.parse(a.createdAt);
+    if (!Number.isNaN(t)) return t;
+  }
+  return null;
+};
+
+/**
+ * Checks whether an announcement has exceeded its 1-day (24h) lifespan since announced
+ */
+export const isAnnouncementExpired = (a, now = Date.now()) => {
+  const annTime = getAnnouncementAnnounceTime(a);
+  if (!annTime) return false;
+  return (now - annTime) >= ONE_DAY_MS;
+};
+
 /**
  * A future `scheduledFor` means "publish at this time". Live = no schedule,
- * an unparseable schedule, or a schedule at/before now.
+ * an unparseable schedule, or a schedule at/before now — and NOT expired (> 1 day old).
  */
 export const isAnnouncementLive = (a, now = Date.now()) => {
-  if (!a || !a.scheduledFor) return true;
+  if (!a) return false;
+  if (isAnnouncementExpired(a, now)) return false;
+  if (!a.scheduledFor) return true;
   const t = new Date(a.scheduledFor).getTime();
   return Number.isNaN(t) || t <= now;
 };
@@ -54,23 +84,27 @@ export const getAllStudentsForDropdown = async () => {
 };
 
 /**
- * Listens to all announcements in real-time
+ * Listens to all announcements in real-time, auto-removing announcements older than 1 day
  */
 export const listenToAnnouncements = (onUpdate, onError) => {
   const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
   return onSnapshot(
     q,
     (snapshot) => {
+      const now = Date.now();
       const announcements = [];
-      snapshot.forEach(doc => {
-        announcements.push({ id: doc.id, ...doc.data() });
+      snapshot.forEach(docSnap => {
+        const item = { id: docSnap.id, ...docSnap.data() };
+        if (isAnnouncementExpired(item, now)) {
+          // Auto-delete from Firestore after 1 day
+          deleteDoc(docSnap.ref).catch(() => {});
+        } else {
+          announcements.push(item);
+        }
       });
       onUpdate(announcements);
     },
     (error) => {
-      // No error callback meant a denied read or a missing composite index
-      // left the page on "Loading announcements..." for ever, with nothing in
-      // the console — indistinguishable from "notifications don't work".
       console.error("[announcements] listener failed:", error?.message || error);
       if (typeof onError === "function") onError(error);
     }

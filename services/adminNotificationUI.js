@@ -1,6 +1,5 @@
 import { listenToPendingAdmissions } from "./admissionService.js";
 import { listenToAdminNotifications } from "./notificationService.js";
-import { isNotifRead } from "./notificationReadState.js";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
@@ -106,11 +105,7 @@ window.clearAdmissionDecisionHistory = () => {};
  */
 const alertsHtml = () => {
   const all = window.__pendingAdmissions || [];
-  // Clicked alerts leave the list (exactly like every other notification) —
-  // but ONLY the clicked one. Merely opening the Notifications page clears
-  // the badges (seen-state) and never dismisses alerts. The applicant is
-  // untouched until Approved/Rejected in Pending approval.
-  const pending = all.filter((r) => !isNotifRead(`adm_${r.id}`));
+  const pending = all;
   if (pending.length === 0) return "";
   // Plain cards like every other notification: no Review button, the whole
   // card is the click target and it disappears when tapped.
@@ -161,18 +156,109 @@ const seatAlertsHtml = () => {
     ${items}`;
 };
 
+const complaintAlertsHtml = () => {
+  const all = (window.__pendingComplaints || []).filter(c => c && (c.status === "Pending" || c.status === "In Progress"));
+  if (all.length === 0) return "";
+  const items = all.slice(0, 10).map((c) => {
+    const seatStr = c.seatNumber ? ` · Seat ${c.seatNumber}${c.seatFloor ? ` (${c.seatFloor})` : ""}` : "";
+    return `
+      <div class="notif-item unread" style="cursor:pointer;" onclick="if(window.navigate) window.navigate('complaints');" title="Click to open Complaints page">
+        <div class="notif-icon red">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="notif-content" style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div class="notif-title" style="color:var(--danger, #ef4444); font-weight:700;">${esc(c.category || "Complaint")} — ${esc(c.studentName || "Student")}</div>
+            <span class="badge ${c.status === 'In Progress' ? 'badge-info' : 'badge-pending'}" style="font-size:10px; padding:2px 6px;">${esc(c.status)}</span>
+          </div>
+          <div class="notif-body">${esc(c.description || "")}${seatStr}</div>
+          <div class="notif-time">${esc(fmtWhen(c))}</div>
+        </div>
+      </div>`;
+  }).join("");
+  return `
+    <div style="font-size:12px; font-weight:700; letter-spacing:.04em; color:var(--text-muted); padding:.75rem .25rem .5rem;">
+      STUDENT COMPLAINTS · ${all.length} ACTIVE
+    </div>
+    ${items}`;
+};
+
 export const initAdminNotificationUI = () => {
   const list = document.querySelector("#page-notifications .notif-list");
   if (!list) return; // not on a dashboard with notifications
   const role = localStorage.getItem("userRole");
   if (role === "Student") return;
 
-  window.__renderAdmissionAlerts = alertsHtml;
-  window.__renderSeatAlerts = seatAlertsHtml;
+  // Never dump database collections into notification feeds
+  window.__renderAdmissionAlerts = () => "";
+  window.__renderSeatAlerts = () => "";
+  window.__renderComplaintAlerts = () => "";
   window.__admissionBadgesLive = true; // bell pill painted here; don't reset it
   window.__pendingAdmissions = [];
   window.__pendingSeatRequests = [];
+  window.__pendingComplaints = [];
   paintTab(0);
+
+  window.__onComplaintsPageOpened = () => {
+    window.__complaintsSeen = true;
+    document.querySelectorAll(".complaints-nav-badge").forEach(badge => {
+      badge.style.display = "none";
+    });
+    if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+  };
+
+  window.__onNotificationsPageOpened = () => {
+    window.__notificationsSeen = true;
+    document.querySelectorAll('[data-page="notifications"] .nav-badge').forEach(badge => {
+      badge.style.display = "none";
+    });
+    const dot = document.getElementById("topbar-notif-dot");
+    if (dot) dot.style.display = "none";
+    paintTab(0);
+    if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+  };
+
+  // Student complaints: live watch on pending complaints
+  import("./complaintService.js").then(({ listenToAllComplaints }) => {
+    let knownComplaintIds = null;
+    try {
+      listenToAllComplaints((records) => {
+        const list = Array.isArray(records) ? records : [];
+        const pending = list.filter((c) => c && (c.status === "Pending" || c.status === "In Progress"));
+        window.__pendingComplaints = pending;
+
+        if (knownComplaintIds !== null) {
+          const fresh = pending.filter((c) => !knownComplaintIds.has(c.id) && c.status === "Pending");
+          if (fresh.length > 0) {
+            window.__complaintsSeen = false;
+            beep();
+            const f = fresh[0];
+            const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
+            if (typeof window.showToast === "function") {
+              window.showToast(`New Complaint: ${f.category || "Issue"} from ${f.studentName || "Student"}${extra} — open Complaints.`, "warning");
+            }
+          }
+        }
+        knownComplaintIds = new Set(pending.map((c) => c.id));
+
+        const isComplaintsActive = document.getElementById("page-complaints")?.classList.contains("active");
+        if (isComplaintsActive) {
+          window.__complaintsSeen = true;
+        }
+
+        // Update sidebar nav badge on Complaints menu item across all sidebars
+        const count = pending.filter(c => c.status === "Pending").length;
+        document.querySelectorAll(".complaints-nav-badge").forEach(badge => {
+          badge.textContent = count > 9 ? "9+" : String(count);
+          badge.style.display = (!isComplaintsActive && !window.__complaintsSeen && count > 0) ? "inline-block" : "none";
+        });
+
+        if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
+      });
+    } catch (e) {
+      console.error("[notifications] complaints watch failed:", e);
+    }
+  }).catch(() => {});
 
   // Student seat-change requests: same live-queue treatment as admissions —
   // bell rings on arrival, badge clears on Approve/Reject.
@@ -189,7 +275,7 @@ export const initAdminNotificationUI = () => {
             const f = fresh[0];
             const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
             if (typeof window.showToast === "function") {
-              window.showToast(`🪑 Seat change: ${f.studentName || "A student"} wants seat ${f.toSeat || "?"}${extra} — open Seats.`, "info");
+              window.showToast(`Seat change request: ${f.studentName || "A student"} wants seat ${f.toSeat || "?"}${extra} — open Seats.`, "info");
             }
           }
         }
@@ -206,7 +292,7 @@ export const initAdminNotificationUI = () => {
   // events were recorded but never surfaced. Subscribe here and hand the list
   // to the announcements renderer so both share one bell and one list.
   window.__systemNotifs = [];
-  window.__leadNotifs = [];
+  window.__systemNotifs = [];
   try {
     listenToAdminNotifications((records) => {
       window.__systemNotifs = Array.isArray(records) ? records : [];
@@ -216,10 +302,8 @@ export const initAdminNotificationUI = () => {
     console.error("[notifications] list listener failed:", e);
   }
 
-  // New website enquiries. The public form writes `visitors` straight from the
-  // browser, so no admin module ever runs on that path and notifyAdmins() never
-  // fired for it — which is why the owner saw nothing when someone signed up.
-  // Watch the lead queue itself so a fresh enquiry still rings the bell.
+  // Watch for newly arriving website enquiries in real-time.
+  // Historical enquiries stay on the Visitors page and are not dumped as unread notifications.
   try {
     let knownLeads = null;
     onSnapshot(
@@ -227,33 +311,15 @@ export const initAdminNotificationUI = () => {
       (snap) => {
         const live = new Set();
         const fresh = [];
-        const allNew = [];
         snap.forEach((d) => {
           const v = d.data() || {};
           if ((v.leadStatus || "New") !== "New") return;
           live.add(d.id);
-          allNew.push({ id: d.id, ...v });
           if (knownLeads && !knownLeads.has(d.id)) fresh.push({ id: d.id, ...v });
         });
         const first = knownLeads === null;
         knownLeads = live;
-        // The list is the LIVE New-lead queue (not just arrivals this session),
-        // so an enquiry stays until it is Converted/Closed or clicked away.
-        // Clicked-away leads stay gone via the shared read-state (sys_lead_*).
-        window.__leadNotifs = allNew
-          .sort((a, b) => {
-            const ta = (a.createdAt && (a.createdAt.seconds || 0)) || 0;
-            const tb = (b.createdAt && (b.createdAt.seconds || 0)) || 0;
-            return tb - ta;
-          })
-          .slice(0, 20)
-          .map((v) => ({
-            id: "lead_" + v.id,
-            type: "new-lead",
-            title: "New website enquiry",
-            body: `${v.visitorName || ""}${v.phone ? " · " + v.phone : ""}${v.planName ? " · " + v.planName : ""}`,
-            createdAt: v.createdAt,
-          }));
+
         if (first || fresh.length === 0) {
           if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
           return;
@@ -264,10 +330,22 @@ export const initAdminNotificationUI = () => {
         const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
         if (typeof window.showToast === "function") {
           window.showToast(
-            `🌐 New website enquiry: ${n.visitorName || n.phone || "someone"}${extra} — open Visitors.`,
+            `New website enquiry: ${n.visitorName || n.phone || "someone"}${extra} — open Visitors.`,
             "info"
           );
         }
+
+        // Post a genuine notification to Firestore collection so it can be cleared/discarded permanently
+        import("./notificationService.js").then(({ notifyAdmins }) => {
+          fresh.forEach((lead) => {
+            notifyAdmins({
+              type: "new-lead",
+              title: "New website enquiry",
+              body: `${lead.visitorName || "Someone"}${lead.phone ? " · " + lead.phone : ""}${lead.planName ? " · " + lead.planName : ""}`,
+            }).catch(() => {});
+          });
+        }).catch(() => {});
+
         if (typeof window.__refreshNotifBadges === "function") window.__refreshNotifBadges();
       },
       (e) => console.error("[notifications] lead watch failed:", e?.message || e)
@@ -291,7 +369,7 @@ export const initAdminNotificationUI = () => {
           const extra = fresh.length > 1 ? ` (+${fresh.length - 1} more)` : "";
           beep();
           if (typeof window.showToast === "function") {
-            window.showToast(`🔔 New admission: ${first.name || "Student"}${extra} — tap the bell to review.`, "info");
+            window.showToast(`New admission: ${first.name || "Student"}${extra} — tap the bell to review.`, "info");
           }
         }
       }

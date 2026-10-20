@@ -16,10 +16,13 @@ export const filterComplaints = (records, filters) => {
     const q = filters.search.toLowerCase();
     result = result.filter(r => {
       const name = (r.studentName || "").toLowerCase();
+      const phone = (r.studentPhone || "").toLowerCase();
       const seat = (r.seatNumber || "").toLowerCase();
+      const floor = (r.seatFloor || "").toLowerCase();
+      const desc = (r.description || "").toLowerCase();
       const id = (r.id || "").toLowerCase();
       const studentId = (r.studentId || "").toLowerCase();
-      return name.includes(q) || seat.includes(q) || id.includes(q) || studentId.includes(q);
+      return name.includes(q) || phone.includes(q) || seat.includes(q) || floor.includes(q) || desc.includes(q) || id.includes(q) || studentId.includes(q);
     });
   }
 

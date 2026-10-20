@@ -1,4 +1,4 @@
-import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, onSnapshot, updateDoc, doc, getDocs } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, onSnapshot, updateDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
 /**
@@ -42,7 +42,10 @@ export const listenToUnreadNotifications = (onUpdate) => {
       q,
       (snap) => {
         let count = 0;
-        snap.forEach(() => count++);
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          if (data.discarded !== true) count++;
+        });
         onUpdate(count);
       },
       () => onUpdate(0)
@@ -54,16 +57,22 @@ export const listenToUnreadNotifications = (onUpdate) => {
 };
 
 /**
- * Live list of the latest admin notifications (for the Notifications page).
+ * Live list of active unread admin notifications (for the Notifications page).
+ * Discarded or read notifications are excluded.
  */
-export const listenToAdminNotifications = (onUpdate, max = 20) => {
+export const listenToAdminNotifications = (onUpdate, max = 50) => {
   try {
     const q = query(collection(db, "notifications"), orderBy("createdAt", "desc"), limit(max));
     return onSnapshot(
       q,
       (snap) => {
         const list = [];
-        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          if (data.read !== true && data.discarded !== true) {
+            list.push({ id: d.id, ...data });
+          }
+        });
         onUpdate(list);
       },
       () => onUpdate([])
@@ -74,20 +83,46 @@ export const listenToAdminNotifications = (onUpdate, max = 20) => {
   }
 };
 
-export const markNotificationRead = async (id) => {
+/**
+ * Discards a notification permanently: deletes from Firestore, falls back to read flag.
+ */
+export const discardNotification = async (id) => {
+  if (!id) return;
   try {
-    await updateDoc(doc(db, "notifications", id), { read: true });
+    await deleteDoc(doc(db, "notifications", id));
   } catch (e) {
-    console.warn("[notifications] mark-read failed:", e?.message || e);
+    try {
+      await updateDoc(doc(db, "notifications", id), { read: true });
+    } catch (err) {
+      console.warn("[notifications] discard failed:", err?.message || err);
+    }
+  }
+};
+
+export const markNotificationRead = async (id) => {
+  return discardNotification(id);
+};
+
+/**
+ * Discards all notifications permanently so they are never stored or shown again.
+ */
+export const discardAllNotifications = async () => {
+  try {
+    const snap = await getDocs(collection(db, "notifications"));
+    const ops = [];
+    snap.forEach((d) => {
+      ops.push(
+        deleteDoc(d.ref).catch(() => updateDoc(d.ref, { read: true }).catch(() => {}))
+      );
+    });
+    if (ops.length > 0) {
+      await Promise.all(ops);
+    }
+  } catch (e) {
+    console.warn("[notifications] discard-all failed:", e?.message || e);
   }
 };
 
 export const markAllNotificationsRead = async () => {
-  try {
-    const q = query(collection(db, "notifications"), where("read", "==", false));
-    const snap = await getDocs(q);
-    await Promise.all(snap.docs.map((d) => updateDoc(d.ref, { read: true })));
-  } catch (e) {
-    console.warn("[notifications] mark-all-read failed:", e?.message || e);
-  }
+  return discardAllNotifications();
 };
