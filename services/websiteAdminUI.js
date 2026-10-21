@@ -263,7 +263,10 @@ const DEFAULT_SITE_CONTENT = {
     hoursValue: "24/7",
     rating: "4.9 ★",
     boysBadgeOn: true,
-    boysBadgeText: "Only for Boys"
+    boysBadgeText: "Only for Boys",
+    intakeOpen: true,
+    intakeBadgeText: "Now accepting new student intake",
+    intakeClosedText: "Intake currently closed"
   },
   disciplines: [
     { id: "d1", title: "Civil Services", desc: "UPSC CSE, GPSC Class 1-2, Police Sub-Inspector, Talati & State competitive exams." },
@@ -488,8 +491,8 @@ export const websiteAdminUI = {
           planName: "Full Day Plan",
           nameGu: "ફુલ ડે પ્લાન",
           price: 1000,
-          duration: "17 hours daily (6 AM – 11 PM)",
-          taglineGu: "રોજના ૧૭ કલાક (સવારે ૬ થી રાત્રે ૧૧)",
+          duration: "24/7 Daily · Open 24 Hours (365 Days)",
+          taglineGu: "૨૪/૭ દૈનિક · ૨૪ કલાક ખુલ્લું (૩૬૫ દિવસ)",
           seatType: "Fixed",
           featured: true,
           seatPreference: true,
@@ -497,7 +500,7 @@ export const websiteAdminUI = {
           badgeGu: "સૌથી વધુ પસંદગી",
           status: "Active",
           benefits: [
-            "Full 17-hour access: 6:00 AM – 11:00 PM",
+            "Full 24/7 round-the-clock access (365 days)",
             "100% Guaranteed fixed reserved seat",
             "Personal dedicated locker facility",
             "AC + High-Speed Wi-Fi + switchboard",
@@ -596,6 +599,24 @@ export const websiteAdminUI = {
             <input type="checkbox" ${c.hero.boysBadgeOn ? "checked" : ""} onchange="websiteAdminUI.updateHero('boysBadgeOn', this.checked)" style="width:16px; height:16px;" />
             Show boys-only badge in hero</label>
           <input value="${esc(c.hero.boysBadgeText)}" onchange="websiteAdminUI.updateHero('boysBadgeText', this.value)" placeholder="Badge text" class="input-field" style="flex:1; min-width:180px;" />
+        </div>
+        <!-- Student Intake Status Toggle (Connected to Website Hero Badge) -->
+        <div style="margin-top:1rem; padding:12px 14px; border-radius:10px; background:var(--bg-hover); border:1px solid var(--border);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <label style="font-size:13.5px; font-weight:600; display:flex; gap:.5rem; align-items:center; cursor:pointer;">
+              <input type="checkbox" ${c.hero.intakeOpen !== false ? "checked" : ""} onchange="websiteAdminUI.updateHero('intakeOpen', this.checked); websiteAdminUI.renderContent();" style="width:17px; height:17px; accent-color:var(--primary);" />
+              Student Intake Status: <span style="color:${c.hero.intakeOpen !== false ? '#10b981' : '#ef4444'}; font-weight:700;">${c.hero.intakeOpen !== false ? '● OPEN (Accepting Applications)' : '● CLOSED (Paused)'}</span>
+            </label>
+            <div style="font-size:11.5px; color:var(--text-muted);">Controls live intake badge on public website</div>
+          </div>
+          <div style="display:flex; gap:.75rem; margin-top:.75rem; flex-wrap:wrap;">
+            <label style="flex:1; min-width:200px; font-size:12px;">Badge Text when OPEN
+              <input value="${esc(c.hero.intakeBadgeText || 'Now accepting new student intake')}" onchange="websiteAdminUI.updateHero('intakeBadgeText', this.value)" placeholder="Now accepting new student intake" class="input-field" style="${fld} margin-top:4px;" />
+            </label>
+            <label style="flex:1; min-width:200px; font-size:12px;">Badge Text when CLOSED
+              <input value="${esc(c.hero.intakeClosedText || 'Intake currently closed')}" onchange="websiteAdminUI.updateHero('intakeClosedText', this.value)" placeholder="Intake currently closed" class="input-field" style="${fld} margin-top:4px;" />
+            </label>
+          </div>
         </div>
       </div>
       <div class="card" style="padding:1.25rem; margin-bottom:1rem;">
@@ -1077,7 +1098,7 @@ export const websiteAdminUI = {
             </div>
             <div>
               <label class="facility-label">Duration / Tagline</label>
-              <input type="text" class="form-control" id="plan-duration-${plan.id}" value="${safeDuration}" placeholder="e.g. 1 Month / 17 hrs daily" />
+              <input type="text" class="form-control" id="plan-duration-${plan.id}" value="${safeDuration}" placeholder="e.g. 1 Month / 24/7 daily" />
             </div>
             <div>
               <label class="facility-label">Seat Type</label>

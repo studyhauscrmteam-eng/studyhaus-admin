@@ -3347,3 +3347,52 @@ select.sp-input option,
 .sp-input.sp-select-sm:hover {
   color: var(--text-primary);
 }
+
+/* ============ SEAT LEGEND CHIPS (Dark & Light Theme Adaptive) ============ */
+.seat-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: all 0.15s ease;
+}
+.seat-legend-chip.avail {
+  background: rgba(34, 197, 94, 0.16);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+.seat-legend-chip.occ {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.seat-legend-chip.res {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.seat-legend-chip.sel {
+  background: var(--primary);
+  color: #ffffff;
+  border: 1px solid var(--primary);
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.25);
+}
+body.light-mode .seat-legend-chip.avail {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+body.light-mode .seat-legend-chip.occ {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+body.light-mode .seat-legend-chip.res {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}

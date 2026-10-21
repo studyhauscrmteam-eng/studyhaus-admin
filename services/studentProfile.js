@@ -508,7 +508,7 @@ const renderProfileModal = (s, role) => {
   const isStandard = isCash || isUpi || isPayLater || isPending || !curMethod;
 
   let payOptions = `
-    <option value="" ${!curMethod ? "selected" : ""}>Not set</option>
+    <option value="" disabled ${!curMethod ? "selected" : "hidden"}>Not set</option>
     <option value="Cash" ${isCash ? "selected" : ""}>Cash</option>
     <option value="UPI" ${isUpi ? "selected" : ""}>UPI</option>
     <option value="Pay Later" ${isPayLater ? "selected" : ""}>Pay Later</option>
