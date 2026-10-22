@@ -675,11 +675,13 @@ const renderPaymentAdminTable = () => {
 
   // View Filter: All Transactions vs Renewal Requests
   if (currentFilters.view === "renewals") {
-    // Strictly renewal records
-    filtered = filtered.filter(r => isRenewalRecord(r));
-    // Apply status filter if set
-    if (currentFilters.status !== "All") {
-      filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === currentFilters.status);
+    // The Renewal Requests tab directly displays incoming renewal requests awaiting verification!
+    // No need to manually select 'Pending' from the dropdown.
+    if (currentFilters.status === "approved" || currentFilters.status === "rejected") {
+      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status).key === currentFilters.status);
+    } else {
+      // Default (including when dropdown is 'All' or 'pending'): strictly pending renewal requests!
+      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status).key === "pending");
     }
   } else {
     // In All Transactions, apply Status Filter if specified
