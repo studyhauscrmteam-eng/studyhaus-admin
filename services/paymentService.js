@@ -112,13 +112,135 @@ export const listenToMyPayments = (studentId, onUpdate, onError) => {
 // ===============================================
 
 export const listenToAllPayments = (onUpdate) => {
-  const q = query(collection(db, "payments"));
-  return onSnapshot(q, (snapshot) => {
-    const records = [];
-    snapshot.forEach(doc => records.push({ id: doc.id, ...doc.data() }));
-    records.sort((a, b) => new Date(b.date || b.paymentDate || 0) - new Date(a.date || a.paymentDate || 0));
+  let payments = [];
+  let renewals = [];
+  const studentMap = new Map();
+
+  const emit = () => {
+    const unifiedMap = new Map();
+
+    // 1. Ingest all records from 'payments' collection
+    payments.forEach(p => {
+      const sName = p.studentName || (p.studentId && studentMap.get(p.studentId)?.name) || "Student";
+      const sPhone = p.studentPhone || (p.studentId && studentMap.get(p.studentId)?.phone) || "";
+      const dateStr = (() => {
+        if (p.date) return p.date;
+        if (p.paymentDate) return p.paymentDate;
+        if (p.createdAt?.seconds) return new Date(p.createdAt.seconds * 1000).toISOString();
+        return "";
+      })();
+      const txn = String(p.transactionId || "").trim().toUpperCase();
+      const amt = Number(p.amount) || 0;
+      const stDate = p.startDate || "";
+      const enDate = p.endDate || "";
+      const key = (txn && txn !== "CASH" && txn !== "RC-N/A" && !/rc-imp/i.test(txn))
+        ? `txn_${txn}`
+        : `${p.studentId || sName}_${stDate}_${enDate}_${amt}_${p.source || 'payment'}`;
+
+      unifiedMap.set(key, {
+        ...p,
+        studentName: sName,
+        studentPhone: sPhone,
+        date: dateStr,
+        source: p.source || (p.renewalMonths || p.durationDays ? "renewal" : "payment")
+      });
+    });
+
+    // 2. Ingest all records from 'renewals' collection (e.g. Bhavesh Makwana and all renewals)
+    renewals.forEach(r => {
+      const sName = r.studentName || (r.studentId && studentMap.get(r.studentId)?.name) || "Student";
+      const sPhone = r.studentPhone || (r.studentId && studentMap.get(r.studentId)?.phone) || "";
+      const dateStr = (() => {
+        if (r.createdAt?.seconds) return new Date(r.createdAt.seconds * 1000).toISOString();
+        if (r.date) return r.date;
+        if (r.paymentDate) return r.paymentDate;
+        if (r.startDate) return r.startDate;
+        return "";
+      })();
+      const txn = String(r.transactionId || "").trim().toUpperCase();
+      const amt = Number(r.amount) || 0;
+      const stDate = r.startDate || "";
+      const enDate = r.endDate || "";
+      const key = (txn && txn !== "CASH" && txn !== "RC-N/A" && !/rc-imp/i.test(txn))
+        ? `txn_${txn}`
+        : `${r.studentId || sName}_${stDate}_${enDate}_${amt}_renewal`;
+
+      const existing = unifiedMap.get(key);
+      if (!existing) {
+        // Renewal that was only in renewals collection (not in payments)
+        unifiedMap.set(key, {
+          id: r.id,
+          studentId: r.studentId,
+          studentName: sName,
+          studentPhone: sPhone,
+          planName: r.newPlan || r.planName || "Membership Plan",
+          amount: amt,
+          paymentMethod: r.paymentMethod || "Cash",
+          transactionId: r.transactionId || "—",
+          startDate: stDate,
+          endDate: enDate,
+          durationDays: Number(r.durationDays || 30),
+          durationMode: r.durationMode || "monthly",
+          source: "renewal",
+          status: (r.status && String(r.status).toLowerCase() === "pending") ? "pending" : "approved",
+          date: dateStr,
+          paymentDate: r.paymentDate || stDate,
+          screenshot: r.screenshot || r.paymentScreenshotUrl || (Array.isArray(r.screenshots) ? r.screenshots[0] : ""),
+          paymentScreenshotUrl: r.screenshot || r.paymentScreenshotUrl || (Array.isArray(r.screenshots) ? r.screenshots[0] : ""),
+          screenshots: Array.isArray(r.screenshots) ? r.screenshots : (r.screenshot ? [r.screenshot] : []),
+          createdAt: r.createdAt || null
+        });
+      } else {
+        // Enrich existing payment if renewal has more complete details
+        if (!existing.screenshot && (r.screenshot || r.paymentScreenshotUrl)) {
+          existing.screenshot = r.screenshot || r.paymentScreenshotUrl;
+          existing.paymentScreenshotUrl = existing.screenshot;
+        }
+        if ((!existing.studentName || existing.studentName === "Student" || existing.studentName === "Unknown") && sName && sName !== "Student") {
+          existing.studentName = sName;
+        }
+      }
+    });
+
+    const records = Array.from(unifiedMap.values());
+    const getTs = (x) => {
+      if (x.createdAt?.seconds) return x.createdAt.seconds * 1000;
+      const raw = x.date || x.paymentDate || x.startDate;
+      if (!raw) return 0;
+      const t = new Date(raw).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+    records.sort((a, b) => getTs(b) - getTs(a));
     onUpdate(records);
-  });
+  };
+
+  const unsubPayments = onSnapshot(query(collection(db, "payments")), (snap) => {
+    payments = [];
+    snap.forEach(doc => payments.push({ id: doc.id, ...doc.data() }));
+    emit();
+  }, (err) => console.warn("[payments] listen error:", err));
+
+  const unsubRenewals = onSnapshot(query(collection(db, "renewals")), (snap) => {
+    renewals = [];
+    snap.forEach(doc => renewals.push({ id: doc.id, ...doc.data() }));
+    emit();
+  }, (err) => console.warn("[renewals] listen error:", err));
+
+  const unsubStudents = onSnapshot(query(collection(db, "students")), (snap) => {
+    studentMap.clear();
+    snap.forEach(doc => {
+      const d = doc.data() || {};
+      studentMap.set(doc.id, { name: d.name, phone: d.phone });
+      if (d.uid) studentMap.set(d.uid, { name: d.name, phone: d.phone });
+    });
+    emit();
+  }, (err) => console.warn("[students] listen error:", err));
+
+  return () => {
+    try { unsubPayments(); } catch (_) {}
+    try { unsubRenewals(); } catch (_) {}
+    try { unsubStudents(); } catch (_) {}
+  };
 };
 
 export const receiveDirectPayment = async (data) => {
@@ -150,10 +272,27 @@ export const approvePayment = async (paymentId, approverName) => {
     const paymentData = snap.data();
     if (paymentData.status !== "pending") throw new Error("Payment is not pending.");
 
-    // Retrieve the student
-    const studentRef = doc(db, "students", paymentData.studentId);
-    const studentSnap = await getDoc(studentRef);
-    if (!studentSnap.exists()) throw new Error("Student not found");
+    // Retrieve the student with fallbacks
+    let studentRef = doc(db, "students", paymentData.studentId);
+    let studentSnap = await getDoc(studentRef);
+    if (!studentSnap.exists()) {
+      // Fallback 1: query by uid
+      const qUid = query(collection(db, "students"), where("uid", "==", paymentData.studentId));
+      const snapUid = await getDocs(qUid);
+      if (!snapUid.empty) {
+        studentRef = snapUid.docs[0].ref;
+        studentSnap = snapUid.docs[0];
+      } else {
+        // Fallback 2: query by studentId or admissionNo
+        const qId = query(collection(db, "students"), where("studentId", "==", paymentData.studentId));
+        const snapId = await getDocs(qId);
+        if (!snapId.empty) {
+          studentRef = snapId.docs[0].ref;
+          studentSnap = snapId.docs[0];
+        }
+      }
+    }
+    if (!studentSnap.exists()) throw new Error("Student record not found for ID: " + paymentData.studentId);
     const studentData = studentSnap.data();
 
     // Calculate new due date
@@ -163,7 +302,7 @@ export const approvePayment = async (paymentId, approverName) => {
     let newDueDateStr = paymentData.endDate;
     if (!newDueDateStr) {
       // Fallback calculation if endDate wasn't stored on the payment
-      const renewalMonths = Number(paymentData.renewalPeriod) || 1;
+      const renewalMonths = Number(paymentData.renewalPeriod || paymentData.renewalMonths) || 1;
       currentDue.setDate(1); // Reset to 1st to avoid month-end overflow
       currentDue.setMonth(currentDue.getMonth() + renewalMonths);
       const lastDay = new Date(currentDue.getFullYear(), currentDue.getMonth() + 1, 0).getDate();
@@ -171,14 +310,18 @@ export const approvePayment = async (paymentId, approverName) => {
       newDueDateStr = currentDue.toISOString().split("T")[0];
     }
 
-    // 1. Update Student Record
+    // 1. Update Student Record to Active with new due date and debt cleared
     const studentUpdates = {
       paymentDueDate: newDueDateStr,
       status: "Active",
+      approvalStatus: "Approved",
+      debt: 0,
       updatedAt: serverTimestamp()
     };
     if (paymentData.startDate) studentUpdates.startDate = paymentData.startDate;
     if (paymentData.endDate) studentUpdates.endDate = paymentData.endDate;
+    if (paymentData.planId) studentUpdates.planId = paymentData.planId;
+    if (paymentData.planName) studentUpdates.planName = paymentData.planName;
 
     await updateDoc(studentRef, studentUpdates);
 
@@ -192,7 +335,7 @@ export const approvePayment = async (paymentId, approverName) => {
     // 3. Record in renewals collection
     try {
       const renDoc = {
-        studentId: paymentData.studentId,
+        studentId: studentSnap.id,
         studentName: paymentData.studentName || studentData.name,
         oldPlan: studentData.planName || "",
         newPlan: paymentData.planName || studentData.planName || "",
@@ -216,6 +359,20 @@ export const approvePayment = async (paymentId, approverName) => {
       }
       await addDoc(collection(db, "renewals"), renDoc);
     } catch (_) {}
+
+    // 4. Notify the student in notifications collection
+    try {
+      await addDoc(collection(db, "notifications"), {
+        recipientId: studentData.uid || studentSnap.id,
+        studentId: studentSnap.id,
+        type: "renewal_approved",
+        title: "Renewal Approved!",
+        message: `Your membership renewal for ${paymentData.planName || studentData.planName} has been approved. Your subscription is valid until ${newDueDateStr}. Full platform access is restored.`,
+        date: new Date().toISOString(),
+        read: false,
+        createdAt: serverTimestamp()
+      });
+    } catch (_) {}
     
     return { success: true };
   } catch (error) {
@@ -226,12 +383,31 @@ export const approvePayment = async (paymentId, approverName) => {
 export const rejectPayment = async (paymentId, approverName, remark) => {
   try {
     const paymentRef = doc(db, "payments", paymentId);
+    const snap = await getDoc(paymentRef);
+    const paymentData = snap.exists() ? snap.data() : {};
+
     await updateDoc(paymentRef, {
       status: "rejected",
       approvedBy: approverName,
       approvalDate: serverTimestamp(),
-      remark: remark
+      remark: remark || "Payment rejected by admin",
+      rejectionReason: remark || "Payment rejected by admin"
     });
+
+    if (paymentData.studentId) {
+      try {
+        await addDoc(collection(db, "notifications"), {
+          recipientId: paymentData.studentId,
+          studentId: paymentData.studentId,
+          type: "renewal_rejected",
+          title: "Renewal Payment Rejected",
+          message: `Your renewal payment of ₹${paymentData.amount || ''} could not be verified: ${remark || 'Please check payment details and upload valid proof.'}`,
+          date: new Date().toISOString(),
+          read: false,
+          createdAt: serverTimestamp()
+        });
+      } catch (_) {}
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

@@ -25,6 +25,10 @@
   --accent-amber: #f59e0b;
   --accent-blue: #3b82f6;
 
+  --danger: #f43f5e;
+  --warning: #f59e0b;
+  --success: #10b981;
+
   /* Data table chrome (students, payments, ... ) */
   --table-head: #0b1220;
   --table-stripe: rgba(148, 163, 184, 0.045);
@@ -71,6 +75,7 @@ body.light-mode {
      defaults (#f43f5e / #f59e0b) fall below AA on a white card. */
   --danger: #e11d48;
   --warning: #b45309;
+  --success: #15803d;
 }
 
 /* Base utility classes for themes */
@@ -3296,32 +3301,59 @@ body.light-mode .sp-idcard .sp-idcard-sub { color: #0c4a6e; }
 }
 
 /* ============ FIX: premium themed selects (custom chevron, no OS-native look) ============ */
+select,
+.select-theme,
+.pay-filter-select,
+.rn-select,
+select.input-field,
 select.sp-input,
 .form-group select {
   appearance: none;
   -webkit-appearance: none;
   cursor: pointer;
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-bright);
   background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 14px 14px;
-  padding-right: 2.4rem;
+  padding-right: 2.2rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
+body.light-mode select,
+body.light-mode .select-theme,
+body.light-mode .pay-filter-select,
+body.light-mode .rn-select,
+body.light-mode select.input-field,
 body.light-mode select.sp-input,
 body.light-mode .form-group select {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--border-bright);
   background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
 }
+select:hover,
+.select-theme:hover,
+.pay-filter-select:hover,
+.rn-select:hover,
+select.input-field:hover,
 select.sp-input:hover,
 .form-group select:hover {
-  border-color: var(--border-bright);
+  border-color: var(--primary);
 }
+select:focus,
+.select-theme:focus,
+.pay-filter-select:focus,
+.rn-select:focus,
+select.input-field:focus,
 select.sp-input:focus,
 .form-group select:focus {
-  border-color: var(--accent-emerald);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
   outline: none;
 }
+select:disabled,
 select.sp-input:disabled,
 .form-group select:disabled {
   opacity: 0.55;
@@ -3329,6 +3361,9 @@ select.sp-input:disabled,
 }
 /* Native option popup follows the active theme */
 option,
+select option,
+.pay-filter-select option,
+.rn-select option,
 select.sp-input option,
 .form-group select option {
   background-color: var(--bg-card);
