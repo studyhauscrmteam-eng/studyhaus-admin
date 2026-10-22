@@ -237,7 +237,6 @@ export const initPaymentAdminUI = () => {
     currentFilters.view = view;
     const btnAll = document.getElementById("tab-btn-all");
     const btnRen = document.getElementById("tab-btn-renewals");
-    const statusSelect = document.getElementById("payment-filter-status");
     if (view === "renewals") {
       if (btnAll) { 
         btnAll.style.background = "transparent"; 
@@ -251,13 +250,6 @@ export const initPaymentAdminUI = () => {
         btnRen.style.boxShadow = "0 1px 3px rgba(0,0,0,0.1)"; 
         btnRen.style.borderColor = "var(--border-bright)";
       }
-      if (statusSelect) { 
-        statusSelect.style.display = "inline-block"; 
-        if (currentFilters.status === "All") {
-          currentFilters.status = "pending";
-          statusSelect.value = "pending";
-        }
-      }
     } else {
       if (btnAll) { 
         btnAll.style.background = "var(--bg-card)"; 
@@ -270,9 +262,6 @@ export const initPaymentAdminUI = () => {
         btnRen.style.color = "var(--text-secondary)"; 
         btnRen.style.boxShadow = "none";
         btnRen.style.borderColor = "transparent";
-      }
-      if (statusSelect) { 
-        statusSelect.style.display = "inline-block"; 
       }
     }
     renderPaymentAdminTable();
