@@ -398,7 +398,7 @@ const renderVisitors = (canEdit, canDelete) => {
     }
     const name = String(v.visitorName || "there").trim() || "there";
     const message =
-      `Hello ${name}, this is Studyhaus Library. ` +
+      `Hello ${name}, this is Shreeji Library. ` +
       `Please fill your details in the Student Login here: ${STUDENT_LOGIN_URL} ` +
       `— reply here after submitting.`;
     try {

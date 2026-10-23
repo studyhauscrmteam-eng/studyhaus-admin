@@ -37,23 +37,44 @@ export const initDashboardListeners = () => {
   const role = localStorage.getItem("userRole");
   if (role === "Student") return; // Students do not have permission to read global metrics
 
+  // Fast-paint cached values immediately so dashboard is instant
+  try {
+    const raw = localStorage.getItem("shreeji_cached_metrics");
+    if (raw) {
+      const cached = JSON.parse(raw);
+      for (const [id, val] of Object.entries(cached)) {
+        updateElement(id, val);
+      }
+    }
+  } catch (_) {}
+
+  const cacheAndSet = (id, val) => {
+    updateElement(id, val);
+    try {
+      const raw = localStorage.getItem("shreeji_cached_metrics");
+      const cached = raw ? JSON.parse(raw) : {};
+      cached[id] = val;
+      localStorage.setItem("shreeji_cached_metrics", JSON.stringify(cached));
+    } catch (_) {}
+  };
+
   console.log("Initializing live dashboard listeners...");
 
   // 1. Listen to Earnings (Today & Monthly)
   listenToEarnings((data) => {
-    updateElement("metric-earnings-today", formatCurrency(data.todayEarnings));
-    updateElement("metric-earnings-monthly", formatCurrency(data.monthlyEarnings));
+    cacheAndSet("metric-earnings-today", formatCurrency(data.todayEarnings));
+    cacheAndSet("metric-earnings-monthly", formatCurrency(data.monthlyEarnings));
   }, (err) => console.error("Earnings listener error:", err));
 
   // 2. Listen to Expenses (Today)
   listenToDashboardExpenses((data) => {
-    updateElement("metric-expenses-today", formatCurrency(data.todayExpenses));
+    cacheAndSet("metric-expenses-today", formatCurrency(data.todayExpenses));
   }, (err) => console.error("Expenses listener error:", err));
 
   // 3. Listen to Visitors (Today)
   listenToVisitors((data) => {
     const stats = calculateVisitorAnalytics(data);
-    updateElement("metric-visitors-today", stats.todayCount);
+    cacheAndSet("metric-visitors-today", stats.todayCount);
   }, (err) => console.error("Visitors listener error:", err));
 
   // 4. Listen to Students (Active & Old)
@@ -73,7 +94,7 @@ export const initDashboardListeners = () => {
       if (data.seatNumber && data.status === "Active" && String(data.approvalStatus || "Approved") === "Approved") occupiedSeats++;
     });
 
-    updateElement("metric-active-students", `${activeStudents} <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted); display: block; margin-top: 0.2rem;">${oldStudents} Old Students</span>`);
+    cacheAndSet("metric-active-students", `${activeStudents} <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted); display: block; margin-top: 0.2rem;">${oldStudents} Old Students</span>`);
   }, (err) => console.error("Students listener error:", err));
 
   // 5. Listen to Seats for REAL occupancy (separate from students)
@@ -92,13 +113,13 @@ export const initDashboardListeners = () => {
     const total = available + occupied + reserved + maintenance;
     const occupancyPercent = total > 0 ? Math.round((occupied / total) * 100) : 0;
     
-    updateElement("metric-occupancy-percent", `${occupancyPercent}%`);
-    updateElement("metric-occupancy-fraction", `${occupied} / ${total} seats taken`);
+    cacheAndSet("metric-occupancy-percent", `${occupancyPercent}%`);
+    cacheAndSet("metric-occupancy-fraction", `${occupied} / ${total} seats taken`);
   }, (err) => console.error("Seats listener error:", err));
 
   // 6. Listen to Pending Payments Panel
   listenToPendingPayments((data) => {
-    updateElement("pending-total-today", formatCurrency(data.totalPendingToday));
+    cacheAndSet("pending-total-today", formatCurrency(data.totalPendingToday));
   }, (err) => console.error("Pending payments listener error:", err));
 
   // Note: Upcoming Renewals feed is now handled by dashboardReminderUI.js

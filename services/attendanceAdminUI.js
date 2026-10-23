@@ -1,8 +1,10 @@
-import { listenToAllAttendance, checkIn, checkOut } from "./attendanceService.js";
+import { listenToAllAttendance, checkIn, checkOut, forceCheckOutStudent } from "./attendanceService.js";
 import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 import { listenToAllStudents } from "./studentService.js";
 import { calculateStudyHours } from "./studyHourCalculator.js";
+
+const escAttr = (s) => String(s == null ? "" : s).replace(/'/g, "\\'");
 
 let allRecords = [];
 let allStudents = [];
@@ -32,7 +34,7 @@ export const initAttendanceAdminUI = () => {
     </div>
     
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
-      <div class="card" style="padding:1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; display:flex; justify-content:space-between; align-items:flex-start; box-shadow:0 4px 6px -1px rgba(0,0,0,0.02);">
+      <div class="card" id="card-present-metric" style="padding:1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; display:flex; justify-content:space-between; align-items:flex-start; box-shadow:0 4px 6px -1px rgba(0,0,0,0.02); cursor:pointer;" title="Click to filter currently present students">
         <div><div style="font-size:11px; font-weight:700; letter-spacing:0.5px; color:var(--text-secondary); margin-bottom:8px; text-transform:uppercase;">Present Currently</div><div style="font-size:24px; font-weight:700; color:var(--text-primary);" id="att-metric-present">0</div></div>
         <div style="width:32px; height:32px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:8px; display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
       </div>
@@ -72,7 +74,21 @@ export const initAttendanceAdminUI = () => {
 
     <!-- Table Card -->
     <div class="card" style="padding:1.5rem; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.02);">
-      <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:1.5rem;">Today's check-ins</h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:1.5rem;">
+        <div>
+          <h3 style="font-size:15px; font-weight:600; color:var(--text-primary); margin:0;">Today's check-ins</h3>
+          <p style="font-size:12px; color:var(--text-muted); margin:2px 0 0;">View daily attendance records and live student check-ins.</p>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="text" id="att-search-input" placeholder="Search student or seat..." class="input-field" style="padding:6px 12px; font-size:12px; width:180px; border-radius:8px; border:1px solid var(--border); background:var(--bg-card); color:var(--text-primary);" />
+          <div style="display:flex; gap:4px; background:var(--bg-hover); padding:3px; border-radius:8px; border:1px solid var(--border);">
+            <button class="att-filter-tab active" data-filter="All" style="padding:4px 10px; font-size:12px; border:none; border-radius:6px; cursor:pointer; background:var(--bg-card); color:var(--text-primary); font-weight:600;">All</button>
+            <button class="att-filter-tab" data-filter="Present" style="padding:4px 10px; font-size:12px; border:none; border-radius:6px; cursor:pointer; background:transparent; color:var(--text-secondary);">Currently Present</button>
+            <button class="att-filter-tab" data-filter="Completed" style="padding:4px 10px; font-size:12px; border:none; border-radius:6px; cursor:pointer; background:transparent; color:var(--text-secondary);">Completed</button>
+            <button class="att-filter-tab" data-filter="Absent" style="padding:4px 10px; font-size:12px; border:none; border-radius:6px; cursor:pointer; background:transparent; color:var(--text-secondary);">Absent</button>
+          </div>
+        </div>
+      </div>
       
       <div style="overflow-x:auto;">
         <table style="width:100%; border-collapse:collapse; text-align:left; font-size:13px; color:var(--text-primary);">
@@ -214,6 +230,39 @@ export const initAttendanceAdminUI = () => {
     allStudents = students;
     renderTable();
   });
+
+  // Attach search and filter tab listeners
+  const searchInput = document.getElementById("att-search-input");
+  if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
+      currentFilters.search = e.target.value.trim();
+      renderTable();
+    });
+  }
+
+  document.querySelectorAll(".att-filter-tab").forEach(tab => {
+    tab.addEventListener("click", (e) => {
+      document.querySelectorAll(".att-filter-tab").forEach(t => {
+        t.style.background = "transparent";
+        t.style.color = "var(--text-secondary)";
+        t.style.fontWeight = "normal";
+      });
+      const t = e.currentTarget;
+      t.style.background = "var(--bg-card)";
+      t.style.color = "var(--text-primary)";
+      t.style.fontWeight = "600";
+      currentFilters.status = t.getAttribute("data-filter") || "All";
+      renderTable();
+    });
+  });
+
+  const presentMetricCard = document.getElementById("card-present-metric");
+  if (presentMetricCard) {
+    presentMetricCard.onclick = () => {
+      const tab = document.querySelector('.att-filter-tab[data-filter="Present"]');
+      if (tab) tab.click();
+    };
+  }
 };
 
 const renderMetrics = () => {
@@ -309,23 +358,81 @@ const renderTable = () => {
   const todaysRecords = allRecords.filter(r => r.date === todayStr);
   const activeStudents = allStudents.filter(s => s.status === 'Active');
 
-  if (activeStudents.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-secondary);">No active students found.</td></tr>`;
+  if (activeStudents.length === 0 && todaysRecords.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-secondary);">No active students or records found.</td></tr>`;
+    return;
+  }
+
+  // Unified list of students to render (including any checked in not marked active)
+  const studentMap = new Map();
+  activeStudents.forEach(s => studentMap.set(s.id, s));
+  todaysRecords.forEach(r => {
+    if (r.studentId && !studentMap.has(r.studentId)) {
+      studentMap.set(r.studentId, {
+        id: r.studentId,
+        name: r.studentName || "Student",
+        studentId: r.studentAdmissionId || r.studentId,
+        seatNumber: r.seatNumber || "",
+        seatFloor: r.seatFloor || "Ground Floor",
+        status: "Active"
+      });
+    }
+  });
+
+  let displayList = Array.from(studentMap.values()).map(student => {
+    const record = todaysRecords.find(r => r.studentId === student.id);
+    const isOnLeave = Array.isArray(student.leaveDates) && student.leaveDates.includes(todayStr);
+    let derivedStatus = "Absent";
+    if (record && record.status === "Active") derivedStatus = "Present";
+    else if (record && record.status === "Completed") derivedStatus = "Completed";
+    else if (isOnLeave) derivedStatus = "On Leave";
+
+    return { student, record, isOnLeave, derivedStatus };
+  });
+
+  // Apply status filter
+  if (currentFilters.status && currentFilters.status !== "All") {
+    if (currentFilters.status === "Present") {
+      displayList = displayList.filter(item => item.derivedStatus === "Present");
+    } else if (currentFilters.status === "Completed") {
+      displayList = displayList.filter(item => item.derivedStatus === "Completed");
+    } else if (currentFilters.status === "Absent") {
+      displayList = displayList.filter(item => item.derivedStatus === "Absent" || item.derivedStatus === "On Leave");
+    }
+  }
+
+  // Apply search query
+  if (currentFilters.search) {
+    const q = currentFilters.search.toLowerCase();
+    displayList = displayList.filter(item => {
+      const name = (item.student.name || "").toLowerCase();
+      const sId = (item.student.studentId || item.student.id || "").toLowerCase();
+      const seat = (item.record?.seatNumber || item.student.seatNumber || "").toLowerCase();
+      const phone = (item.student.phone || "").toLowerCase();
+      return name.includes(q) || sId.includes(q) || seat.includes(q) || phone.includes(q);
+    });
+  }
+
+  // Sort: Present first, then Completed, then Absent/Leave
+  const statusPriority = { "Present": 0, "Completed": 1, "On Leave": 2, "Absent": 3 };
+  displayList.sort((a, b) => {
+    const priA = statusPriority[a.derivedStatus] ?? 4;
+    const priB = statusPriority[b.derivedStatus] ?? 4;
+    if (priA !== priB) return priA - priB;
+    return (a.student.name || "").localeCompare(b.student.name || "");
+  });
+
+  if (displayList.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color:var(--text-secondary);">No students match the current filter or search.</td></tr>`;
     return;
   }
 
   let html = "";
-  activeStudents.forEach(student => {
-    // Find if student checked in today
-    const record = todaysRecords.find(r => r.studentId === student.id);
-    
-    // Check if student is on leave today
-    const isOnLeave = student.leaveDates && student.leaveDates.includes(todayStr);
-
+  displayList.forEach(({ student, record, isOnLeave, derivedStatus }) => {
     let badgeHtml = "";
-    if (record && record.status === "Active") {
-      badgeHtml = `<button onclick="window.handleForceCheckOut('${record.id}', ${record.checkIn})" title="Click to check out" style="background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='rgba(34,197,94,0.28)'" onmouseout="this.style.background='rgba(34,197,94,0.14)'">Present</button>`;
-    } else if (record && record.status === "Completed") {
+    if (derivedStatus === "Present" && record) {
+      badgeHtml = `<span style="background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:5px;"><span style="width:6px; height:6px; border-radius:50%; background:var(--success); display:inline-block;"></span>Present</span>`;
+    } else if (derivedStatus === "Completed") {
       badgeHtml = `<span style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px;">Completed</span>`;
     } else if (isOnLeave) {
       badgeHtml = `<button onclick="window.toggleLeave('${student.id}', '${todayStr}', false)" title="Remove Leave" style="background:rgba(245,158,11,0.14); color:var(--warning); border:1px solid rgba(245,158,11,0.45); padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; display:inline-block; text-align:center; min-width:80px; cursor:pointer; transition:all 0.2s; outline:none; font-family:inherit;" onmouseover="this.style.background='rgba(245,158,11,0.28)'" onmouseout="this.style.background='rgba(245,158,11,0.14)'">On Leave</button>`;
@@ -351,7 +458,7 @@ const renderTable = () => {
       : assignedSeat;
 
     html += `
-      <tr style="border-bottom:1px solid var(--border); transition:0.2s; cursor:pointer;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
+      <tr style="border-bottom:1px solid var(--border); transition:0.2s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
         <td style="padding:16px; display:flex; align-items:center; gap:12px;">
           <div style="width:36px; height:36px; border-radius:50%; background:var(--bg-hover); color:var(--text-secondary); display:flex; align-items:center; justify-content:center; font-weight:600; font-size:13px; border:1px solid var(--border);">${initials}</div>
           <div>
@@ -374,12 +481,30 @@ const renderTable = () => {
 
   tbody.innerHTML = html;
 
-  window.handleForceCheckOut = async (attId, inTime, event) => {
+  window.handleForceCheckOut = async (attId, inTime, studentId, studentName, seatNumber, event) => {
     if (event) event.stopPropagation();
-    const confirmed = await window.showCustomConfirm("Force Check-Out", "Force check-out this student now?");
-    if (confirmed) {
-      const res = await checkOut(attId, inTime);
-      if(!res.success) window.showToast(res.error, "error");
+    const nameDisplay = studentName ? ` for <b>${studentName}</b>` : "";
+    const seatDisplay = seatNumber ? ` (Seat ${seatNumber})` : "";
+    const confirmed = await window.showCustomConfirm(
+      "Force Check-Out",
+      `Are you sure you want to force check out${nameDisplay}${seatDisplay} now?<br><br>This will record their check-out time and immediately free up the seat.`
+    );
+    if (!confirmed) return;
+
+    const res = await forceCheckOutStudent({
+      attendanceId: attId,
+      studentId: studentId,
+      seatNumber: seatNumber,
+      checkInTimestamp: inTime
+    });
+    if (res.success) {
+      if (typeof window.showToast === "function") {
+        window.showToast(res.message || `Checked out ${studentName || 'student'} successfully.`);
+      }
+    } else {
+      if (typeof window.showToast === "function") {
+        window.showToast(res.error || "Failed to force check out.", "error");
+      }
     }
   };
 

@@ -1,5 +1,19 @@
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
+import { openProofViewer } from "./proofViewer.js";
+
+// Global document preview and enlarge lightbox modal
+window.enlargeDocument = (src, title = "Document Preview") => {
+  if (!src) {
+    if (window.showToast) window.showToast("No document preview available.", "warning");
+    return;
+  }
+  openProofViewer({ sources: [src], title });
+};
+
+window.viewAdminProofModal = (dataUrl, title = "Payment Screenshot Proof") => {
+  window.enlargeDocument(dataUrl, title);
+};
 
 // ──────────────────────────────────────────────
 // State for custom Selfie capture
@@ -238,13 +252,58 @@ export const loadGlobalDocuments = async () => {
 };
 
 /**
- * Load document images for a student from Firestore
+ * Load document images for a student from Firestore.
+ * Supports candidate IDs (direct ID, auth UID, sequential studentId / admissionNo)
+ * and falls back to collection query if direct document key is mismatched.
  * @param {string} studentId
+ * @param {Object} [fallbackStudent=null]
  * @returns {Promise<Object|null>}
  */
-export const loadStudentDocuments = async (studentId) => {
-  const snap = await getDoc(doc(db, "studentDocuments", studentId));
-  return snap.exists() ? snap.data() : null;
+export const loadStudentDocuments = async (studentId, fallbackStudent = null) => {
+  if (!studentId && !fallbackStudent) return null;
+
+  const candidates = new Set();
+  const addCandidate = (val) => {
+    if (val && typeof val === "string") {
+      const trimmed = val.trim();
+      if (trimmed) candidates.add(trimmed);
+    }
+  };
+
+  addCandidate(studentId);
+  if (fallbackStudent && typeof fallbackStudent === "object") {
+    addCandidate(fallbackStudent.id);
+    addCandidate(fallbackStudent.uid);
+    addCandidate(fallbackStudent.studentId);
+    addCandidate(fallbackStudent.admissionNo);
+  }
+
+  // 1. Direct getDoc on each candidate ID
+  for (const cid of candidates) {
+    try {
+      const snap = await getDoc(doc(db, "studentDocuments", cid));
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d && Object.keys(d).length > 0) return d;
+      }
+    } catch (_) {}
+  }
+
+  // 2. Query studentDocuments collection by studentId or uid field
+  for (const cid of candidates) {
+    try {
+      const { query, collection, where, getDocs, limit } = await import("firebase/firestore");
+      const q1 = query(collection(db, "studentDocuments"), where("studentId", "==", cid), limit(1));
+      const s1 = await getDocs(q1);
+      if (!s1.empty) return s1.docs[0].data();
+
+      const q2 = query(collection(db, "studentDocuments"), where("uid", "==", cid), limit(1));
+      const s2 = await getDocs(q2);
+      if (!s2.empty) return s2.docs[0].data();
+    } catch (_) {}
+  }
+
+  return null;
 };
 
 /**
@@ -548,7 +607,7 @@ export const renderStudentDocuments = async (studentId, containerId = "student-d
 
     const preview = hasFile
       ? (isImage
-        ? `<img src="${base64}" alt="${label}" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);">`
+        ? `<img src="${base64}" alt="${label}" onclick="window.enlargeDocument(this.src, '${label}')" title="Click to view & enlarge" style="width:100%;height:110px;object-fit:cover;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);cursor:pointer;">`
         : `<div style="width:100%;height:110px;border-radius:8px;background:var(--bg-hover);border:1px solid var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;">
              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
              <span style="font-size:11px;color:var(--text-muted);">File</span>
@@ -1140,3 +1199,22 @@ export const uploadProfilePhoto = async (file, studentId) => {
  * Kept as a no-op wrapper so the import never breaks.
  */
 export const initializePhotoUpload = async () => ({ success: true });
+
+export const deleteGlobalDocument = async (docId) => {
+  if (!docId) return { success: false, error: "Missing document ID." };
+  try {
+    const { doc: fsDoc, deleteDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+    await deleteDoc(fsDoc(db, "globalDocuments", docId));
+    try {
+      const cq = query(collection(db, "globalDocumentChunks"), where("docId", "==", docId));
+      const cs = await getDocs(cq);
+      for (const d of cs.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (_) {}
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to delete global document:", err);
+    return { success: false, error: err.message || "Failed to delete document." };
+  }
+};

@@ -20,7 +20,7 @@ const API_BASE = "https://www.shreejilibrary.co.in/api";
  *
  * @returns {Promise<{ok: boolean, removed?: object, error?: string}>}
  */
-export const purgeStudentOnServer = async (studentId) => {
+export const purgeStudentOnServer = async (studentId, extra = {}) => {
   try {
     const user = getAuth().currentUser;
     if (!user) return { ok: false, error: "You are not signed in." };
@@ -28,7 +28,7 @@ export const purgeStudentOnServer = async (studentId) => {
     let res = await fetch(`${API_BASE}/students/purge`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ studentId }),
+      body: JSON.stringify({ studentId, ...extra }),
     });
 
     // If session expired or token rejected, force refresh token and retry once
@@ -38,7 +38,7 @@ export const purgeStudentOnServer = async (studentId) => {
         res = await fetch(`${API_BASE}/students/purge`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ studentId }),
+          body: JSON.stringify({ studentId, ...extra }),
         });
       } catch (_) {}
     }
@@ -75,21 +75,21 @@ const validateStudentUpdate = async (id, updates) => {
     return false;
   };
 
-  if (updates.phone) {
+  if (updates.phone && updates.phone !== currentData.phone) {
     const q = query(studentsRef, where("phone", "==", updates.phone));
     const snap = await getDocs(q);
     const duplicate = snap.docs.find(d => !isSameStudent(d));
     if (duplicate) throw new Error(`Phone number ${updates.phone} is already in use.`);
   }
 
-  if (updates.email) {
+  if (updates.email && updates.email !== currentData.email) {
     const q = query(studentsRef, where("email", "==", updates.email));
     const snap = await getDocs(q);
     const duplicate = snap.docs.find(d => !isSameStudent(d));
     if (duplicate) throw new Error(`Email ${updates.email} is already in use.`);
   }
 
-  if (updates.studentId) {
+  if (updates.studentId && updates.studentId !== currentData.studentId) {
     const q = query(studentsRef, where("studentId", "==", updates.studentId));
     const snap = await getDocs(q);
     const duplicate = snap.docs.find(d => !isSameStudent(d));
@@ -167,7 +167,13 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
     // In all cases, proceed with deleting all data so the student's records are completely wiped.
     let loginRemoved = false;
     try {
-      const purge = await purgeStudentOnServer(studentId);
+      const purge = await purgeStudentOnServer(studentId, {
+        uid: data.uid,
+        phone: data.phone,
+        email: data.email,
+        authEmail: data.authEmail,
+        loginId: data.loginId,
+      });
       if (purge.ok) {
         loginRemoved = true;
       } else {
@@ -291,7 +297,17 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
         ["mail", where("meta.studentId", "==", studentId)],
         ["mail", where("meta.admissionId", "==", studentId)],
         ["globalDocuments", where("studentId", "==", studentId)],
+        ["profileUpdateRequests", where("studentId", "==", studentId)],
+        ["seatRequests", where("studentId", "==", studentId)],
       ];
+      if (data.uid && data.uid !== studentId) {
+        wipeQueries.push(
+          ["profileUpdateRequests", where("uid", "==", data.uid)],
+          ["seatRequests", where("uid", "==", data.uid)],
+          ["notifications", where("uid", "==", data.uid)],
+          ["messageLogs", where("uid", "==", data.uid)]
+        );
+      }
       for (const [colName, cond] of wipeQueries) {
         try {
           const s = await getDocs(query(collection(db, colName), cond));
@@ -330,6 +346,25 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
           } catch (_) { /* skip */ }
         }
       } catch (_) { /* best-effort */ }
+    }
+    // 2e. Always purge any active requests for this student (seat requests, profile updates)
+    const pendingReqQueries = [
+      ["profileUpdateRequests", where("studentId", "==", studentId)],
+      ["seatRequests", where("studentId", "==", studentId)],
+    ];
+    if (data.uid && data.uid !== studentId) {
+      pendingReqQueries.push(
+        ["profileUpdateRequests", where("uid", "==", data.uid)],
+        ["seatRequests", where("uid", "==", data.uid)]
+      );
+    }
+    for (const [colName, cond] of pendingReqQueries) {
+      try {
+        const s = await getDocs(query(collection(db, colName), cond));
+        for (const d of s.docs) {
+          try { await deleteDoc(d.ref); } catch (_) {}
+        }
+      } catch (_) {}
     }
 
     // 3. Delete linked docs (each best-effort so one failure never half-leaves)

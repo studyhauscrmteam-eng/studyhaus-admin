@@ -4,8 +4,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-  <title>Login — Studyhaus CRM</title>
+  <link rel="icon" type="image/png" href="./icon-192.png" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <link rel="manifest" href="./manifest.json" />
+  <title>Login — Shreeji Library Admin</title>
+  <meta name="theme-color" content="#983132" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
@@ -226,16 +229,11 @@
   </div>
 
   <div class="auth-layout">
-    <div class="auth-logo">
+    <div class="auth-logo" onclick="window.location.reload()" title="Click to refresh Shreeji Library" style="cursor:pointer;">
       <div class="auth-logo-flex">
-        <div class="auth-logo-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-          </svg>
-        </div>
-        <div class="auth-logo-text">Studyhaus</div>
+        <img src="./assets/logo.webp" alt="Shreeji Library" style="height: 48px; width: auto; object-fit: contain; border-radius: 8px;" onerror="this.onerror=null; this.src='./assets/logo.jpg';" />
       </div>
-      <div class="auth-logo-sub">Admin portal</div>
+      <div class="auth-logo-sub" style="margin-top: 6px; font-weight: 600; color: var(--text-muted, #64748b);">Admin Console</div>
     </div>
 
     <div class="auth-card">
@@ -252,7 +250,7 @@
       <form id="login-form">
         <div class="form-group">
           <label>Work email</label>
-          <input type="email" id="email" required placeholder="name@studyhaus.com" />
+          <input type="email" id="email" required placeholder="name@shreejilibrary.com" />
         </div>
         <div class="form-group">
           <label>Password</label>

@@ -455,8 +455,12 @@ export const initAdmissionsUI = async () => {
           shot = (docs && docs[key]) || null;
         }
         if (shot) {
-            const win = window.open("", "_blank");
-            win.document.write('<html><body style="margin:0; display:flex; justify-content:center; align-items:center; background:#111;"><img src="' + shot + '" style="max-width:100%; max-height:100vh; object-fit:contain;"/></body></html>');
+            if (window.openProofViewer) {
+              window.openProofViewer({ sources: [shot], title: "Payment Screenshot Proof" });
+            } else {
+              const win = window.open("", "_blank");
+              win.document.write('<html><body style="margin:0; display:flex; justify-content:center; align-items:center; background:#111;"><img src="' + shot + '" style="max-width:100%; max-height:100vh; object-fit:contain;"/></body></html>');
+            }
         } else {
             window.showToast("No screenshot found.", "warning");
         }
@@ -630,8 +634,15 @@ export const initAdmissionsUI = async () => {
       let docs = null;
       try {
         const { loadStudentDocuments } = await import("./documentUploadService.js");
-        docs = await loadStudentDocuments(id);
+        docs = await loadStudentDocuments(id, data);
       } catch (_) { /* no documents store row — the panel just shows none */ }
+
+      // Merge documents from store + student data (e.g. data._documents or data.documents)
+      const allDocs = {
+        ...(typeof docs === "object" && docs ? docs : {}),
+        ...(typeof data._documents === "object" && data._documents ? data._documents : {}),
+        ...(typeof data.documents === "object" && data.documents ? data.documents : {})
+      };
 
       // `firestore:<key>` markers mean "the value lives in studentDocuments".
       const resolve = (v) => {
@@ -639,7 +650,7 @@ export const initAdmissionsUI = async () => {
         if (!s) return "";
         if (s.startsWith("firestore:")) {
           const key = s.split(":")[1];
-          return (docs && docs[key]) || "";
+          return (allDocs && allDocs[key]) || (data && data[key]) || "";
         }
         return s;
       };
@@ -652,13 +663,78 @@ export const initAdmissionsUI = async () => {
         seen.add(v);
         entries.push({ src: v, label });
       };
-      pushDoc(docs && docs.photo, "Photo");
-      pushDoc(docs && (docs.profilePhoto || docs.selfie), "Photo");
-      pushDoc(data.profilePhotoUrl || data.photoUrl || data.photo, "Photo");
-      pushDoc(docs && docs.aadhaarFront, "Aadhaar front");
-      pushDoc(docs && docs.aadhaarBack, "Aadhaar back");
-      pushDoc(docs && docs.paymentScreenshot, "Payment screenshot");
-      pushDoc(data.paymentScreenshotUrl, "Payment screenshot");
+
+      // 1. Photo
+      const photoVal =
+        allDocs.photo ||
+        allDocs.profilePhoto ||
+        allDocs.selfie ||
+        allDocs.photoUrl ||
+        allDocs.profilePhotoUrl ||
+        data.profilePhotoUrl ||
+        data.photoUrl ||
+        data.photo ||
+        data.selfie;
+      pushDoc(photoVal, "Photo");
+
+      // 2. Aadhaar front
+      const aadhaarFrontVal =
+        allDocs.aadhaarFront ||
+        allDocs.aadharFront ||
+        allDocs.aadhaarFrontUrl ||
+        allDocs.aadharFrontUrl ||
+        allDocs.aadhaar_front ||
+        allDocs.aadhar_front ||
+        data.aadhaarFront ||
+        data.aadharFront ||
+        data.aadhaarFrontUrl ||
+        data.aadharFrontUrl ||
+        data.aadhaar_front ||
+        data.aadhar_front;
+      pushDoc(aadhaarFrontVal, "Aadhaar front");
+
+      // 3. Aadhaar back
+      const aadhaarBackVal =
+        allDocs.aadhaarBack ||
+        allDocs.aadharBack ||
+        allDocs.aadhaarBackUrl ||
+        allDocs.aadharBackUrl ||
+        allDocs.aadhaar_back ||
+        allDocs.aadhar_back ||
+        data.aadhaarBack ||
+        data.aadharBack ||
+        data.aadhaarBackUrl ||
+        data.aadharBackUrl ||
+        data.aadhaar_back ||
+        data.aadhar_back;
+      pushDoc(aadhaarBackVal, "Aadhaar back");
+
+      // 4. Payment screenshot
+      const paymentScreenshotVal =
+        allDocs.paymentScreenshot ||
+        allDocs.paymentScreenshotUrl ||
+        allDocs.payment_screenshot ||
+        data.paymentScreenshot ||
+        data.paymentScreenshotUrl ||
+        data.payment_screenshot;
+      pushDoc(paymentScreenshotVal, "Payment screenshot");
+
+      // 5. Catch-all for any other files uploaded in studentDocuments
+      const handledKeys = new Set([
+        "photo", "profilePhoto", "selfie", "photoUrl", "profilePhotoUrl",
+        "aadhaarFront", "aadharFront", "aadhaarFrontUrl", "aadharFrontUrl", "aadhaar_front", "aadhar_front",
+        "aadhaarBack", "aadharBack", "aadhaarBackUrl", "aadharBackUrl", "aadhaar_back", "aadhar_back",
+        "paymentScreenshot", "paymentScreenshotUrl", "payment_screenshot",
+        "studentId", "uid", "updatedAt", "createdAt", "migratedTo", "verificationNote", "id"
+      ]);
+      for (const [k, v] of Object.entries(allDocs)) {
+        if (handledKeys.has(k)) continue;
+        if (typeof v === "string" && (v.startsWith("data:") || v.startsWith("http://") || v.startsWith("https://") || v.length > 50)) {
+          const label = k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+          pushDoc(v, label || "Document");
+        }
+      }
+
       admDocIndex[id] = entries;
 
       const esc = (v) => escHtml(v);
@@ -921,6 +997,197 @@ export const initAdmissionsUI = async () => {
       document.head.appendChild(st);
     }
 
+    window.approveProfileUpdateRequest = async (requestId) => {
+      try {
+        const reqRef = doc(db, "profileUpdateRequests", requestId);
+        const snap = await getDoc(reqRef);
+        if (!snap.exists()) throw new Error("Request not found.");
+        const data = snap.data();
+        if (data.status !== "Pending") throw new Error(`Request is already ${data.status}.`);
+
+        let targetStudentId = data.studentId;
+        let studentRef = doc(db, "students", targetStudentId);
+        let studentSnap = await getDoc(studentRef);
+        if (!studentSnap.exists() && data.uid) {
+          targetStudentId = data.uid;
+          studentRef = doc(db, "students", targetStudentId);
+          studentSnap = await getDoc(studentRef);
+        }
+        if (!studentSnap.exists()) {
+          const qSt = query(collection(db, "students"), where("studentId", "==", data.studentId));
+          const snapSt = await getDocs(qSt);
+          if (!snapSt.empty) {
+            targetStudentId = snapSt.docs[0].id;
+            studentRef = doc(db, "students", targetStudentId);
+            studentSnap = snapSt.docs[0];
+          }
+        }
+        if (!studentSnap.exists()) throw new Error("Student record not found in database.");
+
+        const requested = data.requestedChanges || {};
+        const updates = { ...requested, updatedAt: serverTimestamp() };
+        if (requested.photo) {
+          updates.profilePhotoUrl = requested.photo;
+          updates.photoUrl = requested.photo;
+          updates.photo = requested.photo;
+        }
+        await updateDoc(studentRef, updates);
+
+        // Also update canonical store in studentDocuments if photo or documents were changed
+        const docUpdates = {};
+        if (requested.photo) docUpdates.photo = requested.photo;
+        if (requested.aadhaarFront) docUpdates.aadhaarFront = requested.aadhaarFront;
+        if (requested.aadhaarBack) docUpdates.aadhaarBack = requested.aadhaarBack;
+        if (Object.keys(docUpdates).length > 0) {
+          const { setDoc } = await import("firebase/firestore");
+          await setDoc(doc(db, "studentDocuments", data.studentId), {
+            ...docUpdates,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+
+        const adminName = localStorage.getItem("userName") || "Admin";
+        await updateDoc(reqRef, {
+          status: "Approved",
+          reviewedAt: serverTimestamp(),
+          reviewedBy: adminName
+        });
+
+        // Notify student
+        try {
+          await addDoc(collection(db, "notifications"), {
+            studentId: data.studentId,
+            title: "Profile Update Approved",
+            message: "Your requested profile details / documents have been approved and updated by admin.",
+            type: "profile_update",
+            read: false,
+            createdAt: serverTimestamp()
+          });
+        } catch (_) {}
+
+        if (window.showToast) window.showToast("Profile update request approved!", "success");
+      } catch (error) {
+        console.error("approveProfileUpdateRequest error:", error);
+        if (window.showToast) window.showToast("Failed to approve: " + error.message, "error");
+      }
+    };
+
+    window.rejectProfileUpdateRequest = async (requestId) => {
+      try {
+        const reqRef = doc(db, "profileUpdateRequests", requestId);
+        const snap = await getDoc(reqRef);
+        if (!snap.exists()) throw new Error("Request not found.");
+        const data = snap.data();
+        if (data.status !== "Pending") throw new Error(`Request is already ${data.status}.`);
+
+        const adminName = localStorage.getItem("userName") || "Admin";
+        await updateDoc(reqRef, {
+          status: "Rejected",
+          reviewedAt: serverTimestamp(),
+          reviewedBy: adminName
+        });
+
+        // Notify student
+        try {
+          await addDoc(collection(db, "notifications"), {
+            studentId: data.studentId,
+            title: "Profile Update Rejected",
+            message: "Your requested profile update was reviewed and rejected by admin.",
+            type: "profile_update",
+            read: false,
+            createdAt: serverTimestamp()
+          });
+        } catch (_) {}
+
+        if (window.showToast) window.showToast("Profile update request rejected.", "info");
+      } catch (error) {
+        console.error("rejectProfileUpdateRequest error:", error);
+        if (window.showToast) window.showToast("Failed to reject: " + error.message, "error");
+      }
+    };
+
+    const listenToPendingProfileUpdates = (callback) => {
+      const q = query(
+        collection(db, "profileUpdateRequests"),
+        where("status", "==", "Pending")
+      );
+      return onSnapshot(q, (snap) => {
+        const list = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        list.sort((a, b) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt || 0);
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt || 0);
+          return tb - ta;
+        });
+        callback(list);
+      }, (err) => {
+        console.warn("listenToPendingProfileUpdates error:", err);
+        callback([]);
+      });
+    };
+
+    const paintProfileUpdateRequests = (requests) => {
+      const tbody = document.getElementById("pending-profile-updates-body");
+      const badge = document.getElementById("badge-pending-profile-updates");
+      if (badge) {
+        if (requests.length > 0) {
+          badge.textContent = `${requests.length} Pending`;
+          badge.style.display = "inline-block";
+        } else {
+          badge.style.display = "none";
+        }
+      }
+      if (!tbody) return;
+      if (!requests || requests.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--text-muted);">No pending profile update requests.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = requests.map(req => {
+        const changes = req.requestedChanges || {};
+        const old = req.oldData || {};
+        const changesHtml = Object.keys(changes).map(field => {
+          const oldVal = old[field] || "—";
+          const newVal = changes[field] || "—";
+          const label = field.charAt(0).toUpperCase() + field.slice(1);
+
+          if (typeof newVal === "string" && (newVal.startsWith("data:image/") || newVal.startsWith("http://") || newVal.startsWith("https://"))) {
+            return `<div style="font-size:12px; margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+              <span style="font-weight:600; color:var(--text-secondary);">${label}:</span>
+              ${typeof oldVal === "string" && (oldVal.startsWith("data:") || oldVal.startsWith("http")) ? `<img src="${oldVal}" style="width:34px; height:34px; border-radius:4px; object-fit:cover; border:1px solid var(--border);" />` : ''}
+              <span>→</span>
+              <img src="${newVal}" style="width:40px; height:40px; border-radius:6px; object-fit:cover; border:2px solid var(--accent-emerald, #10b981); cursor:pointer;" onclick="window.enlargeDocument ? window.enlargeDocument('${newVal}', 'New ${label}') : window.open('${newVal}')" title="Click to enlarge" />
+            </div>`;
+          }
+
+          return `<div style="font-size:12px; margin-bottom:3px;">
+            <span style="font-weight:600; color:var(--text-secondary);">${label}:</span>
+            <span style="color:var(--text-muted); text-decoration:line-through; margin-right:4px;">${escHtml(String(oldVal))}</span>
+            <span style="color:var(--accent-emerald, #10b981); font-weight:700;">→ ${escHtml(String(newVal))}</span>
+          </div>`;
+        }).join("");
+
+        const d = req.createdAt?.toMillis
+          ? new Date(req.createdAt.toMillis()).toLocaleString()
+          : "Just now";
+
+        return `
+          <tr>
+            <td style="vertical-align: middle;">
+              <div style="font-weight:700; color:var(--text-primary); font-size:13.5px;">${escHtml(req.studentName || "Student")}</div>
+              <div style="font-size:11.5px; color:var(--text-muted);">${escHtml(req.studentPhone || "")}</div>
+              <div style="font-size:11px; color:var(--text-muted); font-variant-numeric:tabular-nums;">${escHtml(req.studentId || "")}</div>
+            </td>
+            <td style="vertical-align: middle;">${changesHtml || "<span style='color:var(--text-muted);'>No changes</span>"}</td>
+            <td style="vertical-align: middle; white-space:nowrap; font-size:12px; color:var(--text-muted);">${d}</td>
+            <td style="vertical-align: middle; text-align:right; white-space:nowrap;">
+              <button class="btn btn-primary" onclick="window.approveProfileUpdateRequest('${req.id}')" style="padding:6px 12px; font-size:12px; margin-right:6px;">Approve</button>
+              <button class="btn btn-ghost" onclick="window.rejectProfileUpdateRequest('${req.id}')" style="padding:6px 10px; font-size:12px; color:var(--danger);">Reject</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    };
+
     // Tab pills are class-driven (see .adm-tab): clear the hardcoded inline
     // look the HTML ships with so a tab switch can never clobber the badge.
     ["tab-new-admission", "tab-pending-approval"].forEach((id, i) => {
@@ -1040,6 +1307,11 @@ export const initAdmissionsUI = async () => {
         `;
       });
       tbody.innerHTML = html;
+    });
+
+    // Profile update requests listener & renderer (Task 5)
+    listenToPendingProfileUpdates((profileRequests) => {
+      paintProfileUpdateRequests(profileRequests);
     });
   } else {
     // Hide pending approval tab for students

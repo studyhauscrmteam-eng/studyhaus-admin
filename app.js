@@ -471,110 +471,219 @@ window.renderGlobalDocuments = async () => {
       #document-list-container .doc-spinner { width:28px; height:28px; border-radius:50%;
         border:3px solid rgba(128,128,128,.25); border-top-color: var(--primary, #8b5cf6);
         animation: doc-spin .8s linear infinite; }
-      #document-list-container .docs-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:1rem; }
-      #document-list-container .doc-sec-title { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
-        color:var(--text-muted); margin:0 0 .75rem; }
-      #document-list-container .doc-thumb { width:52px; height:52px; border-radius:8px; overflow:hidden; flex-shrink:0;
-        background:var(--bg-hover); display:flex; align-items:center; justify-content:center; color:var(--primary); }
+      #document-list-container .lib-docs-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:1.25rem; }
+      #document-list-container .doc-thumb { width:56px; height:56px; border-radius:10px; overflow:hidden; flex-shrink:0;
+        background:var(--bg-hover); display:flex; align-items:center; justify-content:center; color:var(--primary); cursor:pointer; }
       #document-list-container .doc-thumb img { width:100%; height:100%; object-fit:cover; }`;
     document.head.appendChild(st);
   }
 
-  container.innerHTML = `<div style="text-align:center;padding:2rem;"><div class="doc-spinner" style="margin:0 auto;"></div><p style="margin-top:.75rem;color:var(--text-secondary);">Loading documents...</p></div>`;
+  container.innerHTML = `<div style="text-align:center;padding:2.5rem;"><div class="doc-spinner" style="margin:0 auto;"></div><p style="margin-top:.75rem;color:var(--text-secondary);font-size:13.5px;">Loading library documents...</p></div>`;
 
   try {
     if (!(await ensureDocService())) {
       throw new Error("Document service could not be loaded.");
     }
-    if (typeof window.loadAllStudentDocuments !== 'function') {
-      const mod = await import('./services/documentUploadService.js');
-      window.loadAllStudentDocuments = mod.loadAllStudentDocuments;
-    }
 
-    // Read-only: general documents + every student document in the DB.
-    const [docs, studentFiles] = await Promise.all([
-      window.loadGlobalDocuments(),
-      window.loadAllStudentDocuments(),
-    ]);
-    window.__globalDocs = docs;
-    window.__studentDocsAll = studentFiles;
+    // Load ONLY Library Documents (globalDocuments) — No student KYC here!
+    const docs = await window.loadGlobalDocuments();
+    window.__globalDocs = docs || [];
 
-    if (docs.length === 0 && studentFiles.length === 0) {
-      container.innerHTML = `<div style="text-align:center;padding:3rem 1rem;border:1px dashed var(--border);border-radius:12px;background:var(--bg-card);">
-        <div style="font-size:2rem;opacity:0.5;margin-bottom:1rem;">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    if (!docs || docs.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:3.5rem 1.5rem;border:1.5px dashed var(--border);border-radius:14px;background:var(--bg-card);">
+          <div style="width:52px; height:52px; border-radius:12px; background:rgba(152,49,50,0.1); color:var(--primary); display:flex; align-items:center; justify-content:center; margin:0 auto 1rem;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <h3 style="margin:0 0 0.5rem 0; font-size:1.15rem; font-weight:700;">No Library Documents Uploaded Yet</h3>
+          <p style="color:var(--text-muted);font-size:13.5px;max-width:440px;margin:0 auto 1.5rem;line-height:1.5;">Upload official library rules, guidelines, notices, agreements, floor plans, and certificates for central library reference.</p>
+          <button class="btn btn-primary" onclick="window.openUploadLibraryDocModal()" style="display:inline-flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Upload First Library Document
+          </button>
         </div>
-        <p style="color:var(--text-secondary);">No documents found</p>
-        <p style="color:var(--text-muted);font-size:13px;margin-top:.35rem;">Documents stored in the database will appear here.</p>
-      </div>`;
+      `;
       return;
     }
 
     const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, c => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
-    const imageIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`;
-    const fileIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-    const downloadBtn = (handler) => `
-        <button type="button" onclick="${handler}" class="btn btn-secondary" style="white-space:nowrap;display:inline-flex;align-items:center;gap:6px;border:none;cursor:pointer;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download
-        </button>`;
+    const fileIcon = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
 
-    let html = "";
-
-    // ── 1. Student documents (every studentDocuments file in the DB) ──
-    if (studentFiles.length > 0) {
-      html += `<p class="doc-sec-title">Student documents — ${studentFiles.length} file${studentFiles.length === 1 ? "" : "s"}</p>
-      <div class="docs-grid" style="margin-bottom:1.75rem;">`;
-      studentFiles.forEach((f, index) => {
-        const isImg = String(f.dataUrl).startsWith("data:image");
-        const thumb = isImg
-          ? `<img src="${f.dataUrl}" alt="${escapeHtml(f.label)}">`
-          : fileIcon;
-        const who = escapeHtml(f.studentName || f.studentId);
-        html += `
-        <div style="display:flex;flex-direction:column;gap:.6rem;padding:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;">
-          <div style="display:flex;align-items:center;gap:.75rem;">
-            <div class="doc-thumb">${thumb}</div>
-            <div style="min-width:0;">
-              <h4 style="margin:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${who}">${who}</h4>
-              <p style="margin:3px 0 0;font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(f.label)}</p>
-            </div>
-          </div>
-          ${downloadBtn(`window.__downloadStudentDocFile(${index})`)}
-        </div>`;
-      });
-      html += `</div>`;
-    }
-
-    // ── 2. General documents (globalDocuments) ──
-    if (docs.length > 0) {
-      html += `<p class="doc-sec-title">General documents — ${docs.length} file${docs.length === 1 ? "" : "s"}</p>
-      <div style="display:grid;gap:1rem;">`;
-      docs.forEach((doc, index) => {
-        const uploadedAt = doc.uploadedAt ? new Date(doc.uploadedAt) : null;
-        const date = uploadedAt && !isNaN(uploadedAt) ? uploadedAt.toLocaleString() : 'Unknown date';
-        const fileType = doc.fileType || '';
-        const iconSvg = fileType.includes("image") ? imageIcon : fileIcon;
-        const title = escapeHtml(doc.title || doc.fileName || 'Untitled');
-        html += `
-      <div class="data-card" style="display:flex;align-items:center;padding:1rem;gap:1rem;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;">
-        <div style="background:var(--bg-hover);border-radius:8px;padding:10px;display:flex;align-items:center;justify-content:center;color:var(--primary);">${iconSvg}</div>
-        <div style="flex:1;min-width:0;">
-          <h4 style="margin:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</h4>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${date}</p>
+    let html = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h3 style="margin:0; font-size:1.1rem; font-weight:700;">Library Repository (${docs.length} document${docs.length === 1 ? '' : 's'})</h3>
+          <div style="font-size:12.5px; color:var(--text-muted); margin-top:2px;">Official rules, guidelines, circulars, agreements and certificates</div>
         </div>
-        ${downloadBtn(`window.__downloadDoc(${index})`)}
+        <button class="btn btn-primary btn-sm" onclick="window.openUploadLibraryDocModal()" style="display:inline-flex; align-items:center; gap:6px; font-weight:600;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Upload Document
+        </button>
       </div>
+      <div class="lib-docs-grid">
     `;
-      });
-      html += `</div>`;
-    }
 
+    docs.forEach((doc, index) => {
+      const uploadedAt = doc.uploadedAt ? new Date(doc.uploadedAt) : null;
+      const date = uploadedAt && !isNaN(uploadedAt) ? uploadedAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Recent';
+      const fileType = doc.fileType || '';
+      const isImg = fileType.includes("image") || (doc.base64Data && String(doc.base64Data).startsWith("data:image"));
+      const title = escapeHtml(doc.title || doc.fileName || 'Untitled Document');
+      const category = escapeHtml(doc.category || 'General Document');
+      const thumb = isImg
+        ? `<img src="${doc.base64Data}" alt="${title}" onclick="window.enlargeDocument('${doc.base64Data.replace(/'/g, "\\'")}', '${title.replace(/'/g, "\\'")}')" title="Click to enlarge" />`
+        : fileIcon;
+
+      html += `
+        <div style="display:flex; flex-direction:column; justify-content:space-between; padding:1.2rem; background:var(--bg-card); border:1px solid var(--border); border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,0.04); transition:transform 0.15s ease, border-color 0.15s ease;">
+          <div>
+            <div style="display:flex; align-items:flex-start; gap:0.9rem; margin-bottom:0.75rem;">
+              <div class="doc-thumb" ${isImg ? '' : `onclick="window.enlargeDocument('${doc.base64Data.replace(/'/g, "\\'")}', '${title.replace(/'/g, "\\'")}')"`} title="Click to preview">
+                ${thumb}
+              </div>
+              <div style="min-width:0; flex:1;">
+                <span class="badge" style="background:rgba(152,49,50,0.1); color:var(--primary); font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; margin-bottom:4px; display:inline-block;">${category}</span>
+                <h4 style="margin:2px 0 0 0; font-size:14.5px; font-weight:700; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${title}">${title}</h4>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Added ${date} · ${escapeHtml(doc.fileName || '')}</div>
+              </div>
+            </div>
+            ${doc.description ? `<p style="margin:0 0 1rem 0; font-size:12.5px; color:var(--text-secondary); line-height:1.45; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${escapeHtml(doc.description)}</p>` : ''}
+          </div>
+          <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border); padding-top:0.85rem; margin-top:0.75rem;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="window.enlargeDocument('${doc.base64Data.replace(/'/g, "\\'")}', '${title.replace(/'/g, "\\'")}')" style="flex:1; justify-content:center; font-size:12px; padding:6px 10px; display:inline-flex; align-items:center; gap:4px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> Preview
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="window.__downloadDoc(${index})" style="padding:6px 10px; font-size:12px; border:1px solid var(--border); border-radius:6px;" title="Download File">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="window.deleteLibraryDocument('${doc.id}', '${title.replace(/'/g, "\\'")}')" style="padding:6px 10px; font-size:12px; color:var(--danger, #ef4444); border:1px solid var(--border); border-radius:6px;" title="Delete Document">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
     container.innerHTML = html;
   } catch (e) {
     console.error(e);
-    container.innerHTML = `<p style="color:#ef4444;text-align:center;">Failed to load documents. ${escapeErr(e)}</p>`;
+    container.innerHTML = `<p style="color:#ef4444;text-align:center;padding:2rem;">Failed to load library documents. ${escapeErr(e)}</p>`;
+  }
+};
+
+window.openUploadLibraryDocModal = () => {
+  document.getElementById("upload-library-doc-modal")?.remove();
+  const modal = document.createElement("dialog");
+  modal.id = "upload-library-doc-modal";
+  modal.className = "card smooth-modal";
+  modal.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 20px 50px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(520px, 94vw); margin:auto;";
+  modal.innerHTML = `
+    <div style="padding:1.25rem 1.5rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <h3 style="margin:0; font-size:1.1rem; font-weight:700;">Upload Library Document</h3>
+      </div>
+      <button class="btn btn-ghost" id="ulm-close" style="padding:0.25rem 0.5rem; font-size:1.15rem; line-height:1; cursor:pointer;">✕</button>
+    </div>
+    <form id="ulm-form" style="padding:1.25rem 1.5rem; display:flex; flex-direction:column; gap:1rem;">
+      <div class="form-group">
+        <label style="font-size:12px; font-weight:700; text-transform:uppercase;">Document Title *</label>
+        <input type="text" id="ulm-title" required class="sp-input" placeholder="e.g. Shreeji Library Rules & Regulations 2026" />
+      </div>
+      <div class="form-group">
+        <label style="font-size:12px; font-weight:700; text-transform:uppercase;">Category *</label>
+        <select id="ulm-category" required class="sp-input">
+          <option value="Rules & Regulations">Library Rules & Regulations</option>
+          <option value="Policies & Notices">Policies & General Notices</option>
+          <option value="Government & Registration">Government & Registration Certificate</option>
+          <option value="Membership Agreement">Membership Agreement / Terms</option>
+          <option value="Floor Plan & Safety">Floor Plan & Safety Guidelines</option>
+          <option value="Fee Circular">Fee & Renewal Circular</option>
+          <option value="Other">Other Library Document</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label style="font-size:12px; font-weight:700; text-transform:uppercase;">Description <span style="font-size:11px; color:var(--text-muted); font-weight:normal;">(optional)</span></label>
+        <textarea id="ulm-desc" rows="2" class="sp-input" placeholder="Brief note or description of this document..." style="resize:vertical;"></textarea>
+      </div>
+      <div class="form-group">
+        <label style="font-size:12px; font-weight:700; text-transform:uppercase;">Select File (PDF, JPG, PNG) *</label>
+        <input type="file" id="ulm-file" accept="image/*,.pdf" required class="sp-input" style="padding:8px;" />
+        <small style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">Maximum file size: 10 MB.</small>
+      </div>
+      <div id="ulm-progress-bar" style="display:none; margin-top:4px;">
+        <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px;">Uploading document… <span id="ulm-progress-pct">0</span>%</div>
+        <div style="height:5px; background:var(--bg-hover); border-radius:99px; overflow:hidden;">
+          <div id="ulm-progress-fill" style="height:100%; width:0%; background:var(--primary); transition:width 0.2s;"></div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:0.6rem; margin-top:0.75rem;">
+        <button type="button" class="btn btn-ghost" id="ulm-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="ulm-submit" style="padding:8px 20px; font-weight:700;">Upload to Repository</button>
+      </div>
+    </form>
+  `;
+  document.body.appendChild(modal);
+  const close = () => { modal.close(); modal.remove(); };
+  modal.querySelector("#ulm-close").onclick = close;
+  modal.querySelector("#ulm-cancel").onclick = close;
+  modal.addEventListener("close", () => modal.remove());
+  modal.showModal();
+
+  const form = modal.querySelector("#ulm-form");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const file = modal.querySelector("#ulm-file").files[0];
+    if (!file) return;
+    const title = modal.querySelector("#ulm-title").value.trim();
+    const category = modal.querySelector("#ulm-category").value;
+    const description = modal.querySelector("#ulm-desc").value.trim();
+
+    const submitBtn = modal.querySelector("#ulm-submit");
+    const pWrap = modal.querySelector("#ulm-progress-bar");
+    const pFill = modal.querySelector("#ulm-progress-fill");
+    const pPct = modal.querySelector("#ulm-progress-pct");
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Uploading...";
+    pWrap.style.display = "block";
+
+    try {
+      const { uploadGlobalDocument } = await import("./services/documentUploadService.js");
+      await uploadGlobalDocument(file, title, `${category ? `[${category}] ` : ''}${description}`, (pct) => {
+        pFill.style.width = `${pct}%`;
+        pPct.textContent = String(pct);
+      });
+      if (window.showToast) window.showToast("Library document uploaded successfully!", "success");
+      close();
+      window.renderGlobalDocuments();
+    } catch (err) {
+      console.error("Library doc upload error:", err);
+      if (window.showToast) window.showToast("Upload failed: " + err.message, "error");
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Upload to Repository";
+    }
+  };
+};
+
+window.deleteLibraryDocument = async (docId, title) => {
+  if (!confirm(`Are you sure you want to delete "${title || 'this library document'}" from the repository?`)) {
+    return;
+  }
+  try {
+    const { deleteGlobalDocument } = await import("./services/documentUploadService.js");
+    const res = await deleteGlobalDocument(docId);
+    if (res.success) {
+      if (window.showToast) window.showToast("Document deleted successfully.", "success");
+      window.renderGlobalDocuments();
+    } else {
+      if (window.showToast) window.showToast("Failed to delete document: " + res.error, "error");
+    }
+  } catch (err) {
+    if (window.showToast) window.showToast("Error: " + err.message, "error");
   }
 };
 
@@ -603,21 +712,6 @@ window.__downloadDoc = async (index) => {
     }
   }
   window.downloadBase64File(d.base64Data || '', d.fileName || d.title || 'document');
-};
-
-// Download one student document from the read-only Documents gallery.
-window.__downloadStudentDocFile = (index) => {
-  const f = (window.__studentDocsAll || [])[index];
-  if (!f || !f.dataUrl) {
-    if (typeof showToast === 'function') showToast('No file to download.', 'error');
-    return;
-  }
-  if (typeof window.downloadBase64File !== 'function') {
-    if (typeof showToast === 'function') showToast('Downloader could not be loaded. Please refresh the page.', 'error');
-    return;
-  }
-  const who = String(f.studentName || f.studentId || 'student').replace(/[^\w\-]+/g, '_');
-  window.downloadBase64File(f.dataUrl, `${who}_${f.key}`);
 };
 
 

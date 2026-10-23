@@ -1,7 +1,7 @@
 import { createAnnouncement, listenToAnnouncements, deleteAnnouncement, getAllStudentsForDropdown, isAnnouncementLive } from "./announcementService.js";
 import { discardNotification, discardAllNotifications } from "./notificationService.js";
 
-const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
+const BASE_TITLE = document.title || "Shreeji Library — Reading Space CRM";
 let lastAnnouncements = [];
 let annError = null;
 let currentNotifTab = "alerts"; // 'alerts' | 'broadcasts'
@@ -263,6 +263,24 @@ export const initAnnouncementAdminUI = () => {
     });
   }
 
+  // Wire audience change and announcement form listeners defensively
+  const audSelect = document.getElementById("ann-audience");
+  if (audSelect && !audSelect.dataset.wired) {
+    audSelect.dataset.wired = "1";
+    audSelect.addEventListener("change", () => {
+      if (typeof window.handleAudienceChange === "function") window.handleAudienceChange();
+    });
+  }
+
+  const annForm = document.getElementById("announcement-form");
+  if (annForm && !annForm.dataset.wired) {
+    annForm.dataset.wired = "1";
+    annForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (typeof window.submitAnnouncement === "function") window.submitAnnouncement();
+    });
+  }
+
   listenToAnnouncements(
     (announcements) => {
       annError = null;
@@ -496,38 +514,65 @@ window.handleAudienceChange = async () => {
  */
 window.submitAnnouncement = async () => {
   const btn = document.getElementById("btn-schedule-announcement");
-  if (btn) { btn.disabled = true; btn.textContent = "Scheduling..."; }
+  try {
+    const title = document.getElementById("ann-title")?.value?.trim() || "";
+    const message = document.getElementById("ann-message")?.value?.trim() || "";
+    const type = document.getElementById("ann-type")?.value || "info";
+    const audience = document.getElementById("ann-audience")?.value || "All Students";
+    const scheduledFor = document.getElementById("ann-date")?.value || null;
 
-  const data = {
-    title: document.getElementById("ann-title").value,
-    message: document.getElementById("ann-message").value,
-    type: document.getElementById("ann-type").value,
-    audience: document.getElementById("ann-audience").value,
-    scheduledFor: document.getElementById("ann-date").value || null,
-    createdBy: localStorage.getItem("userName") || "Admin"
-  };
-
-  if (data.audience === "Specific Students") {
-    const checkboxes = document.querySelectorAll(".ann-student-cb:checked");
-    data.targetStudentIds = Array.from(checkboxes).map(cb => cb.value);
-    if (data.targetStudentIds.length === 0) {
-      window.showToast(window.t ? window.t('Please select at least one student.') || "Please select at least one student." : "Please select at least one student.", "error");
-      if (btn) { btn.disabled = false; btn.textContent = "Schedule"; }
+    if (!title || !message) {
+      window.showToast(window.t ? window.t("Please enter both title and message.") || "Please enter both title and message." : "Please enter both title and message.", "warning");
       return;
     }
-  }
 
-  const res = await createAnnouncement(data);
-  
-  if (btn) { btn.disabled = false; btn.textContent = "Schedule"; }
+    if (btn) { btn.disabled = true; btn.textContent = "Scheduling..."; }
 
-  if (res.success) {
-    window.showToast(window.t ? window.t('Announcement scheduled successfully!') || "Announcement scheduled successfully!" : "Announcement scheduled successfully!", "success");
+    const data = {
+      title,
+      message,
+      type,
+      audience,
+      scheduledFor,
+      createdBy: localStorage.getItem("userName") || "Admin"
+    };
+
+    if (data.audience === "Specific Students") {
+      const checkboxes = document.querySelectorAll(".ann-student-cb:checked");
+      data.targetStudentIds = Array.from(checkboxes).map(cb => cb.value);
+      if (data.targetStudentIds.length === 0) {
+        window.showToast(window.t ? window.t('Please select at least one student.') || "Please select at least one student." : "Please select at least one student.", "error");
+        if (btn) { btn.disabled = false; btn.textContent = "Schedule"; }
+        return;
+      }
+    }
+
+    const res = await createAnnouncement(data);
     
-    document.getElementById("announcement-modal").close();
-    document.getElementById("announcement-form").reset();
-  } else {
-    window.showToast(window.t ? window.t('Error: ') || "Error: " : "Error: " + res.error, "error");
+    if (btn) { btn.disabled = false; btn.textContent = "Schedule"; }
+
+    if (res.success) {
+      window.showToast(window.t ? window.t('Announcement scheduled successfully!') || "Announcement scheduled successfully!" : "Announcement scheduled successfully!", "success");
+      
+      const modal = document.getElementById("announcement-modal");
+      if (modal && typeof modal.close === "function") modal.close();
+      const form = document.getElementById("announcement-form");
+      if (form && typeof form.reset === "function") form.reset();
+
+      // Automatically switch to Broadcast Announcements tab so user sees the newly sent announcement!
+      if (typeof window.switchNotifTab === "function") {
+        window.switchNotifTab("broadcasts");
+      } else {
+        currentNotifTab = "broadcasts";
+        renderAnnouncementList();
+      }
+    } else {
+      window.showToast(window.t ? window.t('Error: ') || "Error: " : "Error: " + res.error, "error");
+    }
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = "Schedule"; }
+    console.error("[announcement] submit failed:", err);
+    window.showToast("Failed to schedule announcement: " + (err.message || err), "error");
   }
 };
 

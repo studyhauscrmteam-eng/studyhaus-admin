@@ -4,14 +4,74 @@ import { db } from "../firebase/firebase.js";
 // Hover card bridge — the shared photo+name card lives in seatMapUI.js.
 // Pass-through with JS-safe string escaping for inline attributes.
 const escJs = (v) => String(v == null ? "" : v).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-window.__liveSeatHoverShow = (studentId, studentName, seatNumber, status, el, floor) => {
-  window.__seatHoverShow({
-    assignedStudentId: studentId,
-    assignedStudentName: studentName,
+window.__liveSeatHoverShow = (arg1, arg2, arg3, arg4, arg5, arg6) => {
+  let seatNumber, floor, el, attStudentId, attStudentName, status;
+  if (arg3 && typeof arg3 === "object" && arg3.nodeType) {
+    seatNumber = arg1; floor = arg2; el = arg3; attStudentId = arg4; attStudentName = arg5;
+  } else {
+    attStudentId = arg1; attStudentName = arg2; seatNumber = arg3; status = arg4; el = arg5; floor = arg6;
+  }
+  const normFloor = floor || currentFloor;
+  const found = allSeats.find(s => String(s.seatNumber) === String(seatNumber) && (s.floor || "Ground Floor") === normFloor);
+  const seatObj = found ? { ...found } : {
     seatNumber: seatNumber,
-    floor: floor || currentFloor,
-    status: status,
-  }, el);
+    floor: normFloor,
+    status: status || (attStudentId ? "Occupied" : "Available"),
+    assignedStudentName: "None",
+    rotationalEligibility: "both"
+  };
+  if (attStudentId) {
+    seatObj.currentOccupantId = attStudentId;
+    seatObj.currentOccupantName = attStudentName || "Student";
+    seatObj.status = "Occupied";
+    if (seatObj.assignedStudentId && seatObj.assignedStudentId === attStudentId) {
+      seatObj.occupantType = "fixed";
+    } else {
+      seatObj.occupantType = "rotational";
+    }
+  } else {
+    if (seatObj.status !== "Occupied" && seatObj.status !== "Conflict") {
+      seatObj.currentOccupantId = null;
+      seatObj.currentOccupantName = null;
+      seatObj.occupantType = null;
+    }
+  }
+  if (typeof window.__seatHoverShow === "function") {
+    window.__seatHoverShow(seatObj, el);
+  }
+};
+
+window.handleLiveSeatClick = async (studentId, studentName, seatNumber, seatFloor, attId, event) => {
+  if (event) event.stopPropagation();
+  const confirmed = await window.showCustomConfirm(
+    "Force Check-Out Occupant",
+    `Check out <b>${studentName || "student"}</b> from Seat ${seatNumber} (${seatFloor}) now?<br><br>This will record their check-out time and free up the seat immediately.`
+  );
+  if (!confirmed) return;
+
+  try {
+    const { forceCheckOutStudent } = await import("./attendanceService.js");
+    const res = await forceCheckOutStudent({
+      studentId: studentId,
+      studentName: studentName,
+      seatNumber: seatNumber,
+      seatFloor: seatFloor,
+      attendanceId: attId
+    });
+    if (res.success) {
+      if (typeof window.showToast === "function") {
+        window.showToast(res.message || `Checked out ${studentName || 'student'} successfully.`);
+      }
+    } else {
+      if (typeof window.showToast === "function") {
+        window.showToast(res.error || "Failed to check out.", "error");
+      }
+    }
+  } catch (err) {
+    if (typeof window.showToast === "function") {
+      window.showToast("Checkout error: " + err.message, "error");
+    }
+  }
 };
 
 // State
@@ -79,7 +139,7 @@ const normalizeSeatNumber = (value) => {
 // Floor normalizer so "Ground", "ground-floor", "First Floor", etc. match reliably
 const normalizeFloor = (value) => {
   const raw = String(value == null ? "" : value).trim().toLowerCase();
-  if (raw.includes("first") || raw.includes("1st") || raw === "1" || raw.startsWith("b")) {
+  if (raw.includes("first") || raw.includes("1st") || raw === "1" || raw.startsWith("b") || raw.includes("prem")) {
     return "First Floor";
   }
   return "Ground Floor";
@@ -354,10 +414,11 @@ const renderLiveMap = () => {
       return normalizeFloor(attFloor) === targetFloorNorm;
     });
 
-    if (att) {
-      // PRESENT — show photo or colored initial avatar
-      const name = att.studentName || '?';
-      const firstName = name.split(' ')[0];
+    const isOccupied = !!att || seat.status === "Occupied" || !!seat.currentOccupantId;
+    if (isOccupied) {
+      const occStudentId = att?.studentId || seat.currentOccupantId || seat.assignedStudentId || "";
+      const name = att?.studentName || seat.currentOccupantName || seat.assignedStudentName || "Occupant";
+      const firstName = name.split(" ")[0];
       const initial = firstName.charAt(0).toUpperCase();
 
       const colors = [
@@ -367,15 +428,16 @@ const renderLiveMap = () => {
 
       // Check-in time badge
       let checkInTime = '';
-      if (att.checkIn) {
-        const t = new Date(att.checkIn);
-        const hh = String(t.getHours()).padStart(2,'0');
-        const mm = String(t.getMinutes()).padStart(2,'0');
+      const rawTime = att?.checkIn || seat.currentCheckInTime;
+      if (rawTime) {
+        const t = new Date(rawTime);
+        const hh = String(t.getHours()).padStart(2, '0');
+        const mm = String(t.getMinutes()).padStart(2, '0');
         checkInTime = `${hh}:${mm}`;
       }
 
-      // Use real photo if available, else initial avatar
-      const photoUrl = studentPhotos[att.studentId];
+      // Real photo or initial avatar
+      const photoUrl = studentPhotos[occStudentId] || seat.currentOccupantPhoto;
       const avatarHtml = photoUrl
         ? `<img src="${photoUrl}" alt="${name}"
             style="width:28px; height:28px; border-radius:50%; object-fit:cover;
@@ -388,14 +450,17 @@ const renderLiveMap = () => {
                        font-size:12px; font-weight:700; flex-shrink:0;">${initial}</div>`;
 
       const ps = livePresentStyle();
+      const clickAttr = `onclick="window.handleLiveSeatClick('${escJs(occStudentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', '${escJs(seatFloor)}', '${escJs(att?.id || seat.currentSessionId || '')}', event)"`;
       return `
         <div style="background:${ps.bg}; border:${ps.border}; color:${ps.color}; border-radius:10px;
                  width:100%; height:70px; box-sizing:border-box;
                  display:flex; flex-direction:column; align-items:center;
-                 justify-content:center; gap:2px; cursor:default; overflow:hidden; padding:4px;
-                 box-shadow:0 1px 3px rgba(239,68,68,0.12); position:relative;"
-             onmouseenter="window.__liveSeatHoverShow('${escJs(att.studentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this, '${escJs(seatFloor)}')"
-             onmouseleave="window.__seatHoverHide()">
+                 justify-content:center; gap:2px; cursor:pointer; overflow:hidden; padding:4px;
+                 box-shadow:0 1px 3px rgba(239,68,68,0.12); position:relative; transition:transform 0.15s, box-shadow 0.15s;"
+             ${clickAttr}
+             title="Occupied by ${name} (Seat ${seatNumStr}) — Click to check out"
+             onmouseenter="this.style.transform='scale(1.04)'; window.__liveSeatHoverShow('${escJs(occStudentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this, '${escJs(seatFloor)}')"
+             onmouseleave="this.style.transform='scale(1)'; window.__seatHoverHide()">
           <div style="position:absolute; top:4px; left:4px; font-size:9px; font-weight:700; color:${ps.sub}; line-height:1;">${seatNumStr}</div>
           <div style="display:flex; align-items:center; justify-content:center; position:relative; margin-top:6px;">
             ${avatarHtml}
@@ -418,9 +483,7 @@ const renderLiveMap = () => {
     const statusTag = (seat.status !== "Available")
       ? `<div style="position:absolute; top:4px; left:4px; font-size:8px; font-weight:700; line-height:1; opacity:0.8;">${seat.status}</div>`
       : "";
-    const hoverAttrs = seat.assignedStudentId
-      ? `onmouseenter="window.__liveSeatHoverShow('${escJs(seat.assignedStudentId)}', '${escJs(seat.assignedStudentName)}', '${escJs(seatNumStr)}', '${escJs(seat.status)}', this, '${escJs(seatFloor)}')" onmouseleave="window.__seatHoverHide()"`
-      : "";
+    const hoverAttrs = `onmouseenter="window.__liveSeatHoverShow(null, null, '${escJs(seatNumStr)}', '${escJs(seat.status)}', this, '${escJs(seatFloor)}')" onmouseleave="window.__seatHoverHide()"`;
     return `
       <div style="background:${st.bg}; border:${st.border}; color:${st.color}; border-radius:10px;
                   width:100%; height:70px; box-sizing:border-box;

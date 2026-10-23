@@ -2,6 +2,7 @@ import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPaymen
 import { ROLES, hasPermission } from "../auth/roles.js";
 import { doc, getDoc, getDocs, collection, query, where } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
+import { openProofViewer } from "./proofViewer.js";
 
 let allPayments = [];
 let unsubscribe = null;
@@ -43,7 +44,7 @@ const isRenewalRecord = (p) => {
   return false;
 };
 
-// ── Payment screenshot viewer — supports data URL, HTTP/HTTPS and blob ──
+// ── Payment screenshot viewer with enlarge, zoom, rotate, and drag pan ──
 window.viewPaymentScreenshots = async (paymentId) => {
   let shots = [];
   const local = allPayments.find(p => p.id === paymentId);
@@ -61,53 +62,10 @@ window.viewPaymentScreenshots = async (paymentId) => {
   }
   if (!shots.length) return window.showToast("No screenshot proof attached to this payment.", "warning");
 
-  let idx = 0;
-  const old = document.getElementById("pss-modal");
-  if (old) old.remove();
-
-  const dialog = document.createElement("dialog");
-  dialog.id = "pss-modal";
-  dialog.className = "card smooth-modal";
-  dialog.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 18px 45px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(560px, 94vw); margin:auto;";
-  dialog.innerHTML = `
-    <div style="padding:1.25rem 1.5rem;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
-        <h3 style="margin:0; font-size:1.05rem; font-weight:700;">Payment Screenshot Proof</h3>
-        <button class="btn btn-ghost" id="pss-close" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer;">✕</button>
-      </div>
-      <div id="pss-stage" style="text-align:center; background:var(--bg-hover); border-radius:10px; overflow:hidden; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; min-height:220px; max-height:65vh; padding:10px;"></div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.75rem;">
-        ${shots.length > 1 ? `
-        <div style="display:flex; gap:0.5rem; align-items:center;">
-          <button class="btn btn-secondary" id="pss-prev" style="padding:0.35rem 0.75rem; font-size:12px;">← Prev</button>
-          <span id="pss-count" style="font-size:12px; color:var(--text-muted);"></span>
-          <button class="btn btn-secondary" id="pss-next" style="padding:0.35rem 0.75rem; font-size:12px;">Next →</button>
-        </div>` : `<div></div>`}
-        <a class="btn btn-primary" id="pss-download" download="payment-proof.jpg" href="${shots[0]}" style="text-decoration:none; padding:7px 16px; font-size:12.5px;">Download Proof</a>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(dialog);
-  const stage = dialog.querySelector("#pss-stage");
-  const dl = dialog.querySelector("#pss-download");
-  const paint = () => {
-    stage.innerHTML = `<img src="${shots[idx]}" alt="Payment screenshot ${idx + 1}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'padding:2.5rem; color:var(--text-muted); font-size:13px; text-align:center;\\'>Screenshot proof could not be loaded</div>';" style="width:100%; height:auto; max-height:65vh; object-fit:contain; display:block; border-radius:8px;" />`;
-    if (dl) dl.href = shots[idx];
-    const c = dialog.querySelector("#pss-count");
-    if (c) c.textContent = `${idx + 1} of ${shots.length}`;
-    const prev = dialog.querySelector("#pss-prev");
-    const next = dialog.querySelector("#pss-next");
-    if (prev) prev.disabled = idx === 0;
-    if (next) next.disabled = idx === shots.length - 1;
-  };
-  paint();
-  dialog.querySelector("#pss-close").onclick = () => dialog.close();
-  const prevBtn = dialog.querySelector("#pss-prev");
-  const nextBtn = dialog.querySelector("#pss-next");
-  if (prevBtn) prevBtn.onclick = () => { if (idx > 0) { idx--; paint(); } };
-  if (nextBtn) nextBtn.onclick = () => { if (idx < shots.length - 1) { idx++; paint(); } };
-  dialog.addEventListener("close", () => dialog.remove());
-  dialog.showModal();
+  openProofViewer({
+    sources: shots,
+    title: "Payment Screenshot Proof"
+  });
 };
 
 /**
@@ -784,12 +742,20 @@ const renderPaymentAdminTable = () => {
               </button>
               <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 8px; color:var(--danger); border-radius:6px;" title="Reject Request">✕</button>
             ` : `
-              ${hasProof ? `
-                <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11.5px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-                  <span>Proof</span>
-                </button>
-              ` : `<span style="font-size:11px; color:var(--text-muted);">—</span>`}
+              <div style="display:inline-flex; align-items:center; gap:6px;">
+                ${(!isPending && !isRejected) ? `
+                  <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="font-size:11.5px; padding:4px 8px; border-radius:6px; font-weight:600; display:inline-flex; align-items:center; gap:4px;" title="Download E-Invoice PDF">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>Invoice</span>
+                  </button>
+                ` : ''}
+                ${hasProof ? `
+                  <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11.5px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    <span>Proof</span>
+                  </button>
+                ` : ''}
+              </div>
             `}
           </div>
         </td>
@@ -798,6 +764,33 @@ const renderPaymentAdminTable = () => {
   });
 
   tbody.innerHTML = html;
+};
+
+window.downloadAdminPaymentInvoice = async (paymentId) => {
+  const r = allPayments.find(p => p.id === paymentId);
+  if (!r) return window.showToast ? window.showToast("Payment record not found.", "error") : alert("Payment record not found.");
+  try {
+    if (window.showToast) window.showToast("Generating E-Invoice PDF...", "info");
+    const { generateInvoicePDF } = await import("./pdfService.js");
+    const rawDate = r.date || r.paymentDate || (r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000).toLocaleDateString() : new Date().toLocaleDateString());
+    await generateInvoicePDF({
+      invoiceNo: `INV-${String(r.id || Date.now()).slice(-8).toUpperCase()}`,
+      date: typeof rawDate === "string" ? rawDate : new Date(rawDate).toLocaleDateString(),
+      studentName: r.studentName || "Student",
+      studentId: r.studentId || "—",
+      studentPhone: r.phone || r.studentPhone || "—",
+      studentEmail: r.email || r.studentEmail || (typeof allStudents !== "undefined" ? (allStudents.find(s => s.id === r.studentId || s.studentId === r.studentId)?.email) : "") || "",
+      seatNumber: r.seatNumber || "",
+      seatFloor: r.seatFloor || "Ground Floor",
+      planName: r.planName || "Library Reading Membership",
+      period: (r.startDate && r.endDate) ? `${r.startDate} to ${r.endDate}` : (r.monthLabel || "Monthly"),
+      paymentMode: r.paymentMethod || r.mode || "UPI",
+      transactionId: r.transactionId || "—",
+      amount: r.amount || 0
+    });
+  } catch (e) {
+    if (window.showToast) window.showToast("Failed to generate invoice: " + e.message, "error");
+  }
 };
 
 // Export functions

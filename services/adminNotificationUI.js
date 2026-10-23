@@ -3,7 +3,7 @@ import { listenToAdminNotifications } from "./notificationService.js";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
-const BASE_TITLE = document.title || "Studyhaus — Reading Space CRM";
+const BASE_TITLE = document.title || "Shreeji Library — Reading Space CRM";
 let firstSnapshot = true;
 let knownIds = new Set();
 

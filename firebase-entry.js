@@ -42,8 +42,14 @@ window.renderRenewalHistory = renderRenewalHistory;
 window.openReportViewer = openReportViewer;
 window.closeReportViewer = closeReportViewer;
 
+// Expose forceCheckOutStudent globally
+import { forceCheckOutStudent } from "./services/attendanceService.js";
+window.forceCheckOutStudent = forceCheckOutStudent;
+
 // Expose Document Upload logic globally
 import { uploadGlobalDocument, loadGlobalDocuments, loadAllStudentDocuments, downloadBase64File } from "./services/documentUploadService.js";
+import { openProofViewer } from "./services/proofViewer.js";
+window.openProofViewer = openProofViewer;
 window.uploadGlobalDocument = uploadGlobalDocument;
 window.loadGlobalDocuments = loadGlobalDocuments;
 window.loadAllStudentDocuments = loadAllStudentDocuments;

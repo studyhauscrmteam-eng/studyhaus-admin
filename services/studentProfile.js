@@ -153,14 +153,12 @@ export const initStudentManagementUI = async () => {
     return;
   }
 
-  // Load plans for edit dropdown
-  try {
-    availablePlans = await fetchPlansForDropdown(false);
-  } catch (e) {
-    console.error("Could not fetch plans", e);
-  }
+  // Load plans for edit dropdown in background without blocking table load
+  fetchPlansForDropdown(false)
+    .then(plans => { availablePlans = plans || []; })
+    .catch(e => console.error("Could not fetch plans:", e));
 
-  // Start Listener
+  // Start Listener immediately
   tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Loading students...</td></tr>`;
   
   listenToAllStudents((data) => {
@@ -1143,6 +1141,32 @@ window.triggerWhatsAppModal = (id) => {
 
   if (window.openWhatsAppModal) {
     window.openWhatsAppModal(studentData);
+  }
+};
+
+window.handleAdminForceCheckOutStudent = async (studentId, studentName) => {
+  const confirmed = await window.showCustomConfirm(
+    "Force Check-Out Student",
+    `Force check-out <b>${studentName || "this student"}</b> now?<br><br>This will record their check-out time and clear their library check-in session.`
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById("sp-btn-checkout");
+  if (btn) { btn.disabled = true; btn.textContent = "Checking out..."; }
+
+  try {
+    const { forceCheckOutStudent } = await import("./attendanceService.js");
+    const res = await forceCheckOutStudent({ studentId });
+    if (res.success) {
+      window.showToast && window.showToast(res.message || `Successfully checked out ${studentName}.`, "success");
+      if (btn) { btn.textContent = "Checked Out"; }
+    } else {
+      window.showToast && window.showToast("Checkout failed: " + res.error, "error");
+      if (btn) { btn.disabled = false; btn.textContent = "Check Out"; }
+    }
+  } catch (e) {
+    window.showToast && window.showToast("Checkout error: " + e.message, "error");
+    if (btn) { btn.disabled = false; btn.textContent = "Check Out"; }
   }
 };
 

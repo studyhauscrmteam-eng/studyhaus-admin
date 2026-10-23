@@ -105,60 +105,77 @@ export const initAuthGuard = () => {
           // Redirect logged-in users away from login page to their dashboard
           window.location.href = getRedirectUrlForRole(role);
         } else {
-          // ── Resolve display name ──────────────────────────────────────
-          // Priority: Firestore name → email prefix → "User"
-          let userDoc2 = null;
-          const actualDocId = localStorage.getItem("userId") || user.uid;
-          try {
-            userDoc2 = await getDocument("students", actualDocId);
-            if (!userDoc2) userDoc2 = await getDocument("users", actualDocId);
-            if (!userDoc2) userDoc2 = await getDocument("users", user.uid);
-          } catch (_) { }
+          // ── Fast Unblock & Route Protection ────────────────────────
+          protectRoute(role, currentPath);
 
-          if (userDoc2 && (userDoc2.status === "disabled" || userDoc2.status === "Inactive" || userDoc2.status === "Old" || userDoc2.status === "Old Student")) {
-            localStorage.setItem("forceUnauthorized", "true");
-            await logout();
-            return;
-          }
-
-          const displayName = (userDoc2 && userDoc2.name)
-            ? userDoc2.name
-            : (user.email ? user.email.split("@")[0] : "User");
-
-          // Initials for avatar (e.g. "Admin User" → "AU")
-          const initials = displayName
-            .split(" ")
-            .filter(Boolean)
-            .slice(0, 2)
-            .map(w => w[0].toUpperCase())
-            .join("") || "?";
-
-          // Time-based greeting
-          const hour = new Date().getHours();
-          const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-
-          // ── Update DOM ────────────────────────────────────────────────
-          const nameEl = document.getElementById("current-user-name");
-          const topbarNameEl = document.getElementById("topbar-user-name");
+          // Fast-render user role and cached greeting immediately (0ms delay)
           const roleEl = document.getElementById("current-user-role");
           const topbarRoleEl = document.getElementById("topbar-user-role");
-          const avatarEl = document.getElementById("current-user-avatar");
-          const topbarAvatarEl = document.getElementById("topbar-user-avatar");
-          const greetEl = document.getElementById("dashboard-greeting");
-
-          if (nameEl) nameEl.textContent = displayName;
-          if (topbarNameEl) topbarNameEl.textContent = displayName;
           if (roleEl) roleEl.textContent = role;
           if (topbarRoleEl) topbarRoleEl.textContent = role;
-          // Don't clobber a photo avatar already rendered by the portal —
-          // only write initials into text-only placeholders.
-          if (avatarEl && !avatarEl.querySelector("img")) avatarEl.textContent = initials;
-          if (topbarAvatarEl && !topbarAvatarEl.querySelector("img")) topbarAvatarEl.textContent = initials;
-          if (greetEl) greetEl.textContent = `${timeGreeting}, ${displayName.split(" ")[0]}!`;
 
-          // If on a protected page, check permissions
-          protectRoute(role, currentPath);
+          const cachedName = localStorage.getItem("userName");
+          if (cachedName) {
+            const nameEl = document.getElementById("current-user-name");
+            const topbarNameEl = document.getElementById("topbar-user-name");
+            const greetEl = document.getElementById("dashboard-greeting");
+            if (nameEl) nameEl.textContent = cachedName;
+            if (topbarNameEl) topbarNameEl.textContent = cachedName;
+            const hour = new Date().getHours();
+            const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+            if (greetEl) greetEl.textContent = `${timeGreeting}, ${cachedName.split(" ")[0]}!`;
+          }
+
+          // Unblock the page immediately — don't make the user wait on Firestore!
           if (loader) loader.style.display = "none";
+
+          // ── Resolve display name in background (non-blocking) ──────
+          (async () => {
+            let userDoc2 = null;
+            const actualDocId = localStorage.getItem("userId") || user.uid;
+            try {
+              if (role === "Student") {
+                userDoc2 = await getDocument("students", actualDocId);
+              } else {
+                userDoc2 = await getDocument("users", actualDocId);
+                if (!userDoc2) userDoc2 = await getDocument("users", user.uid);
+              }
+            } catch (_) { }
+
+            if (userDoc2 && (userDoc2.status === "disabled" || userDoc2.status === "Inactive" || userDoc2.status === "Old" || userDoc2.status === "Old Student")) {
+              localStorage.setItem("forceUnauthorized", "true");
+              await logout();
+              return;
+            }
+
+            const displayName = (userDoc2 && userDoc2.name)
+              ? userDoc2.name
+              : (user.email ? user.email.split("@")[0] : (cachedName || "User"));
+
+            localStorage.setItem("userName", displayName);
+
+            const initials = displayName
+              .split(" ")
+              .filter(Boolean)
+              .slice(0, 2)
+              .map(w => w[0].toUpperCase())
+              .join("") || "?";
+
+            const hour = new Date().getHours();
+            const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+            const nameEl = document.getElementById("current-user-name");
+            const topbarNameEl = document.getElementById("topbar-user-name");
+            const avatarEl = document.getElementById("current-user-avatar");
+            const topbarAvatarEl = document.getElementById("topbar-user-avatar");
+            const greetEl = document.getElementById("dashboard-greeting");
+
+            if (nameEl) nameEl.textContent = displayName;
+            if (topbarNameEl) topbarNameEl.textContent = displayName;
+            if (avatarEl && !avatarEl.querySelector("img")) avatarEl.textContent = initials;
+            if (topbarAvatarEl && !topbarAvatarEl.querySelector("img")) topbarAvatarEl.textContent = initials;
+            if (greetEl) greetEl.textContent = `${timeGreeting}, ${displayName.split(" ")[0]}!`;
+          })();
         }
       } catch (error) {
         console.error("Auth Guard Error:", error);

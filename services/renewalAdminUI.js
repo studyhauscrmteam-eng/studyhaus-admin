@@ -3,6 +3,7 @@ import { fetchPlansForDropdown } from "./admissionService.js";
 import { listenToMyPayments } from "./paymentService.js";
 import { db } from "../firebase/firebase.js";
 import { collection, addDoc, setDoc, deleteDoc, getDocs, query, where, doc, getDoc, serverTimestamp } from "firebase/firestore";
+import { openProofViewer } from "./proofViewer.js";
 
 let availablePlans = [];
 
@@ -486,38 +487,14 @@ window.submitRenewal = async (studentId, oldPlanName) => {
   }
 };
 
-// Global proof viewer modal for Admin
+// Global proof viewer modal for Admin with enlarge, zoom, and rotate
 window.viewAdminProofModal = (dataUrl, title = "Payment Screenshot Proof") => {
-  const isValidImage = (u) => typeof u === "string" && (u.startsWith("data:image/") || u.startsWith("http://") || u.startsWith("https://") || u.startsWith("blob:"));
+  const isValidImage = (u) => typeof u === "string" && (u.startsWith("data:image/") || u.startsWith("http://") || u.startsWith("https://") || u.startsWith("blob:") || u.startsWith("data:application/pdf"));
   if (!isValidImage(dataUrl)) {
     if (window.showToast) window.showToast("No valid screenshot proof available for this payment.", "warning");
     return;
   }
-  const old = document.getElementById("admin-proof-modal");
-  if (old) old.remove();
-
-  const dialog = document.createElement("dialog");
-  dialog.id = "admin-proof-modal";
-  dialog.className = "card smooth-modal";
-  dialog.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 18px 45px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(560px, 94vw); margin:auto;";
-  dialog.innerHTML = `
-    <div style="padding:1.25rem 1.5rem;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
-        <h3 style="margin:0; font-size:1.05rem; font-weight:700;">${title}</h3>
-        <button class="btn btn-ghost" id="apm-close" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer;">✕</button>
-      </div>
-      <div style="text-align:center; background:var(--bg-hover); border-radius:10px; overflow:hidden; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; min-height:220px; max-height:65vh; padding:10px;">
-        <img src="${dataUrl}" alt="Proof" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'padding:2.5rem; color:var(--text-muted); font-size:13px; text-align:center;\\'>⚠️ Screenshot proof could not be loaded</div>';" style="width:100%; height:auto; max-height:65vh; object-fit:contain; display:block; border-radius:8px;" />
-      </div>
-      <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
-        <a class="btn btn-primary" download="payment-proof.jpg" href="${dataUrl}" style="text-decoration:none; padding:7px 16px; font-size:13px;">Download Proof</a>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(dialog);
-  dialog.querySelector("#apm-close").onclick = () => dialog.close();
-  dialog.addEventListener("close", () => dialog.remove());
-  dialog.showModal();
+  openProofViewer({ sources: [dataUrl], title });
 };
 
 /**

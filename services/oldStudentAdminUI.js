@@ -168,7 +168,7 @@ const renderOldStudents = (canRestore, canErase) => {
     if (!first) return;
     const second = await window.showCustomConfirm("Final Confirmation", `Really erase <b>${name}</b> forever?`, "Delete Forever", true);
     if (!second) return;
-    const res = await permanentlyDeleteStudent(id);
+    const res = await permanentlyDeleteStudent(id, { fullWipe: true });
     if (res.success) window.showToast(`Permanently deleted ${name}.`, "success");
     else window.showToast("Error: " + res.error, "error");
   };
@@ -188,6 +188,7 @@ const renderOldStudents = (canRestore, canErase) => {
             <div>
               <div class="name" style="text-decoration:underline dotted; text-underline-offset:3px;">${s.name || "Unknown"}</div>
               <div class="sub-text">${s.phone || "No Phone"}</div>
+              <span class="badge" style="background:rgba(239,68,68,0.1); color:#dc2626; border:1px solid rgba(239,68,68,0.25); font-size:10px; margin-top:3px; display:inline-block; padding:1px 6px;">Portal Access Disabled</span>
             </div>
           </div>
         </td>

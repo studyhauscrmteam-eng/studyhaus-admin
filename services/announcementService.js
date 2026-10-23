@@ -6,22 +6,62 @@ import { db } from "../firebase/firebase.js";
  */
 export const createAnnouncement = async (data) => {
   try {
+    const title = String(data?.title || "").trim();
+    const message = String(data?.message || "").trim();
+    if (!title || !message) {
+      return { success: false, error: "Title and message are required." };
+    }
+
+    const audience = data.audience || "All Students";
     const announcementData = {
-      title: data.title,
-      message: data.message,
-      audience: data.audience || "All Students", // "All Students", "Active Only", etc.
+      title,
+      message,
+      audience,
       scheduledFor: data.scheduledFor || null, // Optional future date
       type: data.type || "info", // "info", "warning", "success"
-      createdBy: data.createdBy,
+      createdBy: data.createdBy || "Admin",
       createdAt: serverTimestamp(),
       status: "Active"
     };
 
-    if (data.targetStudentIds && data.audience === "Specific Students") {
+    if (data.targetStudentIds && audience === "Specific Students") {
       announcementData.targetStudentIds = data.targetStudentIds;
     }
 
     const docRef = await addDoc(collection(db, "announcements"), announcementData);
+
+    // Also mirror to notifications collection so bell badge, Alerts tab, and targeted recipients receive it
+    try {
+      const notifPayload = {
+        type: data.type || "info",
+        title,
+        body: message,
+        message,
+        audience,
+        read: false,
+        announcementId: docRef.id,
+        createdAt: serverTimestamp()
+      };
+
+      if (audience === "Staff") {
+        notifPayload.forRoles = ["Owner/Admin", "Manager", "Employee"];
+        await addDoc(collection(db, "notifications"), notifPayload);
+      } else if (audience === "Specific Students" && Array.isArray(data.targetStudentIds)) {
+        for (const sid of data.targetStudentIds.slice(0, 50)) {
+          await addDoc(collection(db, "notifications"), {
+            ...notifPayload,
+            studentId: sid,
+            recipientId: sid
+          });
+        }
+      } else {
+        notifPayload.forRoles = ["Owner/Admin", "Manager"];
+        await addDoc(collection(db, "notifications"), notifPayload);
+      }
+    } catch (notifErr) {
+      console.warn("[announcements] notification mirror write:", notifErr?.message || notifErr);
+    }
+
     return { success: true, id: docRef.id };
   } catch (error) {
     console.error("Error creating announcement:", error);

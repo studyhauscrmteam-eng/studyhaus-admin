@@ -48,6 +48,45 @@ export const docIdForSeat = (floor, number) => {
   return (String(floor) === "First Floor" ? `first-${n}` : `ground-${n}`);
 };
 
+/**
+ * Format seat display code:
+ * Ground Floor: L-<num> for fixed, LR-<num> for rotational day, LN-<num> for rotational night
+ * First Floor: P-<num> for fixed, PR-<num> for rotational day, PN-<num> for rotational night
+ * Options:
+ *  - pad3: boolean (e.g. "L-005")
+ *  - rotationalEligibility: "day" | "night" | "both"
+ */
+export const formatSeatCode = (seatNumber, floor = "Ground Floor", planOrType = "", options = {}) => {
+  if (!seatNumber) return "";
+  const s = String(seatNumber).trim();
+  const existingPref = s.match(/^(LR|LN|PR|PN|L|P)-?(\d+)$/i);
+  if (existingPref) {
+    const numPart = options.pad3 ? String(existingPref[2]).padStart(3, "0") : existingPref[2];
+    return `${existingPref[1].toUpperCase()}-${numPart}`;
+  }
+  const norm = normalizeSeatNumberPlain(s);
+  const numPart = options.pad3 ? String(norm).padStart(3, "0") : norm;
+  const isFirst = String(floor || "").toLowerCase().includes("first") || String(floor || "").toLowerCase().includes("premium");
+
+  const rotElig = options.rotationalEligibility || "";
+  if (rotElig === "day") return isFirst ? `PR-${numPart}` : `LR-${numPart}`;
+  if (rotElig === "night") return isFirst ? `PN-${numPart}` : `LN-${numPart}`;
+
+  const tp = String(planOrType || "").toLowerCase();
+  const isNight = tp.includes("night") || tp.includes("ln") || tp.includes("pn");
+  const isRotational = tp.includes("rotational") || tp.includes("rotation") || isNight || tp.includes("lr") || tp.includes("pr");
+
+  if (isFirst) {
+    if (isNight) return `PN-${numPart}`;
+    if (isRotational) return `PR-${numPart}`;
+    return `P-${numPart}`;
+  } else {
+    if (isNight) return `LN-${numPart}`;
+    if (isRotational) return `LR-${numPart}`;
+    return `L-${numPart}`;
+  }
+};
+
 /** Floor from a legacy A/B name ("A20"->Ground, "B15"->First), else null. */
 export const legacyFloorForName = (value) => {
   const raw = String(value == null ? "" : value).trim().toUpperCase().replace(/\s+/g, "");
@@ -89,8 +128,6 @@ export const seedInitialSeats = async () => {
 
   if (snap.empty) {
     console.log("Seeding library seat plan: 1-68 Ground Floor, 1-40 First Floor...");
-    // Single batched write (was 108 sequential round-trips) — the map
-    // appears in about a second instead of hanging on "0 seats".
     const batch = writeBatch(db);
     const plan = [
       { count: GROUND_SEAT_COUNT, floor: 'Ground Floor' },
@@ -101,18 +138,24 @@ export const seedInitialSeats = async () => {
       for (let i = 1; i <= count; i++) {
         const name = String(i);
         const pos = planPositionFor(floor, name) || {};
-        // Deterministic doc ID = floor + number (ground-20 / first-20):
-        // re-running seed overwrites the same docs instead of cloning
-        // duplicates. seatNumber itself is the plain number.
         batch.set(doc(seatsRef, docIdForSeat(floor, name)), {
           seatNumber: name,
           floor,
+          library: floor === "First Floor" ? "Shreeji Premium Reading Library" : "Shreeji Reading Library",
           col: pos.col ?? null,
           row: pos.row ?? null,
           status: "Available",
           assignedStudentId: null,
           assignedStudentName: null,
           planType: null,
+          rotationalEligibility: "both",
+          currentOccupantId: null,
+          currentOccupantName: null,
+          currentPlanName: null,
+          currentCheckInTime: null,
+          currentSessionId: null,
+          occupantType: null,
+          conflict: null,
           lastUpdated: serverTimestamp()
         });
       }
@@ -122,31 +165,27 @@ export const seedInitialSeats = async () => {
 };
 
 /**
- * Self-healing occupancy reconcile. Runs on every admin Seats page open.
- * Fixes the two mismatches that make counts lie against the map:
- *  1. GHOST occupied — seat says Occupied but no Active student claims it
- *     (stale after deletes/edits) → released to Available.
- *  2. UNMARKED claim — an Active student holds a seatNumber whose doc(s)
- *     still say Available (after rebuilds/direct edits) → marked Occupied
- *     with the student's name. Missing plan-valid docs are recreated.
- *  3. ORPHAN claim — an Active student holds a seat name that is not on the
- *     library plan at all → reported (returned) so the page can show WHY
- *     that student's seat can't appear on the map. Never auto-deleted here.
- * Never touches Reserved / Maintenance / Inactive seats, never edits student
- * docs. Best-effort: failures only log.
+ * Self-healing occupancy reconcile.
+ * Separates Physical Identity, Fixed Assignment, and Current Real-Time Occupancy:
+ *  1. Checks active fixed assignments from the students collection.
+ *  2. Checks genuine real-time occupancy from active attendance sessions today.
+ *  3. Preserves fixed assignments even when fixed students are absent or rotational guests are sitting.
+ *  4. Clears stale occupancy when attendance has ended without overwriting fixed ownership.
+ *
  * @returns {Promise<{released: number, claimed: number, orphans: Array}>}
  */
 export const reconcileSeatOccupancy = async () => {
   const empty = { released: 0, claimed: 0, orphans: [] };
   try {
-    const [seatsSnap, studentsSnap] = await Promise.all([
+    const [seatsSnap, studentsSnap, activeAttSnap] = await Promise.all([
       getDocs(collection(db, "seats")),
-      getDocs(query(collection(db, "students"), where("status", "==", "Active")))
+      getDocs(query(collection(db, "students"), where("status", "==", "Active"))),
+      getDocs(query(collection(db, "attendance"), where("status", "==", "Active")))
     ]);
     if (seatsSnap.empty) return empty;
 
-    // Active claims by floor-aware key ("Ground Floor||20").
-    const claims = new Map(); // key -> { id, name }
+    // Active fixed claims by floor-aware key ("Ground Floor||20")
+    const claims = new Map();
     studentsSnap.forEach(stu => {
       const data = stu.data() || {};
       const raw = data.seatNumber;
@@ -155,11 +194,34 @@ export const reconcileSeatOccupancy = async () => {
       const floor = data.seatFloor || legacyFloorForName(raw) || "Ground Floor";
       const key = seatKey(floor, n);
       if (!claims.has(key)) {
-        claims.set(key, { id: stu.id, name: data.name || "Student", planValid: PLAN_SEAT_NAMES.has(key), floor, number: n });
+        claims.set(key, {
+          id: stu.id,
+          name: data.name || "Student",
+          planName: data.planName || "Fixed Plan",
+          planValid: PLAN_SEAT_NAMES.has(key),
+          floor,
+          number: n
+        });
       }
     });
 
-    // Which floor-aware keys already have a doc.
+    // Active real-time occupancy from attendance sessions
+    const activeOccupants = new Map();
+    activeAttSnap.forEach(attDoc => {
+      const a = attDoc.data() || {};
+      if (!a.seatNumber) return;
+      const n = normalizePlanName(a.seatNumber);
+      const floor = a.seatFloor || "Ground Floor";
+      const key = seatKey(floor, n);
+      activeOccupants.set(key, {
+        sessionId: attDoc.id,
+        studentId: a.studentId,
+        studentName: a.studentName || "Student",
+        planName: a.planName || "",
+        checkIn: a.checkIn || Date.now()
+      });
+    });
+
     const present = new Set();
     seatsSnap.forEach(d => {
       const sd = d.data() || {};
@@ -172,37 +234,71 @@ export const reconcileSeatOccupancy = async () => {
     const batch = writeBatch(db);
     let released = 0, claimed = 0, created = 0;
     const orphans = [];
+
     seatsSnap.forEach(d => {
       const data = d.data() || {};
       const n = normalizePlanName(data.seatNumber);
       const floor = data.floor || legacyFloorForName(data.seatNumber) || "Ground Floor";
       const key = seatKey(floor, n);
-      if (!PLAN_SEAT_NAMES.has(key)) return; // non-plan docs: cleanup owns these
-      const claim = claims.get(key);
-      if (data.status === "Occupied" && !claim) {
+      if (!PLAN_SEAT_NAMES.has(key)) return;
+
+      const claim = claims.get(key); // Fixed-seat assignment
+      const activeOcc = activeOccupants.get(key); // Real-time occupant sitting right now
+
+      const desiredAssignedId = claim ? claim.id : null;
+      const desiredAssignedName = claim ? claim.name : null;
+      const desiredPlanType = claim ? claim.planName : null;
+
+      const desiredOccupantId = activeOcc ? activeOcc.studentId : null;
+      const desiredOccupantName = activeOcc ? activeOcc.studentName : null;
+      const desiredSessionId = activeOcc ? activeOcc.sessionId : null;
+      const desiredCheckInTime = activeOcc ? activeOcc.checkIn : null;
+      const desiredOccupantType = activeOcc
+        ? (claim && claim.id === activeOcc.studentId ? "fixed" : "rotational")
+        : null;
+
+      let desiredStatus = "Available";
+      if (data.status === "Maintenance" || data.status === "Inactive") {
+        desiredStatus = data.status;
+      } else if (data.status === "Conflict" && data.conflict) {
+        desiredStatus = "Conflict";
+      } else if (activeOcc) {
+        desiredStatus = "Occupied";
+      } else if (claim) {
+        desiredStatus = "Reserved"; // Fixed owner absent, available for rotational temporary use
+      }
+
+      // Check if update is needed
+      const needsUpdate =
+        data.status !== desiredStatus ||
+        data.assignedStudentId !== desiredAssignedId ||
+        data.assignedStudentName !== desiredAssignedName ||
+        data.currentOccupantId !== desiredOccupantId ||
+        data.currentOccupantName !== desiredOccupantName ||
+        data.occupantType !== desiredOccupantType;
+
+      if (needsUpdate) {
         batch.update(d.ref, {
-          status: "Available",
-          assignedStudentId: null,
-          assignedStudentName: null,
-          planType: null,
+          status: desiredStatus,
+          assignedStudentId: desiredAssignedId,
+          assignedStudentName: desiredAssignedName,
+          planType: desiredPlanType,
+          currentOccupantId: desiredOccupantId,
+          currentOccupantName: desiredOccupantName,
+          currentSessionId: desiredSessionId,
+          currentCheckInTime: desiredCheckInTime,
+          occupantType: desiredOccupantType,
+          rotationalEligibility: data.rotationalEligibility || "both",
+          library: floor === "First Floor" ? "Shreeji Premium Reading Library" : "Shreeji Reading Library",
           lastUpdated: serverTimestamp()
         });
-        released++;
-      } else if (data.status === "Available" && claim) {
-        // A student is assigned to this seat but it shows Available — fix it.
-        // Use "Reserved" (not "Occupied") because assignment means reservation;
-        // "Occupied" should only be set when the student actively checks in.
-        batch.update(d.ref, {
-          status: "Reserved",
-          assignedStudentId: claim.id,
-          assignedStudentName: claim.name,
-          lastUpdated: serverTimestamp()
-        });
-        claimed++;
+
+        if (data.status !== "Occupied" && desiredStatus === "Occupied") claimed++;
+        else if (data.status === "Occupied" && desiredStatus !== "Occupied") released++;
       }
     });
 
-    // Recreate missing docs for plan-valid claims (plan doc gone entirely).
+    // Recreate missing docs for plan-valid claims
     const seatsRef = collection(db, "seats");
     claims.forEach((claim, key) => {
       if (!claim.planValid) {
@@ -211,15 +307,24 @@ export const reconcileSeatOccupancy = async () => {
       }
       if (!present.has(key)) {
         const want = planPositionFor(claim.floor, claim.number) || {};
+        const activeOcc = activeOccupants.get(key);
         batch.set(doc(seatsRef, docIdForSeat(claim.floor, claim.number)), {
           seatNumber: claim.number,
           floor: claim.floor,
+          library: claim.floor === "First Floor" ? "Shreeji Premium Reading Library" : "Shreeji Reading Library",
           col: want.col ?? null,
           row: want.row ?? null,
-          status: "Reserved",
+          status: activeOcc ? "Occupied" : "Reserved",
           assignedStudentId: claim.id,
           assignedStudentName: claim.name,
-          planType: null,
+          planType: claim.planName,
+          rotationalEligibility: "both",
+          currentOccupantId: activeOcc ? activeOcc.studentId : null,
+          currentOccupantName: activeOcc ? activeOcc.studentName : null,
+          currentSessionId: activeOcc ? activeOcc.sessionId : null,
+          currentCheckInTime: activeOcc ? activeOcc.checkIn : null,
+          occupantType: activeOcc ? (activeOcc.studentId === claim.id ? "fixed" : "rotational") : null,
+          conflict: null,
           lastUpdated: serverTimestamp()
         });
         created++;
@@ -559,11 +664,13 @@ export const assignSeat = async (seatId, student) => {
     if (!snap.exists()) throw new Error("Seat not found.");
 
     validateSeatAssignment(snap.data());
+    const data = snap.data() || {};
+    // If seat already has a rotational occupant sitting, status stays Occupied
+    const nextStatus = data.currentOccupantId ? "Occupied" : "Reserved";
 
-    // Update Seat (students may self-reserve an Available seat under new rules)
     try {
       await updateDoc(seatRef, {
-        status: "Reserved", // It's assigned/reserved for this student
+        status: nextStatus,
         assignedStudentId: student.id,
         assignedStudentName: student.name,
         planType: student.planName || "Unknown",
@@ -577,16 +684,14 @@ export const assignSeat = async (seatId, student) => {
       throw e;
     }
 
-    // Also update Student profile so they know their seat.
-    // New self-admission users don't have a students/{uid} doc yet — skip quietly.
     try {
       const studentRef = doc(db, "students", student.id);
       await updateDoc(studentRef, {
-        seatNumber: normalizeSeatNumberPlain(snap.data().seatNumber),
-        seatFloor: (snap.data() || {}).floor || "Ground Floor",
+        seatNumber: normalizeSeatNumberPlain(data.seatNumber),
+        seatFloor: data.floor || "Ground Floor",
         updatedAt: serverTimestamp()
       });
-    } catch (_) { /* admission flow creates the doc moments later */ }
+    } catch (_) {}
 
     return { success: true };
   } catch (error) {
@@ -600,18 +705,19 @@ export const unassignSeat = async (seatId) => {
     const snap = await getDoc(seatRef);
     if (!snap.exists()) throw new Error("Seat not found.");
 
-    const data = snap.data();
+    const data = snap.data() || {};
     if (data.assignedStudentId) {
-      // Clear from student profile (best effort — doc may not exist yet)
       try {
         const studentRef = doc(db, "students", data.assignedStudentId);
         await updateDoc(studentRef, { seatNumber: null, seatFloor: null });
       } catch (_) {}
     }
 
-    // Reset Seat
+    // If seat has a rotational occupant sitting right now, status stays Occupied!
+    const nextStatus = data.currentOccupantId ? "Occupied" : "Available";
+
     await updateDoc(seatRef, {
-      status: "Available",
+      status: nextStatus,
       assignedStudentId: null,
       assignedStudentName: null,
       planType: null,
@@ -642,5 +748,214 @@ export const changeSeatStatus = async (seatId, newStatus) => {
       return { success: false, error: "Seat update denied. Please deploy the latest firestore.rules." };
     }
     return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Configure rotational eligibility for a physical chair ("both", "day", "night", "none")
+ */
+export const setSeatRotationalEligibility = async (seatId, eligibility) => {
+  try {
+    const valid = ["both", "day", "night", "none"];
+    if (!valid.includes(eligibility)) throw new Error("Invalid eligibility. Must be both, day, night, or none.");
+    await updateDoc(doc(db, "seats", seatId), {
+      rotationalEligibility: eligibility,
+      lastUpdated: serverTimestamp()
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+};
+
+/**
+ * Automatically finds an available alternative seat for safe reassignment.
+ */
+export const autoFindAlternativeSeat = async (floor = "Ground Floor", shift = "day") => {
+  try {
+    const seatsSnap = await getDocs(query(collection(db, "seats"), where("floor", "==", floor)));
+    const candidates = [];
+    seatsSnap.forEach(d => {
+      const s = d.data() || {};
+      if (s.status === "Maintenance" || s.status === "Inactive") return;
+      if (s.currentOccupantId) return; // already physically occupied
+      if (s.conflict) return;
+
+      const rot = s.rotationalEligibility || "both";
+      if (rot !== "both" && rot !== shift && rot !== "none") return;
+      if (rot === "none") return;
+
+      // Unassigned seats are preferred over absent fixed students' seats
+      const score = s.assignedStudentId ? 1 : 2;
+      candidates.push({ id: d.id, seatNumber: s.seatNumber, score });
+    });
+
+    candidates.sort((a, b) => b.score - a.score || Number(a.seatNumber) - Number(b.seatNumber));
+    return candidates.length > 0 ? candidates[0] : null;
+  } catch (_) {
+    return null;
+  }
+};
+
+/**
+ * Safe Rotational Reassignment Workflow:
+ * Moves a rotational occupant from fromSeatId to toSeatId.
+ * Updates the student's active attendance session.
+ * If fromSeat has a pending conflict with a waiting fixed owner, checks in the fixed owner!
+ */
+export const reassignRotationalOccupant = async (fromSeatId, toSeatId, options = {}) => {
+  try {
+    const fromRef = doc(db, "seats", fromSeatId);
+    const toRef = doc(db, "seats", toSeatId);
+
+    const [fromSnap, toSnap] = await Promise.all([getDoc(fromRef), getDoc(toRef)]);
+    if (!fromSnap.exists()) throw new Error("Source seat not found.");
+    if (!toSnap.exists()) throw new Error("Target seat not found.");
+
+    const fromData = fromSnap.data() || {};
+    const toData = toSnap.data() || {};
+
+    if (!fromData.currentOccupantId) {
+      throw new Error(`Seat ${fromData.seatNumber} does not have an active occupant.`);
+    }
+
+    if (toData.currentOccupantId || toData.status === "Occupied" || toData.status === "Maintenance" || toData.status === "Inactive") {
+      throw new Error(`Target Seat ${toData.seatNumber} (${toData.floor}) is not available.`);
+    }
+
+    const rotationalStudentId = fromData.currentOccupantId;
+    const rotationalStudentName = fromData.currentOccupantName || "Student";
+    const sessionId = fromData.currentSessionId;
+    const targetFloor = toData.floor || "Ground Floor";
+    const targetSeatNumber = toData.seatNumber;
+
+    const batch = writeBatch(db);
+
+    // 1. Move occupant to target seat
+    batch.update(toRef, {
+      currentOccupantId: rotationalStudentId,
+      currentOccupantName: rotationalStudentName,
+      currentPlanName: fromData.currentPlanName || null,
+      currentCheckInTime: fromData.currentCheckInTime || Date.now(),
+      currentSessionId: sessionId || null,
+      occupantType: "rotational",
+      status: "Occupied",
+      lastUpdated: serverTimestamp()
+    });
+
+    // 2. Update active attendance session
+    if (sessionId) {
+      try {
+        const attRef = doc(db, "attendance", sessionId);
+        batch.update(attRef, {
+          seatNumber: targetSeatNumber,
+          seatFloor: targetFloor,
+          reassignedFrom: fromData.seatNumber,
+          reassignedAt: serverTimestamp()
+        });
+      } catch (_) {}
+    }
+
+    // 3. Clear fromSeat or fulfill waiting fixed owner
+    const conflict = fromData.conflict;
+    if (conflict && conflict.fixedStudentId) {
+      const fixedId = conflict.fixedStudentId;
+      const fixedName = conflict.fixedStudentName || fromData.assignedStudentName || "Student";
+      
+      const newAttRef = doc(collection(db, "attendance"));
+      batch.set(newAttRef, {
+        studentId: fixedId,
+        studentName: fixedName,
+        seatNumber: fromData.seatNumber,
+        seatFloor: fromData.floor || "Ground Floor",
+        planName: fromData.planType || "Fixed Plan",
+        date: new Date().toISOString().slice(0, 10),
+        checkIn: Date.now(),
+        checkOut: null,
+        duration: 0,
+        status: "Active",
+        createdAt: serverTimestamp()
+      });
+
+      batch.update(fromRef, {
+        currentOccupantId: fixedId,
+        currentOccupantName: fixedName,
+        currentPlanName: fromData.planType || "Fixed Plan",
+        currentCheckInTime: Date.now(),
+        currentSessionId: newAttRef.id,
+        occupantType: "fixed",
+        status: "Occupied",
+        conflict: null,
+        lastUpdated: serverTimestamp()
+      });
+
+      // Notify the fixed owner
+      try {
+        const notifRef = doc(collection(db, "notifications"));
+        batch.set(notifRef, {
+          studentId: fixedId,
+          title: "Seat Ready",
+          message: `Your assigned Seat ${fromData.seatNumber} (${fromData.floor || 'Ground Floor'}) is now ready and you are checked in. Welcome!`,
+          type: "seat_ready",
+          createdAt: serverTimestamp(),
+          unread: true
+        });
+      } catch (_) {}
+    } else {
+      batch.update(fromRef, {
+        currentOccupantId: null,
+        currentOccupantName: null,
+        currentPlanName: null,
+        currentCheckInTime: null,
+        currentSessionId: null,
+        occupantType: null,
+        conflict: null,
+        status: fromData.assignedStudentId ? "Reserved" : "Available",
+        lastUpdated: serverTimestamp()
+      });
+    }
+
+    // 4. Notify the reassigned rotational student
+    try {
+      const notifRef = doc(collection(db, "notifications"));
+      batch.set(notifRef, {
+        studentId: rotationalStudentId,
+        title: "Seat Reassigned",
+        message: `Your seat has been updated to Seat ${targetSeatNumber} (${targetFloor}). Thank you for your cooperation!`,
+        type: "seat_reassigned",
+        createdAt: serverTimestamp(),
+        unread: true
+      });
+    } catch (_) {}
+
+    await batch.commit();
+
+    return {
+      success: true,
+      message: `Reassigned ${rotationalStudentName} from Seat ${fromData.seatNumber} to Seat ${targetSeatNumber} (${targetFloor}).`
+    };
+  } catch (e) {
+    return { success: false, error: e.message || String(e) };
+  }
+};
+
+/**
+ * Dismiss or resolve seat conflict
+ */
+export const resolveSeatConflict = async (seatId, action = "dismiss") => {
+  try {
+    const seatRef = doc(db, "seats", seatId);
+    const snap = await getDoc(seatRef);
+    if (!snap.exists()) throw new Error("Seat not found.");
+    const data = snap.data() || {};
+    
+    await updateDoc(seatRef, {
+      conflict: null,
+      status: data.currentOccupantId ? "Occupied" : (data.assignedStudentId ? "Reserved" : "Available"),
+      lastUpdated: serverTimestamp()
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 };

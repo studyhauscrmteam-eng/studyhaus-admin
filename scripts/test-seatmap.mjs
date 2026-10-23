@@ -87,7 +87,7 @@ const countResolved = (page) =>
 
 const seatButton = (page, name) =>
   page.locator(`#signup-seat-grid [onclick*="_signupSelectSeat"]`)
-        .filter({ hasText: new RegExp(`^\\s*(?:✓\\s*)?${name}\\s*$`) });
+    .filter({ hasText: new RegExp(`^\\s*(?:✓\\s*)?${name}\\s*$`) });
 
 async function main() {
   const server = await serve();
@@ -179,6 +179,76 @@ async function main() {
     await page.waitForTimeout(200);
     const n = await countResolved(page);
     assert(n === 68, `expected 68 after returning, got ${n}`);
+  });
+
+  /* 7 — hover card displays RTO and Eligibility and Fixed Assignment cleanly */
+  await expect("hover card formats RTO, Eligibility and Fixed Assignment for seats", async () => {
+    const res = await page.evaluate(async () => {
+      const btn = document.querySelector("#signup-seat-grid .seat-card") || document.body;
+      await window.__seatHoverShow({
+        id: "test-seat-1",
+        seatNumber: "15",
+        status: "Available",
+        rotationalEligibility: "day"
+      }, btn);
+      const card = document.getElementById("seat-hover-card");
+      return {
+        visible: card && card.style.display === "flex",
+        text: card ? card.innerText : ""
+      };
+    });
+    assert(res.visible, "hover card was not displayed");
+    assert(res.text.includes("Fixed Assignment: None"), "missing Fixed Assignment in hover card");
+    assert(res.text.includes("Real-Time Occupant: Vacant"), "missing Real-Time Occupant in hover card");
+    assert(res.text.includes("Eligibility: Day Shift Only"), "missing Eligibility in hover card");
+    assert(!/Seat\s*15/i.test(res.text), "redundant seat number found in hover card header");
+    assert(!/[⚠️⚡🔄]/.test(res.text), "emoji found in hover card");
+  });
+
+  /* 7b — Reserved seat must show Real-Time Occupant as Vacant (not owner name) */
+  await expect("reserved seat hover card displays Real-Time Occupant as Vacant", async () => {
+    const res = await page.evaluate(async () => {
+      const btn = document.querySelector("#signup-seat-grid .seat-card") || document.body;
+      await window.__seatHoverShow({
+        id: "test-seat-reserved",
+        seatNumber: "22",
+        status: "Reserved",
+        assignedStudentId: "student-xyz",
+        assignedStudentName: "Pooja Patel",
+        rotationalEligibility: "both"
+      }, btn);
+      const card = document.getElementById("seat-hover-card");
+      return {
+        visible: card && card.style.display === "flex",
+        text: card ? card.innerText : ""
+      };
+    });
+    assert(res.visible, "hover card was not displayed");
+    assert(res.text.includes("Status: Assigned (Fixed Plan)"), "status should be Assigned (Fixed Plan)");
+    assert(res.text.includes("Fixed Assignment: Pooja Patel"), "missing Fixed Assignment owner name");
+    assert(res.text.includes("Real-Time Occupant: Vacant"), "Reserved seat must show Real-Time Occupant as Vacant!");
+    assert(!res.text.includes("Real-Time Occupant: Pooja Patel"), "Reserved seat must NOT show owner as Real-Time Occupant!");
+  });
+
+  /* 8 — reassign guest modal creates dropdown without native alerts or emojis */
+  await expect("reassign guest modal provides destination selector without emojis", async () => {
+    const res = await page.evaluate(async () => {
+      // Mock alert/confirm to fail if triggered
+      window.alert = () => { throw new Error("window.alert was called!"); };
+      window.confirm = () => { throw new Error("window.confirm was called!"); };
+
+      await window.openReassignGuestModal("ground-1");
+      const modal = document.getElementById("reassign-guest-modal");
+      const select = document.getElementById("reassign-target-seat-select");
+      return {
+        visible: modal && modal.style.display === "flex",
+        hasSelect: !!select,
+        text: modal ? modal.innerText : ""
+      };
+    });
+    assert(res.visible, "reassign modal did not open");
+    assert(res.hasSelect, "reassign destination seat select is missing");
+    assert(!/[⚠️⚡🔄]/.test(res.text), "emoji found in reassign modal");
   });
 
   await expect("no unexpected console errors", async () => {

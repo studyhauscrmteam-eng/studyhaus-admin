@@ -131,6 +131,7 @@ export const resolveComplaint = async (complaintId, resolverName, resolutionNote
     const docRef = doc(db, "complaints", complaintId);
     const snap = await getDoc(docRef);
     if (!snap.exists()) throw new Error("Complaint not found.");
+    const compData = snap.data() || {};
 
     await updateDoc(docRef, {
       status: "Resolved",
@@ -140,13 +141,38 @@ export const resolveComplaint = async (complaintId, resolverName, resolutionNote
       updatedAt: serverTimestamp()
     });
 
+    // Notify the student that their complaint has been solved!
+    const targetStudentId = compData.studentId || compData.uid;
+    if (targetStudentId) {
+      try {
+        await addDoc(collection(db, "notifications"), {
+          type: "complaint_resolved",
+          title: `Complaint Solved: ${compData.category || "General"}`,
+          body: `Your complaint regarding "${compData.category || "Issue"}" has been resolved by administration.${resolutionNote ? ` Note: ${resolutionNote}` : ""}`,
+          complaintId: complaintId,
+          studentId: targetStudentId,
+          studentName: compData.studentName || "",
+          category: compData.category || "",
+          resolutionNote: resolutionNote || "",
+          resolvedBy: resolverName || "Admin",
+          read: false,
+          forRole: "student",
+          createdAt: serverTimestamp()
+        });
+      } catch (notifErr) {
+        console.warn("[complaints] failed to write student notification:", notifErr);
+      }
+    }
+
     try {
       const notifQ = query(collection(db, "notifications"), where("complaintId", "==", complaintId));
       const notifSnap = await getDocs(notifQ);
-      notifSnap.forEach(d => updateDoc(d.ref, { read: true }).catch(() => {}));
+      notifSnap.forEach(d => {
+        if (d.data().type === "complaint") updateDoc(d.ref, { read: true }).catch(() => {});
+      });
     } catch (_) {}
     
-    return { success: true, data: snap.data() };
+    return { success: true, data: compData };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -155,16 +181,39 @@ export const resolveComplaint = async (complaintId, resolverName, resolutionNote
 export const updateComplaintStatus = async (complaintId, newStatus) => {
   try {
     const docRef = doc(db, "complaints", complaintId);
+    const snap = await getDoc(docRef);
+    const compData = snap.exists() ? (snap.data() || {}) : {};
+
     await updateDoc(docRef, {
       status: newStatus,
       updatedAt: serverTimestamp()
     });
 
     if (newStatus === "Resolved" || newStatus === "Closed") {
+      const targetStudentId = compData.studentId || compData.uid;
+      if (targetStudentId) {
+        try {
+          await addDoc(collection(db, "notifications"), {
+            type: "complaint_resolved",
+            title: `Complaint Solved: ${compData.category || "General"}`,
+            body: `Your complaint regarding "${compData.category || "Issue"}" has been marked as ${newStatus.toLowerCase()}.`,
+            complaintId: complaintId,
+            studentId: targetStudentId,
+            studentName: compData.studentName || "",
+            category: compData.category || "",
+            read: false,
+            forRole: "student",
+            createdAt: serverTimestamp()
+          });
+        } catch (_) {}
+      }
+
       try {
         const notifQ = query(collection(db, "notifications"), where("complaintId", "==", complaintId));
         const notifSnap = await getDocs(notifQ);
-        notifSnap.forEach(d => updateDoc(d.ref, { read: true }).catch(() => {}));
+        notifSnap.forEach(d => {
+          if (d.data().type === "complaint") updateDoc(d.ref, { read: true }).catch(() => {});
+        });
       } catch (_) {}
     }
 

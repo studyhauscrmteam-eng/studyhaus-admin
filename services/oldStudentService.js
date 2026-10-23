@@ -1,4 +1,4 @@
-import { collection, doc, query, where, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, query, where, onSnapshot, updateDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
 /**
@@ -20,7 +20,9 @@ export const listenToOldStudents = (onUpdate, onError) => {
 };
 
 /**
- * Converts an active student into an old student via Soft Delete.
+ * Converts an active student into an old student via Soft Disable.
+ * NOTE: Credentials are PRESERVED (not deleted/removed).
+ * Portal access is DISABLED to prevent any login or guest check-in.
  * Frees up their seat and records the exit reason and job details.
  */
 export const convertToOldStudent = async (studentId, exitReason, jobDetails = "") => {
@@ -30,19 +32,80 @@ export const convertToOldStudent = async (studentId, exitReason, jobDetails = ""
     const now = new Date();
     const exitDateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
+    // 1. Mark student record as Old and explicitly disable portal access
     await updateDoc(docRef, {
       status: "Old",
+      portalAccessDisabled: true,
       seatNumber: "", // Release seat
+      seatFloor: "",
       exitDate: exitDateStr,
       exitReason: exitReason,
       jobDetails: jobDetails,
       updatedAt: serverTimestamp()
     });
 
+    // 2. Update user auth metadata document without deleting credentials
     try {
       const userDocRef = doc(db, "users", studentId);
-      await updateDoc(userDocRef, { status: "Old", updatedAt: serverTimestamp() });
+      await updateDoc(userDocRef, {
+        status: "Old",
+        portalAccessDisabled: true,
+        updatedAt: serverTimestamp()
+      });
     } catch(e) {}
+
+    // 3. Close any active attendance sessions immediately
+    try {
+      const attQ = query(
+        collection(db, "attendance"),
+        where("studentId", "==", studentId),
+        where("status", "==", "Active")
+      );
+      const attSnap = await getDocs(attQ);
+      for (const attDoc of attSnap.docs) {
+        await updateDoc(attDoc.ref, {
+          status: "Completed",
+          checkOut: Date.now(),
+          autoClosedReason: "Student moved to Old Students — portal access disabled",
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (e) {
+      console.warn("[oldStudentService] Attendance cleanup error:", e);
+    }
+
+    // 4. Release assigned seats and real-time occupancy in seats collection
+    try {
+      const assignedSeatsQ = query(collection(db, "seats"), where("assignedStudentId", "==", studentId));
+      const assignedSnap = await getDocs(assignedSeatsQ);
+      for (const sDoc of assignedSnap.docs) {
+        const sData = sDoc.data() || {};
+        const nextStatus = sData.currentOccupantId ? "Occupied" : "Available";
+        await updateDoc(sDoc.ref, {
+          assignedStudentId: null,
+          assignedStudentName: null,
+          planType: null,
+          status: nextStatus,
+          lastUpdated: serverTimestamp()
+        });
+      }
+
+      const occupantSeatsQ = query(collection(db, "seats"), where("currentOccupantId", "==", studentId));
+      const occupantSnap = await getDocs(occupantSeatsQ);
+      for (const sDoc of occupantSnap.docs) {
+        const sData = sDoc.data() || {};
+        const nextStatus = sData.assignedStudentId ? "Reserved" : "Available";
+        await updateDoc(sDoc.ref, {
+          currentOccupantId: null,
+          currentOccupantName: null,
+          currentCheckInTime: null,
+          status: nextStatus,
+          lastUpdated: serverTimestamp()
+        });
+      }
+    } catch (e) {
+      console.warn("[oldStudentService] Seat cleanup error:", e);
+    }
 
     return { success: true };
   } catch (error) {
@@ -52,8 +115,8 @@ export const convertToOldStudent = async (studentId, exitReason, jobDetails = ""
 };
 
 /**
- * Restores an old student back to Active status.
- * Leaves seat empty so admin can reassign it.
+ * Restores an old student back to Active status and re-enables portal access.
+ * Credentials remain intact; leaves seat empty so admin can reassign.
  */
 export const restoreOldStudent = async (studentId) => {
   try {
@@ -61,15 +124,22 @@ export const restoreOldStudent = async (studentId) => {
     
     await updateDoc(docRef, {
       status: "Active",
+      portalAccessDisabled: false,
       seatNumber: "", // Leave blank to avoid conflicts
+      seatFloor: "",
       exitDate: "", // Clear exit data
       exitReason: "",
+      jobDetails: "",
       updatedAt: serverTimestamp()
     });
 
     try {
       const userDocRef = doc(db, "users", studentId);
-      await updateDoc(userDocRef, { status: "Active", updatedAt: serverTimestamp() });
+      await updateDoc(userDocRef, {
+        status: "Active",
+        portalAccessDisabled: false,
+        updatedAt: serverTimestamp()
+      });
     } catch(e) {}
 
     return { success: true };

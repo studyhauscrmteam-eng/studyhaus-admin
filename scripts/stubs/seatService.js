@@ -58,3 +58,16 @@ export const saveSeatPosition = async () => ({ success: true });
 export const renameSeat = async () => ({ success: true });
 export const addSeatAt = async () => ({ success: true });
 export const deleteSeatById = async () => ({ success: true });
+export const formatSeatCode = (seat, type = null) => {
+  if (!seat) return "";
+  const num = String(seat.seatNumber || "").replace(/\D/g, "");
+  const pad = num ? num.padStart(3, "0") : String(seat.seatNumber || "");
+  const isFirst = (seat.floor === "First Floor" || seat.library === "premium");
+  if (type === "rotational-night") return isFirst ? `PN-${pad}` : `LN-${pad}`;
+  if (type === "rotational-day") return isFirst ? `PR-${pad}` : `LR-${pad}`;
+  return isFirst ? `P-${pad}` : `L-${pad}`;
+};
+export const autoFindAlternativeSeat = async () => null;
+export const reassignRotationalOccupant = async () => ({ success: true });
+export const setSeatRotationalEligibility = async () => ({ success: true });
+export const resolveSeatConflict = async () => ({ success: true });

@@ -195,7 +195,7 @@ export const initComplaintAdminUI = () => {
         if (notifyWa && phone) {
           let cleanPhone = phone.replace(/\D/g, "");
           if (cleanPhone.length === 10) cleanPhone = "91" + cleanPhone;
-          const text = `Hello ${name || "Student"},\n\nYour complaint regarding "${category || "Facility"}" at Studyhaus has been resolved.\n\nResolution: ${note || "Issue has been resolved."}\n\nThank you for your patience!`;
+          const text = `Hello ${name || "Student"},\n\nYour complaint regarding "${category || "Facility"}" at Shreeji Library has been resolved.\n\nResolution: ${note || "Issue has been resolved."}\n\nThank you for your patience!`;
           if (window.sendWhatsAppMessage) {
             window.sendWhatsAppMessage({ id: "", fullName: name, phone: cleanPhone }, "Complaint Update", text);
           } else {
