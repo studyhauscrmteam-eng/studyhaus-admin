@@ -348,7 +348,7 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
             oldPlan: "",
             newPlan: data.planName || pData.planName || "",
             startDate: pData.startDate || payload.startDate || data.startDate || "",
-            endDate: pData.endDate || payload.endDate || data.endDate || data.paymentDueDate || "",
+            endDate: pData.endDate || payload.endDate || data.endDate || data.plannedExitDate || "",
             amount: Number(pData.amount || data.planPrice || 0),
             paymentMethod: pData.paymentMethod || data.paymentMethod || "Paid",
             transactionId: pData.transactionId || data.transactionId || "",

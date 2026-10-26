@@ -545,7 +545,7 @@ export const renderRenewalHistory = (studentId, containerId) => {
               realAmount = (pMatch && Number(pMatch.price) > 0) ? Number(pMatch.price) : 1000;
             }
             const startDate = sd.startDate || (sd.createdAt?.seconds ? new Date(sd.createdAt.seconds * 1000).toISOString().split("T")[0] : new Date().toISOString().split("T")[0]);
-            const endDate = sd.paymentDueDate || sd.endDate || addDaysToStr(startDate, 29);
+            const endDate = sd.endDate || sd.plannedExitDate || addDaysToStr(startDate, 29);
             const renItem = {
               id: "admission_" + studentId,
               newPlan: sd.planName || "Regular Fixed Premium",
