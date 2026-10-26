@@ -656,11 +656,11 @@ export const initAdmissionsUI = async () => {
       };
 
       const entries = [];
-      const seen = new Set();
+      const seenLabels = new Set();
       const pushDoc = (raw, label) => {
         const v = resolve(raw);
-        if (!v || seen.has(v)) return;
-        seen.add(v);
+        if (!v || seenLabels.has(label)) return;
+        seenLabels.add(label);
         entries.push({ src: v, label });
       };
 
@@ -714,22 +714,27 @@ export const initAdmissionsUI = async () => {
         allDocs.paymentScreenshot ||
         allDocs.paymentScreenshotUrl ||
         allDocs.payment_screenshot ||
+        allDocs.screenshot ||
+        allDocs.paymentProof ||
         data.paymentScreenshot ||
         data.paymentScreenshotUrl ||
-        data.payment_screenshot;
+        data.payment_screenshot ||
+        data.screenshot ||
+        data.paymentProof;
       pushDoc(paymentScreenshotVal, "Payment screenshot");
 
-      // 5. Catch-all for any other files uploaded in studentDocuments
+      // 5. Catch-all for any other files uploaded in studentDocuments or data
       const handledKeys = new Set([
         "photo", "profilePhoto", "selfie", "photoUrl", "profilePhotoUrl",
         "aadhaarFront", "aadharFront", "aadhaarFrontUrl", "aadharFrontUrl", "aadhaar_front", "aadhar_front",
         "aadhaarBack", "aadharBack", "aadhaarBackUrl", "aadharBackUrl", "aadhaar_back", "aadhar_back",
-        "paymentScreenshot", "paymentScreenshotUrl", "payment_screenshot",
+        "paymentScreenshot", "paymentScreenshotUrl", "payment_screenshot", "screenshot", "paymentProof",
         "studentId", "uid", "updatedAt", "createdAt", "migratedTo", "verificationNote", "id"
       ]);
-      for (const [k, v] of Object.entries(allDocs)) {
+      const combinedDocPool = { ...allDocs, ...(data || {}) };
+      for (const [k, v] of Object.entries(combinedDocPool)) {
         if (handledKeys.has(k)) continue;
-        if (typeof v === "string" && (v.startsWith("data:") || v.startsWith("http://") || v.startsWith("https://") || v.length > 50)) {
+        if (typeof v === "string" && (v.startsWith("data:") || v.startsWith("http://") || v.startsWith("https://") || v.startsWith("firestore:"))) {
           const label = k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
           pushDoc(v, label || "Document");
         }
@@ -784,6 +789,32 @@ export const initAdmissionsUI = async () => {
 
       const remarks = val(data.remarks) || val(data.adminNotes) || "";
 
+      // Effective subscription end date: never truncated to Pay Later due date
+      const effectiveEndDate = (() => {
+        const sDate = data.startDate || "";
+        const eDate = data.endDate;
+        const pDue = data.paymentDueDate;
+        if (eDate && sDate) {
+          const d1 = new Date(`${sDate}T00:00:00`);
+          const d2 = new Date(`${eDate}T00:00:00`);
+          const diff = Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+          if (diff >= 14) return eDate;
+          if (eDate === pDue || data.paymentMethod === "Pay Later" || diff <= 7) {
+            const corr = new Date(d1);
+            corr.setMonth(corr.getMonth() + 1);
+            return corr.toISOString().split("T")[0];
+          }
+          return eDate;
+        }
+        if (eDate) return eDate;
+        if (sDate) {
+          const corr = new Date(`${sDate}T00:00:00`);
+          corr.setMonth(corr.getMonth() + 1);
+          return corr.toISOString().split("T")[0];
+        }
+        return pDue || "";
+      })();
+
       dlg.innerHTML = `
         <div class="ad-head">
           <div class="ad-av" style="background:${bg}; color:${fg};">${initials}</div>
@@ -818,7 +849,7 @@ export const initAdmissionsUI = async () => {
               ${plain("Application no.", data.studentId || data.admissionNo)}
               ${plain("Plan", data.planName)}
               ${plain("Start date", data.startDate)}
-              ${plain("End date", data.endDate)}
+              ${plain("End date", effectiveEndDate)}
               ${plain("Duration", data.duration ? `${data.duration} days` : "")}
               ${val(data.seatAssigned || data.seatNumber)
                 ? row("Preferred seat", `${esc(data.seatAssigned || data.seatNumber)} (${esc(data.seatFloor || data.floor || "Ground Floor")})`) : ""}

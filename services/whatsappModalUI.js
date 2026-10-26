@@ -8,7 +8,7 @@ let templates = [];
 let modalInjected = false;
 
 export const openWhatsAppModal = async (studentData) => {
-  if (!modalInjected) injectModal();
+  injectModal();
   
   if (templates.length === 0) {
     templates = await fetchAllTemplates();
@@ -17,7 +17,7 @@ export const openWhatsAppModal = async (studentData) => {
   const role = localStorage.getItem("userRole");
   const canCustom = (role === "Owner/Admin" || role === "Manager");
 
-  const modal = document.getElementById("wa-modal");
+  const modal = document.getElementById("whatsapp-modal");
   const tplSelect = document.getElementById("wa-template");
   const msgPreview = document.getElementById("wa-preview");
   const sendBtn = document.getElementById("wa-send-btn");
@@ -31,6 +31,8 @@ export const openWhatsAppModal = async (studentData) => {
     html += `<option value="custom">-- Custom Message --</option>`;
   }
   tplSelect.innerHTML = html;
+  msgPreview.value = "";
+  msgPreview.readOnly = true;
   
   tplSelect.onchange = () => {
     const val = tplSelect.value;
@@ -72,43 +74,61 @@ export const openWhatsAppModal = async (studentData) => {
     }
   };
 
-  modal.style.display = "flex";
+  if (typeof modal.showModal === "function") {
+    modal.showModal();
+  } else {
+    modal.style.display = "block";
+  }
 };
 
 export const closeWhatsAppModal = () => {
-  const modal = document.getElementById("wa-modal");
-  if (modal) modal.style.display = "none";
+  const modal = document.getElementById("whatsapp-modal");
+  if (modal) {
+    if (typeof modal.close === "function") modal.close();
+    else modal.style.display = "none";
+  }
 };
 
 const injectModal = () => {
-  if (document.getElementById("wa-modal")) return;
-  
-  const modalHtml = `
-    <div id="wa-modal" class="modal-overlay" style="display:none; z-index:1000; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-      <div class="modal-content" style="background:var(--bg-card); border-radius:8px; width:400px; padding:2rem;">
-        <h2>Send WhatsApp Message</h2>
-        <div style="margin-top:1rem;">
-          <label style="display:block; margin-bottom:0.5rem; font-size:0.875rem;">Select Template</label>
-          <select id="wa-template" class="input-field" style="width:100%;"></select>
-        </div>
-        <div style="margin-top:1rem;">
-          <label style="display:block; margin-bottom:0.5rem; font-size:0.875rem;">Message Preview</label>
-          <textarea id="wa-preview" class="input-field" style="width:100%; height:120px; resize:none;" readonly></textarea>
-        </div>
-        <div style="margin-top:1.5rem; display:flex; gap:1rem; justify-content:flex-end;">
-          <button class="btn btn-secondary" onclick="document.getElementById('wa-modal').style.display='none'">Cancel</button>
-          <button class="btn btn-primary" id="wa-send-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            Send WhatsApp
-          </button>
-        </div>
+  let modal = document.getElementById("whatsapp-modal");
+  if (!modal) {
+    modal = document.createElement("dialog");
+    modal.id = "whatsapp-modal";
+    modal.className = "card";
+    modal.style.cssText = "border:none; border-radius:14px; padding:0; box-shadow:0 25px 60px rgba(0,0,0,0.5); background:var(--bg-card); color:var(--text-primary); width:min(480px, 92vw); margin:auto;";
+    document.body.appendChild(modal);
+  }
+
+  // Populate inner content
+  modal.innerHTML = `
+    <div style="padding:1.5rem; max-height:85vh; overflow-y:auto; box-sizing:border-box;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem;">
+        <h2 style="margin:0; font-size:1.2rem; font-weight:700; display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#25D366" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          <span>Send WhatsApp Message</span>
+        </h2>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label style="display:block; margin-bottom:0.4rem; font-size:0.85rem; font-weight:600;">Select Template</label>
+        <select id="wa-template" class="input-field" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--bg-card); color:var(--text-primary);"></select>
+      </div>
+      <div style="margin-top:1rem;">
+        <label style="display:block; margin-bottom:0.4rem; font-size:0.85rem; font-weight:600;">Message Preview</label>
+        <textarea id="wa-preview" class="input-field" style="width:100%; height:130px; resize:none; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg-hover); color:var(--text-primary); font-family:inherit; font-size:13px; line-height:1.45;" readonly></textarea>
+      </div>
+      <div style="margin-top:1.5rem; display:flex; gap:0.75rem; justify-content:flex-end;">
+        <button type="button" class="btn btn-secondary" onclick="window.closeWhatsAppModal()" style="padding:8px 18px; border-radius:8px; font-weight:600;">Close</button>
+        <button type="button" class="btn btn-primary" id="wa-send-btn" style="background:#25D366; border-color:#25D366; color:#fff; font-weight:700; padding:8px 20px; border-radius:8px; display:inline-flex; align-items:center; gap:6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Send WhatsApp
+        </button>
       </div>
     </div>
   `;
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
   modalInjected = true;
 };
 
 // Global Exposure for inline onclick hooks
 window.openWhatsAppModal = openWhatsAppModal;
+window.closeWhatsAppModal = closeWhatsAppModal;
 window.sendWhatsAppMessage = sendWhatsAppMessage;

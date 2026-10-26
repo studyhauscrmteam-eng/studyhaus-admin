@@ -225,15 +225,38 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
     payload.studentId = data.studentId || "";
     payload.admissionNo = data.admissionNo || data.studentId || "";
   }
-  if (!data.startDate) {
-    payload.startDate = new Date().toISOString().split("T")[0];
-  }
-  if (!data.endDate) {
-    payload.endDate = data.paymentDueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-  }
-  if (!data.paymentDueDate && payload.endDate) {
-    payload.paymentDueDate = payload.endDate;
-  }
+  const effectiveStartDate = data.startDate || new Date().toISOString().split("T")[0];
+  payload.startDate = effectiveStartDate;
+
+  // Permanent joinedDate for anniversaries / original admission reference
+  payload.joinedDate = data.joinedDate || data.joiningDate || data.admissionDate || effectiveStartDate;
+
+  // Real subscription end date calculation (never truncated by Pay Later due date)
+  const calcSubEndDate = () => {
+    const sDate = new Date(`${effectiveStartDate}T00:00:00`);
+    const eDate = data.endDate;
+    const pDue = data.paymentDueDate;
+    if (eDate) {
+      const d1 = sDate.getTime();
+      const d2 = new Date(`${eDate}T00:00:00`).getTime();
+      const diff = Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+      if (diff >= 14) return eDate;
+      if (eDate === pDue || data.paymentMethod === "Pay Later" || diff <= 7) {
+        const corr = new Date(sDate);
+        corr.setMonth(corr.getMonth() + 1);
+        return corr.toISOString().split("T")[0];
+      }
+      return eDate;
+    }
+    const corr = new Date(sDate);
+    corr.setMonth(corr.getMonth() + 1);
+    return corr.toISOString().split("T")[0];
+  };
+
+  payload.endDate = calcSubEndDate();
+
+  // Payment due date remains the agreed pay-by date for Pay Later, or falls back to endDate
+  payload.paymentDueDate = (data.paymentMethod === "Pay Later" && data.paymentDueDate) ? data.paymentDueDate : (data.paymentDueDate || payload.endDate);
 
   // One transaction: the student flips to Active and the seat becomes
   // Occupied together — never one without the other.
@@ -355,7 +378,7 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
         oldPlan: "",
         newPlan: data.planName || "",
         startDate: payload.startDate || data.startDate || "",
-        endDate: payload.endDate || data.paymentDueDate || data.endDate || "",
+        endDate: payload.endDate || data.endDate || "",
         amount: Number(data.planPrice || data.amount || 0),
         paymentMethod: data.paymentMethod || "Paid",
         transactionId: data.transactionId || "",

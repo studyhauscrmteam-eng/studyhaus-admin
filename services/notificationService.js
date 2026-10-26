@@ -30,6 +30,7 @@ export const notifyNewAdmission = (admission) =>
     title: "New admission request",
     body: `${admission.name || "A student"} (${admission.phone || "no phone"}) requested "${admission.planName || "a plan"}". Open Admissions → Pending approval.`,
     admissionId: admission.id || admission.uid || "",
+    studentId: admission.id || admission.uid || "",
   });
 
 /**

@@ -55,12 +55,13 @@ export const sortStudents = (students, sortBy, sortOrder) => {
   };
 
   const isDateSort = sortBy === "createdAt" || sortBy === "updatedAt" || sortBy === "joined" ||
+                     sortBy === "joinedDate" || sortBy === "joiningDate" ||
                      sortBy === "renewalDate" || sortBy === "paymentDueDate" || sortBy === "plannedExitDate" ||
                      sortBy === "startDate" || sortBy === "endDate";
 
   return [...students].sort((a, b) => {
-    let valA = a[sortBy] || "";
-    let valB = b[sortBy] || "";
+    let valA = (sortBy === "joinedDate" ? (a.joinedDate || a.joiningDate || a.admissionDate || a.createdAt || a.startDate) : a[sortBy]) || "";
+    let valB = (sortBy === "joinedDate" ? (b.joinedDate || b.joiningDate || b.admissionDate || b.createdAt || b.startDate) : b[sortBy]) || "";
 
     if (isDateSort) {
       valA = toMs(valA);

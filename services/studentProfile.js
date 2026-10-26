@@ -315,6 +315,41 @@ export const initStudentManagementUI = async () => {
 // ==========================================
 // RENDER LOGIC
 // ==========================================
+
+/**
+ * Calculates genuine subscription end date.
+ * If endDate was mistakenly overwritten with a 3-5 day Pay Later paymentDueDate,
+ * recovers the true subscription end date from startDate + plan duration (default 1 month).
+ */
+export const getSubscriptionEndDate = (s = {}) => {
+  const startStr = s.startDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split("T")[0] : (typeof s.createdAt === "string" && s.createdAt.includes("T") ? s.createdAt.split("T")[0] : s.createdAt)) || "";
+  const endStr = s.endDate;
+  const dueStr = s.paymentDueDate;
+
+  if (endStr && startStr) {
+    const dStart = new Date(`${startStr}T00:00:00`);
+    const dEnd = new Date(`${endStr}T00:00:00`);
+    const diff = Math.round((dEnd - dStart) / (1000 * 60 * 60 * 24));
+    if (diff >= 14) return endStr;
+    if (endStr === dueStr || s.paymentMethod === "Pay Later" || diff <= 7) {
+      const corr = new Date(dStart);
+      corr.setMonth(corr.getMonth() + 1);
+      return corr.toISOString().split("T")[0];
+    }
+    return endStr;
+  }
+  if (endStr) return endStr;
+  if (startStr) {
+    const dStart = new Date(`${startStr}T00:00:00`);
+    if (!isNaN(dStart.getTime())) {
+      const corr = new Date(dStart);
+      corr.setMonth(corr.getMonth() + 1);
+      return corr.toISOString().split("T")[0];
+    }
+  }
+  return dueStr || "";
+};
+
 const renderTable = () => {
   const tableBody = document.getElementById("students-table-body");
   if (!tableBody) return;
@@ -365,9 +400,28 @@ const renderTable = () => {
       ? `<span class="st${tone ? ` st-${tone}` : ""}"${tone ? "" : ` style="color:var(--text-muted);"`}><i class="st-dot"></i>${esc(statusText)}</span>`
       : `<span style="color:var(--text-muted);">—</span>`;
 
-    // Plan on ONE line — "Monthly - ₹1,200" never wraps.
-    const planHtml = s.planName
-      ? `<span style="white-space: nowrap;">${s.planName}</span>`
+    // Resolve genuine plan name (clean up legacy/onboarding format like "Monthly - ₹1,200")
+    let displayPlanName = (s.planName || "").trim();
+    if (s.planId && availablePlans.length) {
+      const match = availablePlans.find(p => p.id === s.planId);
+      if (match && match.planName) displayPlanName = match.planName;
+    }
+    if (!displayPlanName || /^Monthly\s*-\s*₹?\d+/i.test(displayPlanName)) {
+      if (s.planId && availablePlans.length) {
+        const match = availablePlans.find(p => p.id === s.planId);
+        if (match && match.planName) displayPlanName = match.planName;
+      }
+      if (/^Monthly\s*-\s*₹?\d+/i.test(displayPlanName)) {
+        // If still showing Monthly - ₹1,200, find matching plan by price or category
+        const isPrem = s.libraryType === "Shreeji Premium Reading Library" || s.seatFloor === "First Floor";
+        const candidate = availablePlans.find(p => isPrem ? (p.libraryType && p.libraryType.includes("Premium")) : (!p.libraryType || !p.libraryType.includes("Premium")));
+        if (candidate && candidate.planName) displayPlanName = candidate.planName;
+        else displayPlanName = isPrem ? "Regular Fixed Premium" : "Regular Fixed Seat";
+      }
+    }
+
+    const planHtml = displayPlanName
+      ? `<span style="white-space: nowrap;">${esc(displayPlanName)}</span>`
       : `<span style="color:var(--text-muted);">None</span>`;
 
     let nameHtml = s.name ? `<div class="name" style="line-height: 1.3;">${s.name}</div>` : `<div class="name">Unknown</div>`;
@@ -376,22 +430,52 @@ const renderTable = () => {
     // removed — they are only labelled so staff know what they're looking at.
     const flagsHtml = buildFlagBadges(s);
 
-    // Membership end + days left (old-site style: End: 25 Oct 2026 · 11 days left)
-    let dueHtml = `<span style="color:var(--text-muted);">—</span>`;
-    if (s.paymentDueDate) {
-      const due = new Date(`${s.paymentDueDate}T00:00:00`);
-      if (!isNaN(due.getTime())) {
-        const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
-        const endStr = due.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    // Membership subscription end + days left (plus Pay Later due date if applicable)
+    // 1. Subscription End date column
+    let subsEndHtml = `<span style="color:var(--text-muted);">—</span>`;
+    const trueEnd = getSubscriptionEndDate(s);
+    if (trueEnd) {
+      const endD = new Date(`${trueEnd}T00:00:00`);
+      if (!isNaN(endD.getTime())) {
+        const diffDays = Math.ceil((endD - today) / (1000 * 60 * 60 * 24));
+        const endStr = endD.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
         const left = diffDays < 0
           ? `<span style="color:var(--danger); font-weight:600;">Expired ${-diffDays}d ago</span>`
           : diffDays === 0
-            ? `<span style="color:var(--warning); font-weight:600;">Due today</span>`
+            ? `<span style="color:var(--warning); font-weight:600;">Expires today</span>`
             : `<span style="color:var(--success); font-weight:600;">${diffDays} days left</span>`;
-        dueHtml = `<div style="line-height:1.5;"><div style="white-space:nowrap;">End: ${endStr}</div>${left}</div>`;
+        subsEndHtml = `<div style="line-height:1.4;"><div style="white-space:nowrap; font-weight:600;">${endStr}</div>${left}</div>`;
+      } else {
+        subsEndHtml = `<div style="white-space:nowrap;">${trueEnd}</div>`;
+      }
+    }
+
+    // 2. Payment Due Date column (only when a payment deadline exists, e.g. Pay Later)
+    let dueHtml = `<span style="color:var(--text-muted);">—</span>`;
+    if (s.paymentDueDate && (s.paymentMethod === "Pay Later" || s.approvalStatus === "Pending" || s.paymentDueDate !== trueEnd)) {
+      const pDue = new Date(`${s.paymentDueDate}T00:00:00`);
+      if (!isNaN(pDue.getTime())) {
+        const pDiff = Math.ceil((pDue - today) / (1000 * 60 * 60 * 24));
+        const pDueStr = pDue.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+        const pLeft = pDiff < 0
+          ? `<span style="color:var(--danger); font-weight:600;">Overdue ${-pDiff}d</span>`
+          : pDiff === 0
+            ? `<span style="color:var(--warning); font-weight:600;">Due today</span>`
+            : `<span style="color:var(--warning); font-weight:600;">${pDiff} days left</span>`;
+        dueHtml = `<div style="line-height:1.4;"><div style="white-space:nowrap; font-weight:600;">${pDueStr}</div>${pLeft}</div>`;
       } else {
         dueHtml = `<div style="white-space:nowrap;">${s.paymentDueDate}</div>`;
       }
+    }
+
+    // Joined date: permanent original joining date (for anniversary & reference)
+    const joinedVal = s.joinedDate || s.joiningDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate() : s.createdAt) || s.startDate;
+    let joinedFormatted = "—";
+    if (joinedVal) {
+      try {
+        const d = typeof joinedVal.toDate === "function" ? joinedVal.toDate() : new Date(joinedVal);
+        joinedFormatted = isNaN(d.getTime()) ? String(joinedVal) : d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+      } catch (_) { joinedFormatted = String(joinedVal); }
     }
 
     html += `
@@ -403,13 +487,14 @@ const renderTable = () => {
               : `<div class="avatar-sm avatar-tint" style="background:${avBg}; color:${avFg}; margin-top: 2px;">${initials}</div>`; })()}
             <div>
               ${nameHtml}
-              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}${(s.seatNumber || s.seatAssigned) ? ` · <span style="font-weight:600; color:var(--primary);">Seat ${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})</span>` : ""}</div>
+              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}${(s.seatNumber || s.seatAssigned) ? ` · <span style="font-weight:600; color:var(--primary);">Seat ${s.seatNumber || s.seatAssigned}</span>` : ""}</div>
               ${flagsHtml}
             </div>
           </div>
         </td>
-        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 180px; white-space: nowrap;">${planHtml}</td>
-        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${s.createdAt?.toDate ? new Date(s.createdAt.toDate()).toLocaleDateString() : 'N/A'}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 140px; white-space: nowrap;">${planHtml}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${joinedFormatted}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${subsEndHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${dueHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${statusHtml}</td>
       </tr>
@@ -704,34 +789,26 @@ const renderProfileModal = (s, role) => {
               <input type="text" id="edit-seat" value="${escAttr(s.seatNumber || s.seatAssigned || '')}" placeholder="e.g. 20" ${!canEdit ? 'disabled' : ''} />
             </div>
             <div class="form-group">
-              <label>Floor</label>
-              <select id="edit-seat-floor" class="sp-input" ${!canEdit ? 'disabled' : ''}>
-                <option value="Ground Floor" ${(s.seatFloor || s.floor || 'Ground Floor') === 'Ground Floor' ? 'selected' : ''}>Ground Floor</option>
-                <option value="First Floor" ${(s.seatFloor || s.floor || '') === 'First Floor' ? 'selected' : ''}>First Floor</option>
-              </select>
-            </div>
-            <div class="form-group">
               <label>Payment Method</label>
               <select id="edit-payment-method" class="sp-input" ${!canEdit ? 'disabled' : ''}>
                 ${payOptions}
               </select>
             </div>
-            ${isOldStatus(s) ? "" : `
             <div class="form-group">
-              <label>Transaction ID</label>
-              <input type="text" id="edit-txn-id" value="${escAttr(s.transactionId || '')}" placeholder="UPI / bank reference" ${!canEdit ? 'disabled' : ''} />
-            </div>`}
+              <label>Joined Date</label>
+              <input type="date" id="edit-joined-date" value="${escAttr(s.joinedDate || s.joiningDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split('T')[0] : (typeof s.createdAt === 'string' && s.createdAt.includes('T') ? s.createdAt.split('T')[0] : (s.startDate || ''))))}" ${!canEdit ? 'disabled' : ''} title="Original joining date — preserved across renewals for anniversary & reference" />
+            </div>
             <div class="form-group">
               <label>Payment Due Date</label>
               <input type="date" id="edit-payment-due" value="${escAttr(s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} />
             </div>
             <div class="form-group">
-              <label>Admission Start Date</label>
+              <label>Subscription Start Date</label>
               <input type="date" id="edit-start-date" value="${escAttr(s.startDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split('T')[0] : (typeof s.createdAt === 'string' && s.createdAt.includes('T') ? s.createdAt.split('T')[0] : (s.createdAt || ''))))}" ${!canEdit ? 'disabled' : ''} />
             </div>
             <div class="form-group">
-              <label>Admission End Date</label>
-              <input type="date" id="edit-end-date" value="${escAttr(s.endDate || s.paymentDueDate || '')}" ${!canEdit ? 'disabled' : ''} onchange="const p = document.getElementById('edit-payment-due'); if (p && !p.disabled) p.value = this.value;" />
+              <label>Subscription End Date</label>
+              <input type="date" id="edit-end-date" value="${escAttr(getSubscriptionEndDate(s))}" ${!canEdit ? 'disabled' : ''} />
             </div>
           </div>
 
@@ -946,32 +1023,39 @@ window.submitStudentEdit = async (id) => {
     // creates a document), so this can't spawn a second student record.
     // Missing elements (old cached markup) are simply skipped.
     const seatEl = document.getElementById("edit-seat");
-    const seatFloorEl = document.getElementById("edit-seat-floor");
     const payMethodEl = document.getElementById("edit-payment-method");
-    const txnEl = document.getElementById("edit-txn-id");
     const dueEl = document.getElementById("edit-payment-due");
     const startEl = document.getElementById("edit-start-date");
     const endEl = document.getElementById("edit-end-date");
+    const joinedEl = document.getElementById("edit-joined-date");
+    const s = allStudents.find(st => st.id === id) || {};
+
+    if (joinedEl && !joinedEl.disabled && joinedEl.value) {
+      updates.joinedDate = joinedEl.value;
+    }
     if (seatEl && !seatEl.disabled) {
       updates.seatNumber = seatEl.value.trim();
       updates.seatAssigned = seatEl.value.trim();
     }
-    if (seatFloorEl && !seatFloorEl.disabled) {
-      updates.seatFloor = seatFloorEl.value;
-      updates.floor = seatFloorEl.value;
-    }
     if (payMethodEl && !payMethodEl.disabled) updates.paymentMethod = payMethodEl.value;
-    if (txnEl && !txnEl.disabled) updates.transactionId = txnEl.value.trim();
-    if (dueEl && !dueEl.disabled) updates.paymentDueDate = dueEl.value;
     if (startEl && !startEl.disabled) updates.startDate = startEl.value;
     if (endEl && !endEl.disabled) {
       updates.endDate = endEl.value;
-      if (!updates.paymentDueDate && endEl.value) updates.paymentDueDate = endEl.value;
+    }
+    if (dueEl && !dueEl.disabled) {
+      const dueVal = dueEl.value;
+      const endVal = (endEl && !endEl.disabled) ? endEl.value : (updates.endDate || s.endDate || "");
+      if (dueVal && endVal && dueVal >= endVal) {
+        window.showToast("Payment Due Date must be strictly before Subscription End Date.", "warning");
+        btn.textContent = "Save Changes";
+        btn.disabled = false;
+        return;
+      }
+      updates.paymentDueDate = dueVal;
     }
 
     // ── Owner: create the Student Portal login. The password is never typed
     // into this card — it comes from the hidden "Set password" prompt only.
-    const s = allStudents.find(st => st.id === id) || {};
     let targetId = id;
     let portalMsg = "";
     const idInput = document.getElementById("view-login-id");

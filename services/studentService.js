@@ -168,11 +168,12 @@ export const permanentlyDeleteStudent = async (studentId, opts = {}) => {
     let loginRemoved = false;
     try {
       const purge = await purgeStudentOnServer(studentId, {
-        uid: data.uid,
+        uid: data.uid || (studentId.length >= 20 ? studentId : ""),
         phone: data.phone,
         email: data.email,
         authEmail: data.authEmail,
         loginId: data.loginId,
+        personalEmail: data.personalEmail || data.studentEmail || "",
       });
       if (purge.ok) {
         loginRemoved = true;

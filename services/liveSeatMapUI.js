@@ -39,6 +39,22 @@ window.__liveSeatHoverShow = (arg1, arg2, arg3, arg4, arg5, arg6) => {
   if (typeof window.__seatHoverShow === "function") {
     window.__seatHoverShow(seatObj, el);
   }
+  if (attStudentId && (!studentPhotos[attStudentId] || (el && !el.querySelector("img")))) {
+    fetchStudentPhoto(attStudentId).then(photo => {
+      if (photo && el && typeof el.querySelector === "function") {
+        const wrap = el.querySelector(".live-seat-avatar-wrap");
+        if (wrap && !wrap.querySelector("img")) {
+          wrap.innerHTML = `
+            <img src="${photo}" alt=""
+              style="width:28px; height:28px; border-radius:50%; object-fit:cover;
+                     border:1.5px solid #fca5a5; flex-shrink:0;" />
+            <div style="position:absolute; bottom:-1px; right:-2px; width:9px; height:9px;
+                        background:#22c55e; border-radius:50%; border:1px solid #fff;"></div>
+          `;
+        }
+      }
+    });
+  }
 };
 
 window.handleLiveSeatClick = async (studentId, studentName, seatNumber, seatFloor, attId, event) => {
@@ -77,7 +93,7 @@ window.handleLiveSeatClick = async (studentId, studentName, seatNumber, seatFloo
 // State
 let allSeats = [];
 let activeAttendance = [];
-let studentPhotos = {};
+let studentPhotos = (typeof window !== "undefined" && window.__seatHoverPhotoCache) || {};
 let currentFloor = "Ground Floor";
 let unsubSeats = null;
 let unsubAttendance = null;
@@ -187,32 +203,80 @@ const liveLegendStyle = (kind) => {
   return "background:rgba(59,130,246,0.16); color:#60a5fa; border:1px solid rgba(59,130,246,0.5);";
 };
 
-const fetchMissingPhotos = async (records) => {
-  for (const rec of records) {
-    if (studentPhotos[rec.studentId] === undefined) {
-      try {
-        // Primary: the single canonical studentDocuments/{id}.photo
-        // (legacy profilePhoto / selfie copies still work as fallback),
-        // then the denormalised student fields.
-        const docsSnap = await getDoc(doc(db, "studentDocuments", rec.studentId));
-        const dd = docsSnap.exists() ? docsSnap.data() : null;
-        let photoUrl = (dd && (dd.photo || dd.profilePhoto || dd.selfie)) ? (dd.photo || dd.profilePhoto || dd.selfie) : null;
+const fetchStudentPhoto = async (studentId) => {
+  if (!studentId) return null;
+  if (studentPhotos[studentId] !== undefined && studentPhotos[studentId] !== null) {
+    return studentPhotos[studentId];
+  }
+  if (window.__seatHoverPhotoCache && window.__seatHoverPhotoCache[studentId]) {
+    studentPhotos[studentId] = window.__seatHoverPhotoCache[studentId];
+    return studentPhotos[studentId];
+  }
 
-        // Fallback: students/{id} denormalised photo fields
-        if (!photoUrl) {
-          const stuSnap = await getDoc(doc(db, "students", rec.studentId));
-          const sd = stuSnap.exists() ? stuSnap.data() : null;
-          photoUrl = (sd && (sd.profilePhotoUrl || sd.photoUrl || sd.photo || sd.selfieUrl)) || null;
+  let photoUrl = null;
+  try {
+    // 1. Direct students/{id} doc (fastest & canonical source)
+    const stuSnap = await getDoc(doc(db, "students", studentId));
+    if (stuSnap.exists()) {
+      const sd = stuSnap.data() || {};
+      photoUrl = sd.profilePhotoUrl || sd.photoUrl || sd.photo || sd.selfieUrl || null;
+
+      // Check auth uid alias
+      if ((!photoUrl || String(photoUrl).startsWith("firestore:")) && sd.uid && sd.uid !== studentId) {
+        const uSnap = await getDoc(doc(db, "students", sd.uid));
+        if (uSnap.exists()) {
+          const ud = uSnap.data() || {};
+          photoUrl = ud.profilePhotoUrl || ud.photoUrl || ud.photo || ud.selfieUrl || null;
         }
-
-        studentPhotos[rec.studentId] = photoUrl; // null means "checked, no photo"
-      } catch (e) {
-        studentPhotos[rec.studentId] = null;
       }
     }
+
+    // 2. studentDocuments/{id} if still not found or it's a "firestore:" pointer
+    if (!photoUrl || String(photoUrl).startsWith("firestore:")) {
+      const docSnap = await getDoc(doc(db, "studentDocuments", studentId));
+      if (docSnap.exists()) {
+        const dd = docSnap.data() || {};
+        photoUrl = dd.photo || dd.profilePhoto || dd.selfie || null;
+      }
+    }
+  } catch (err) {
+    console.warn("[LiveSeatMap] Photo fetch error for", studentId, err);
   }
-  // Always re-render after resolving photos — even if all are null
-  renderLiveMap();
+
+  if (photoUrl && String(photoUrl).startsWith("firestore:")) {
+    photoUrl = null;
+  }
+
+  studentPhotos[studentId] = photoUrl || null;
+  if (window.__seatHoverPhotoCache) {
+    window.__seatHoverPhotoCache[studentId] = photoUrl || null;
+  }
+  return studentPhotos[studentId];
+};
+
+const fetchMissingPhotos = async () => {
+  const targetIds = new Set();
+  (activeAttendance || []).forEach(a => {
+    if (a.studentId) targetIds.add(a.studentId);
+  });
+  (allSeats || []).forEach(s => {
+    if (s.currentOccupantId) targetIds.add(s.currentOccupantId);
+    if (s.assignedStudentId) targetIds.add(s.assignedStudentId);
+    if (s.studentId) targetIds.add(s.studentId);
+  });
+
+  const idsToFetch = [...targetIds].filter(id => id && studentPhotos[id] === undefined);
+  if (idsToFetch.length === 0) return;
+
+  // Process in parallel batches of 8
+  const BATCH_SIZE = 8;
+  for (let i = 0; i < idsToFetch.length; i += BATCH_SIZE) {
+    const batch = idsToFetch.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(batch.map(id => fetchStudentPhoto(id)));
+    if (results.some(r => !!r)) {
+      renderLiveMap();
+    }
+  }
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -305,6 +369,7 @@ export const initLiveSeatMapInTab = (containerId) => {
         if (typeof window.translateDOM === 'function') window.translateDOM();
       }
       renderLiveMap();
+      fetchMissingPhotos();
     });
   });
 
@@ -346,6 +411,7 @@ const startListeners = () => {
   unsubSeats = onSnapshot(collection(db, "seats"), (snap) => {
     allSeats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderLiveMap();
+    fetchMissingPhotos();
   });
 
   const today = getTodayStr();
@@ -365,7 +431,7 @@ const startListeners = () => {
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(r => r.date === today);
     renderLiveMap();
-    fetchMissingPhotos(activeAttendance);
+    fetchMissingPhotos();
   }, (err) => {
     console.error("[LiveSeatMap] Firestore attendance query error:", err);
     const grid = document.getElementById("live-seat-grid");
@@ -436,8 +502,20 @@ const renderLiveMap = () => {
         checkInTime = `${hh}:${mm}`;
       }
 
-      // Real photo or initial avatar
-      const photoUrl = studentPhotos[occStudentId] || seat.currentOccupantPhoto;
+      // Real photo resolution: check candidate IDs across studentPhotos and global hover cache
+      const candidateIds = [occStudentId, att?.studentId, seat.currentOccupantId, seat.assignedStudentId, seat.studentId].filter(Boolean);
+      let photoUrl = "";
+      for (const cid of candidateIds) {
+        if (studentPhotos[cid]) { photoUrl = studentPhotos[cid]; break; }
+        if (window.__seatHoverPhotoCache && window.__seatHoverPhotoCache[cid]) { photoUrl = window.__seatHoverPhotoCache[cid]; break; }
+      }
+      if (!photoUrl) {
+        photoUrl = seat.currentOccupantPhoto || seat.assignedStudentPhoto || seat.studentPhoto || seat.photoUrl || "";
+      }
+      if (photoUrl && String(photoUrl).startsWith("firestore:")) {
+        photoUrl = "";
+      }
+
       const avatarHtml = photoUrl
         ? `<img src="${photoUrl}" alt="${name}"
             style="width:28px; height:28px; border-radius:50%; object-fit:cover;
@@ -462,7 +540,7 @@ const renderLiveMap = () => {
              onmouseenter="this.style.transform='scale(1.04)'; window.__liveSeatHoverShow('${escJs(occStudentId)}', '${escJs(name)}', '${escJs(seatNumStr)}', 'Occupied', this, '${escJs(seatFloor)}')"
              onmouseleave="this.style.transform='scale(1)'; window.__seatHoverHide()">
           <div style="position:absolute; top:4px; left:4px; font-size:9px; font-weight:700; color:${ps.sub}; line-height:1;">${seatNumStr}</div>
-          <div style="display:flex; align-items:center; justify-content:center; position:relative; margin-top:6px;">
+          <div class="live-seat-avatar-wrap" style="display:flex; align-items:center; justify-content:center; position:relative; margin-top:6px;">
             ${avatarHtml}
             <div style="position:absolute; bottom:-1px; right:-2px; width:9px; height:9px;
                         background:#22c55e; border-radius:50%; border:1px solid #fff;"></div>

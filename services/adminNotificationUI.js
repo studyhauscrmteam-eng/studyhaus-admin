@@ -361,7 +361,7 @@ export const initAdminNotificationUI = () => {
     (records) => {
       window.__pendingAdmissions = records;
 
-      // New arrivals (skip the very first snapshot): toast + beep.
+      // New arrivals (skip the very first snapshot): toast + beep + notifyAdmins.
       if (!firstSnapshot) {
         const fresh = records.filter((r) => !knownIds.has(r.id));
         if (fresh.length > 0) {
@@ -371,6 +371,11 @@ export const initAdminNotificationUI = () => {
           if (typeof window.showToast === "function") {
             window.showToast(`New admission: ${first.name || "Student"}${extra} — tap the bell to review.`, "info");
           }
+          import("./notificationService.js").then(({ notifyNewAdmission }) => {
+            fresh.forEach((admission) => {
+              notifyNewAdmission(admission).catch(() => {});
+            });
+          }).catch(() => {});
         }
       }
       firstSnapshot = false;

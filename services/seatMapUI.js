@@ -19,7 +19,10 @@ let dragSeatId = null;
 // callers pass the seat object itself (window.__seatHoverShow(seat, el)).
 let seatHoverCard = null;
 let seatHoverCurrent = null;
-const seatHoverPhotoCache = {}; // studentId → dataURL | null
+export const seatHoverPhotoCache = (typeof window !== "undefined" && window.__seatHoverPhotoCache) || {};
+if (typeof window !== "undefined") {
+  window.__seatHoverPhotoCache = seatHoverPhotoCache;
+}
 
 const ensureHoverCard = () => {
   if (seatHoverCard) return seatHoverCard;
@@ -32,20 +35,27 @@ const ensureHoverCard = () => {
 
 const seatHoverPhoto = async (studentId) => {
   if (!studentId) return null;
-  if (studentId in seatHoverPhotoCache) return seatHoverPhotoCache[studentId];
+  if (studentId in seatHoverPhotoCache && seatHoverPhotoCache[studentId]) return seatHoverPhotoCache[studentId];
   let url = null;
   try {
     const sSnap = await getDoc(doc(db, "students", studentId));
     if (sSnap.exists()) {
       const v = sSnap.data() || {};
-      url = v.profilePhotoUrl || v.photoUrl || null;
+      url = v.profilePhotoUrl || v.photoUrl || v.photo || v.selfieUrl || null;
     }
-    if (!url) {
+    if (!url || (typeof url === "string" && url.startsWith("firestore:"))) {
       const dSnap = await getDoc(doc(db, "studentDocuments", studentId));
-      if (dSnap.exists()) url = (dSnap.data() || {}).photo || null;
+      if (dSnap.exists()) {
+        const dd = dSnap.data() || {};
+        url = dd.photo || dd.profilePhoto || dd.selfie || null;
+      }
     }
   } catch (_) { url = null; }
+  if (url && typeof url === "string" && url.startsWith("firestore:")) url = null;
   seatHoverPhotoCache[studentId] = url;
+  if (typeof window !== "undefined" && window.__seatHoverPhotoCache) {
+    window.__seatHoverPhotoCache[studentId] = url;
+  }
   return url;
 };
 
@@ -165,6 +175,18 @@ window.__seatHoverShow = async (seatOrId, el) => {
     if (photo) {
       const ph = card.querySelector("#seat-hover-photo");
       if (ph) ph.innerHTML = `<img src="${photo}" style="width:100%;height:100%;object-fit:cover;display:block;" alt="" />`;
+      if (el && typeof el.querySelector === "function") {
+        const wrap = el.querySelector(".live-seat-avatar-wrap");
+        if (wrap && !wrap.querySelector("img")) {
+          wrap.innerHTML = `
+            <img src="${photo}" alt=""
+              style="width:28px; height:28px; border-radius:50%; object-fit:cover;
+                     border:1.5px solid #fca5a5; flex-shrink:0;" />
+            <div style="position:absolute; bottom:-1px; right:-2px; width:9px; height:9px;
+                        background:#22c55e; border-radius:50%; border:1px solid #fff;"></div>
+          `;
+        }
+      }
     }
   }
 };
