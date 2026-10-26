@@ -225,7 +225,14 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
     payload.studentId = data.studentId || "";
     payload.admissionNo = data.admissionNo || data.studentId || "";
   }
-  const effectiveStartDate = data.startDate || new Date().toISOString().split("T")[0];
+  const todayStr = new Date().toISOString().split("T")[0];
+  const appDate = data.submittedAt?.toDate ? data.submittedAt.toDate().toISOString().split("T")[0] : (data.createdAt?.toDate ? data.createdAt.toDate().toISOString().split("T")[0] : todayStr);
+
+  let effectiveStartDate = data.startDate || todayStr;
+  // If startDate on this new approval is older than the application submission date, normalize to application date
+  if (effectiveStartDate < appDate) {
+    effectiveStartDate = appDate;
+  }
   payload.startDate = effectiveStartDate;
 
   // Permanent joinedDate for anniversaries / original admission reference
@@ -234,8 +241,14 @@ const approveStudentsDoc = async (id, studentRef, existing) => {
   // Real subscription end date calculation (never truncated by Pay Later due date)
   const calcSubEndDate = () => {
     const sDate = new Date(`${effectiveStartDate}T00:00:00`);
-    const eDate = data.endDate;
+    let eDate = data.plannedExitDate || data.endDate;
     const pDue = data.paymentDueDate;
+
+    // If eDate is older than effectiveStartDate, it cannot be genuine for this new admission
+    if (eDate && eDate < effectiveStartDate) {
+      eDate = null;
+    }
+
     if (eDate) {
       const d1 = sDate.getTime();
       const d2 = new Date(`${eDate}T00:00:00`).getTime();

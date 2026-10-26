@@ -322,9 +322,28 @@ export const initStudentManagementUI = async () => {
  * recovers the true subscription end date from startDate + plan duration (default 1 month).
  */
 export const getSubscriptionEndDate = (s = {}) => {
-  const startStr = s.startDate || s.admissionDate || (s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split("T")[0] : (typeof s.createdAt === "string" && s.createdAt.includes("T") ? s.createdAt.split("T")[0] : s.createdAt)) || "";
-  const endStr = s.endDate;
+  const createdStr = s.createdAt?.toDate ? s.createdAt.toDate().toISOString().split("T")[0] : (typeof s.createdAt === "string" && s.createdAt.includes("T") ? s.createdAt.split("T")[0] : (typeof s.createdAt === "string" ? s.createdAt : ""));
+  const submittedStr = s.submittedAt?.toDate ? s.submittedAt.toDate().toISOString().split("T")[0] : (typeof s.submittedAt === "string" && s.submittedAt.includes("T") ? s.submittedAt.split("T")[0] : (typeof s.submittedAt === "string" ? s.submittedAt : ""));
+  const appDate = submittedStr || createdStr;
+
+  let startStr = s.startDate || s.admissionDate || appDate || "";
+  let endStr = s.plannedExitDate || s.endDate;
   const dueStr = s.paymentDueDate;
+
+  // Safeguard: If student is Active/Approved, prevent obsolete dates from older sessions
+  if (appDate && (s.status === "Active" || s.approvalStatus === "Approved")) {
+    if (startStr && startStr < appDate) {
+      startStr = appDate;
+    }
+    if (endStr && endStr < appDate) {
+      const dStart = new Date(`${startStr}T00:00:00`);
+      if (!isNaN(dStart.getTime())) {
+        const corr = new Date(dStart);
+        corr.setMonth(corr.getMonth() + 1);
+        endStr = corr.toISOString().split("T")[0];
+      }
+    }
+  }
 
   if (endStr && startStr) {
     const dStart = new Date(`${startStr}T00:00:00`);
