@@ -37,6 +37,29 @@ export const initSettingsAdminUI = async () => {
   const qrEmpty = document.getElementById('setting-qr-empty');
   const qrStatus = document.getElementById('setting-qr-status');
 
+  const signatureUpload = document.getElementById('setting-signature-upload');
+  const signaturePreview = document.getElementById('setting-signature-preview');
+  const signatureEmpty = document.getElementById('setting-signature-empty');
+  const signatureRemove = document.getElementById('setting-signature-remove');
+  const signatureStatus = document.getElementById('setting-signature-status');
+  const signatoryTitleInput = document.getElementById('settings-signatory-title');
+
+  let savedSignatureUrl = "";
+  let uploadedSignatureBase64 = null;
+  let signatureRemoved = false;
+
+  const paintSignaturePreview = (url) => {
+    if (url) {
+      if (signaturePreview) { signaturePreview.src = url; signaturePreview.style.display = 'block'; }
+      if (signatureEmpty) signatureEmpty.style.display = 'none';
+      if (signatureRemove) signatureRemove.style.display = 'inline-block';
+    } else {
+      if (signaturePreview) { signaturePreview.src = ''; signaturePreview.style.display = 'none'; }
+      if (signatureEmpty) signatureEmpty.style.display = 'block';
+      if (signatureRemove) signatureRemove.style.display = 'none';
+    }
+  };
+
   const paintQrPreview = (url) => {
     if (url) {
       if (qrPreview) { qrPreview.src = url; qrPreview.style.display = 'block'; }
@@ -90,6 +113,13 @@ export const initSettingsAdminUI = async () => {
       savedQrUrl = currentSettings.qrCodeUrl;
       paintQrPreview(savedQrUrl);
     }
+    if (currentSettings.signatureUrl) {
+      savedSignatureUrl = currentSettings.signatureUrl;
+      paintSignaturePreview(savedSignatureUrl);
+    }
+    if (signatoryTitleInput) {
+      signatoryTitleInput.value = currentSettings.signatoryTitle || "Authorised Sign.";
+    }
     if (langSelect && currentSettings.language) {
       langSelect.value = currentSettings.language;
     }
@@ -125,6 +155,33 @@ export const initSettingsAdminUI = async () => {
         if (qrStatus) qrStatus.textContent = 'New QR selected — press Save Changes.';
       };
       reader.readAsDataURL(file);
+    });
+  }
+
+  // Handle Signature Upload & Removal
+  if (signatureUpload) {
+    signatureUpload.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        uploadedSignatureBase64 = ev.target.result;
+        signatureRemoved = false;
+        paintSignaturePreview(uploadedSignatureBase64);
+        if (signatureStatus) signatureStatus.textContent = 'New signature selected - press Save Changes.';
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (signatureRemove) {
+    signatureRemove.addEventListener('click', () => {
+      uploadedSignatureBase64 = null;
+      savedSignatureUrl = "";
+      signatureRemoved = true;
+      if (signatureUpload) signatureUpload.value = '';
+      paintSignaturePreview('');
+      if (signatureStatus) signatureStatus.textContent = 'Signature removed - press Save Changes.';
     });
   }
 
@@ -170,6 +227,14 @@ export const initSettingsAdminUI = async () => {
         if (qrUpload || qrPreview) {
           payload.qrCodeUrl = uploadedBase64 || savedQrUrl || "";
         }
+        if (signatureRemoved) {
+          payload.signatureUrl = "";
+        } else if (uploadedSignatureBase64) {
+          payload.signatureUrl = uploadedSignatureBase64;
+        }
+        if (signatoryTitleInput) {
+          payload.signatoryTitle = signatoryTitleInput.value.trim() || "Authorised Sign.";
+        }
         if (langSelect) {
           payload.language = langSelect.value;
         }
@@ -181,8 +246,15 @@ export const initSettingsAdminUI = async () => {
           savedQrUrl = payload.qrCodeUrl;
           uploadedBase64 = null;
           import('./qrService.js').then(({ refreshQrCache }) => refreshQrCache()).catch(() => {});
-          if (qrStatus) qrStatus.textContent = payload.qrCodeUrl ? 'QR live across the portal ✓' : '';
+          if (qrStatus) qrStatus.textContent = payload.qrCodeUrl ? 'QR live across the portal' : '';
           if (qrUpload) qrUpload.value = '';
+        }
+        if (payload.signatureUrl !== undefined) {
+          savedSignatureUrl = payload.signatureUrl;
+          uploadedSignatureBase64 = null;
+          signatureRemoved = false;
+          if (signatureStatus) signatureStatus.textContent = payload.signatureUrl ? 'Signature saved live' : 'Signature cleared';
+          if (signatureUpload) signatureUpload.value = '';
         }
 
         if (langSelect) {

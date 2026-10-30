@@ -25,6 +25,9 @@ import { initAdminNotificationUI } from "./services/adminNotificationUI.js";
 import { initStaffAdminUI } from "./services/staffAdminUI.js";
 import { initTasksAdminUI } from "./services/tasksAdminUI.js";
 import { initSettingsAdminUI } from "./services/settingsAdminUI.js";
+import { openReceiptModal, downloadReceiptPDF } from "./services/receiptService.js?v=3";
+window.openReceiptModal = openReceiptModal;
+window.downloadReceiptPDF = downloadReceiptPDF;
 import "./services/translationService.js";
 import "./services/whatsappModalUI.js"; // Auto-injects modal styles and functions
 

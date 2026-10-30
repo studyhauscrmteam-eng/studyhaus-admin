@@ -1877,7 +1877,13 @@ export const initAdmissionsUI = async () => {
                   payDoc.paymentScreenshotUrl = data.paymentScreenshotUrl;
                   payDoc.screenshots = [data.paymentScreenshotUrl];
                 }
-                await addDoc(collection(db, "payments"), payDoc);
+                try {
+                  const { getNextReceiptNumber } = await import("./receiptService.js");
+                  const rNo = await getNextReceiptNumber();
+                  payDoc.receiptNo = rNo;
+                  payDoc.invoiceNo = rNo;
+                } catch (_) {}
+await addDoc(collection(db, "payments"), payDoc);
 
                 // Also record in renewals collection so renewal history is synchronized
                 try {

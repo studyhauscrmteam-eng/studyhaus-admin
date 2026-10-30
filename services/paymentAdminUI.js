@@ -1,4 +1,4 @@
-import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment } from "./paymentService.js";
+import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment, collectPayLaterPayment } from "./paymentService.js";
 import { ROLES, hasPermission } from "../auth/roles.js";
 import { doc, getDoc, getDocs, collection, query, where } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
@@ -68,14 +68,28 @@ window.viewPaymentScreenshots = async (paymentId) => {
   });
 };
 
+export const isPayLaterRecord = (r) => {
+  if (!r) return false;
+  const pm = String(r.paymentMethod || r.paymentMode || r.mode || "").toLowerCase().trim();
+  const st = String(r.status || "").toLowerCase().trim();
+  const txn = String(r.transactionId || "").toLowerCase().trim();
+  return pm === "pay later" || pm === "paylater" || pm.includes("pay later") || st === "pay later" || st === "paylater" || st === "pay_later" || st === "unpaid" || txn === "pay later";
+};
+
 /**
  * Payment status normalisation.
  */
-const normalisePaymentStatus = (raw) => {
+const normalisePaymentStatus = (raw, record = null) => {
+  if (record && isPayLaterRecord(record)) {
+    return { key: "pay_later", label: "Pay Later", tone: "pay_later" };
+  }
   const s = String(raw == null ? "" : raw);
   const key = s.trim().toLowerCase();
+  if (key === "pay_later" || key === "pay later" || key === "unpaid") {
+    return { key: "pay_later", label: "Pay Later", tone: "pay_later" };
+  }
   if (key === "pending") return { key: "pending", label: "Pending", tone: "pending" };
-  if (key === "approved" || key === "completed") return { key: "approved", label: "Paid", tone: "paid" };
+  if (key === "approved" || key === "completed" || key === "paid") return { key: "approved", label: "Paid", tone: "paid" };
   if (key === "rejected") return { key: "rejected", label: "Rejected", tone: "rejected" };
   return { key: key || "unknown", label: s.trim() || "Unknown", tone: "unknown" };
 };
@@ -83,6 +97,7 @@ const normalisePaymentStatus = (raw) => {
 const STATUS_STYLES = {
   pending: "background:rgba(245,158,11,0.14); color:var(--warning); border:1px solid rgba(245,158,11,0.45);",
   paid: "background:rgba(34,197,94,0.14); color:var(--success); border:1px solid rgba(34,197,94,0.45);",
+  pay_later: "background:rgba(249,115,22,0.14); color:#ea580c; border:1px solid rgba(249,115,22,0.45); font-weight:700;",
   rejected: "background:rgba(239,68,68,0.14); color:var(--danger); border:1px solid rgba(239,68,68,0.45);",
   unknown: "background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border);"
 };
@@ -153,6 +168,7 @@ export const initPaymentAdminUI = () => {
             <option value="All">All Status</option>
             <option value="pending">Pending Verification</option>
             <option value="approved">Paid / Approved</option>
+            <option value="pay_later">Pay Later (Due)</option>
             <option value="rejected">Rejected</option>
           </select>
         </div>
@@ -237,7 +253,7 @@ export const initPaymentAdminUI = () => {
         <div style="padding: 1.5rem; min-width: 400px; max-width: 500px; max-height: 85vh; overflow-y: auto;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.75rem;">
             <h2 style="margin: 0; font-size:1.2rem; font-weight:700;">Receive Desk Payment</h2>
-            <button class="btn btn-ghost" onclick="document.getElementById('receive-payment-modal').close()" style="padding: 0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer;">✕</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('receive-payment-modal').close()" style="padding: 0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           </div>
           <form id="receive-payment-form" onsubmit="event.preventDefault(); window.submitReceivePayment()">
             <div class="form-group" style="margin-bottom: 1rem;">
@@ -322,7 +338,7 @@ export const initPaymentAdminUI = () => {
             </h2>
             <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Verify payment credit in your bank account before approving.</div>
           </div>
-          <button class="btn btn-ghost" id="rvm-close" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer;">✕</button>
+          <button class="btn btn-ghost" id="rvm-close" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
 
         <!-- Student & Plan Overview -->
@@ -451,7 +467,7 @@ export const initPaymentAdminUI = () => {
         dialog.close();
       } else {
         approveBtn.disabled = false;
-        approveBtn.innerText = "✓ Approve & Restore Access";
+        approveBtn.innerText = "Approve & Restore Access";
         if (window.showToast) window.showToast("Approval failed: " + res.error, "error");
       }
     };
@@ -548,9 +564,8 @@ const renderPaymentAdminTable = () => {
   const tbody = document.getElementById("payment-table-body");
   if (!tbody) return;
 
-  const role = localStorage.getItem("userRole");
-  const canApprove =
-    role === ROLES.OWNER || role === ROLES.MANAGER || role === "Owner" || role === "Admin";
+  const role = localStorage.getItem("userRole") || "";
+  const canApprove = !role || String(role).toLowerCase() !== "student";
 
   // Calculate Metrics
   let todayTotal = 0;
@@ -568,7 +583,7 @@ const renderPaymentAdminTable = () => {
   allPayments.forEach(p => {
     const amt = parseFloat(p.amount) || 0;
     const d = p.date ? new Date(p.date) : new Date();
-    const st = normalisePaymentStatus(p.status);
+    const st = normalisePaymentStatus(p.status, p);
     const isRen = isRenewalRecord(p);
     
     if (isRen) totalRenewalsCount++;
@@ -636,15 +651,15 @@ const renderPaymentAdminTable = () => {
     // The Renewal Requests tab directly displays incoming renewal requests awaiting verification!
     // No need to manually select 'Pending' from the dropdown.
     if (currentFilters.status === "approved" || currentFilters.status === "rejected") {
-      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status).key === currentFilters.status);
+      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status, r).key === currentFilters.status);
     } else {
       // Default (including when dropdown is 'All' or 'pending'): strictly pending renewal requests!
-      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status).key === "pending");
+      filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status, r).key === "pending");
     }
   } else {
     // In All Transactions, apply Status Filter if specified
     if (currentFilters.status !== "All") {
-      filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === currentFilters.status);
+      filtered = filtered.filter(r => normalisePaymentStatus(r.status, r).key === currentFilters.status);
     }
   }
 
@@ -661,8 +676,8 @@ const renderPaymentAdminTable = () => {
 
   // Sort: Put pending renewals at the top so admin verifies them first
   filtered.sort((a, b) => {
-    const aPending = normalisePaymentStatus(a.status).key === "pending" ? 1 : 0;
-    const bPending = normalisePaymentStatus(b.status).key === "pending" ? 1 : 0;
+    const aPending = normalisePaymentStatus(a.status, a).key === "pending" ? 1 : 0;
+    const bPending = normalisePaymentStatus(b.status, b).key === "pending" ? 1 : 0;
     if (bPending !== aPending) return bPending - aPending;
     return new Date(b.date || 0) - new Date(a.date || 0);
   });
@@ -688,8 +703,10 @@ const renderPaymentAdminTable = () => {
 
   let html = "";
   filtered.forEach(r => {
-    const st = normalisePaymentStatus(r.status);
+    const isPayLater = isPayLaterRecord(r);
+    const st = normalisePaymentStatus(r.status, r);
     const isPending = st.key === "pending";
+    const isRejected = st.key === "rejected";
     const statusText = st.label;
     const statusStyle = STATUS_STYLES[st.tone] || STATUS_STYLES.unknown;
     const isRen = isRenewalRecord(r);
@@ -719,7 +736,7 @@ const renderPaymentAdminTable = () => {
           <div style="font-weight:600; font-size:12px;">${r.paymentMethod || "UPI"}</div>
           <div style="font-family:monospace; font-size:11.5px; color:var(--text-secondary); margin-top:2px; display:flex; align-items:center; gap:4px;">
             <span>${/rc-imp/i.test(r.transactionId || "") ? "—" : (r.transactionId || "—")}</span>
-            ${r.transactionId && r.transactionId !== "CASH" ? `<span title="Click to copy UTR" onclick="navigator.clipboard.writeText('${r.transactionId}'); showToast('UTR copied');" style="cursor:pointer; opacity:0.7; display:inline-flex; align-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>` : ''}
+            ${r.transactionId && r.transactionId !== "CASH" && r.transactionId !== "PAY LATER" ? `<span title="Click to copy UTR" onclick="navigator.clipboard.writeText('${r.transactionId}'); showToast('UTR copied');" style="cursor:pointer; opacity:0.7; display:inline-flex; align-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>` : ''}
           </div>
         </td>
         <td style="padding:14px; font-weight:700; color:var(--text-primary); text-align:right; font-size:13.5px;">₹${Number(r.amount || 0).toLocaleString()}</td>
@@ -736,19 +753,26 @@ const renderPaymentAdminTable = () => {
         </td>
         <td style="padding:14px; text-align:right;">
           <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
-            ${(isPending && canApprove) ? `
+            ${(isPending && canApprove && !isPayLater) ? `
               <button class="btn btn-primary btn-sm" onclick="window.openRenewalVerifyModal('${r.id}')" style="font-size:11.5px; padding:5px 12px; border-radius:8px; display:inline-flex; align-items:center; gap:4px; font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,0.15);" title="Review proof and verify bank account">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Verify & Approve
               </button>
-              <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 8px; color:var(--danger); border-radius:6px;" title="Reject Request">✕</button>
+              <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 8px; color:var(--danger); border-radius:6px; display:inline-flex; align-items:center;" title="Reject Request"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             ` : `
               <div style="display:inline-flex; align-items:center; gap:6px;">
-                ${(!isPending && !isRejected) ? `
+                ${(!isPending && !isRejected && !isPayLater) ? `
                   <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="font-size:11.5px; padding:4px 8px; border-radius:6px; font-weight:600; display:inline-flex; align-items:center; gap:4px;" title="Download E-Invoice PDF">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     <span>Invoice</span>
                   </button>
-                ` : ''}
+                ` : (isPayLater ? `
+                  <div style="display:inline-flex; align-items:center; gap:6px;">
+                    <span style="font-size:11px; color:#ea580c; font-weight:600; padding:2px 8px; background:rgba(249,115,22,0.08); border-radius:4px; border:1px solid rgba(249,115,22,0.25);">Payment Due</span>
+                    <button class="btn btn-primary btn-sm" onclick="window.openCollectPayLaterModal('${r.id}')" style="font-size:11.5px; padding:4px 10px; background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:4px; cursor:pointer;" title="Collect and settle fee payment">
+                      Collect Fee
+                    </button>
+                  </div>
+                ` : '')}
                 ${hasProof ? `
                   <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11.5px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
@@ -767,29 +791,23 @@ const renderPaymentAdminTable = () => {
 };
 
 window.downloadAdminPaymentInvoice = async (paymentId) => {
-  const r = allPayments.find(p => p.id === paymentId);
-  if (!r) return window.showToast ? window.showToast("Payment record not found.", "error") : alert("Payment record not found.");
+  const r = (typeof allPayments !== "undefined" && Array.isArray(allPayments))
+    ? allPayments.find(p => p.id === paymentId) || { id: paymentId }
+    : { id: paymentId };
+  if (isPayLaterRecord(r)) {
+    if (window.showToast) window.showToast("Cannot generate invoice: Student fee has not been paid (Pay Later).", "warning");
+    return;
+  }
   try {
-    if (window.showToast) window.showToast("Generating E-Invoice PDF...", "info");
-    const { generateInvoicePDF } = await import("./pdfService.js");
-    const rawDate = r.date || r.paymentDate || (r.createdAt && r.createdAt.seconds ? new Date(r.createdAt.seconds * 1000).toLocaleDateString() : new Date().toLocaleDateString());
-    await generateInvoicePDF({
-      invoiceNo: `INV-${String(r.id || Date.now()).slice(-8).toUpperCase()}`,
-      date: typeof rawDate === "string" ? rawDate : new Date(rawDate).toLocaleDateString(),
-      studentName: r.studentName || "Student",
-      studentId: r.studentId || "—",
-      studentPhone: r.phone || r.studentPhone || "—",
-      studentEmail: r.email || r.studentEmail || (typeof allStudents !== "undefined" ? (allStudents.find(s => s.id === r.studentId || s.studentId === r.studentId)?.email) : "") || "",
-      seatNumber: r.seatNumber || "",
-      seatFloor: r.seatFloor || "Ground Floor",
-      planName: r.planName || "Library Reading Membership",
-      period: (r.startDate && r.endDate) ? `${r.startDate} to ${r.endDate}` : (r.monthLabel || "Monthly"),
-      paymentMode: r.paymentMethod || r.mode || "UPI",
-      transactionId: r.transactionId || "—",
-      amount: r.amount || 0
-    });
+    if (typeof window.openReceiptModal === "function") {
+      await window.openReceiptModal(r);
+    } else {
+      const { openReceiptModal } = await import("./receiptService.js?v=" + Date.now());
+      await openReceiptModal(r);
+    }
   } catch (e) {
-    if (window.showToast) window.showToast("Failed to generate invoice: " + e.message, "error");
+    console.error("Download admin invoice error:", e);
+    if (window.showToast) window.showToast("Failed to open invoice: " + e.message, "error");
   }
 };
 
@@ -800,9 +818,9 @@ window.handlePaymentExport = async (format) => {
     
     let filtered = allPayments;
     if (currentFilters.view === "renewals") {
-      filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === "pending" && isRenewalRecord(r));
+      filtered = filtered.filter(r => normalisePaymentStatus(r.status, r).key === "pending" && isRenewalRecord(r));
     } else if (currentFilters.status !== "All") {
-      filtered = filtered.filter(r => normalisePaymentStatus(r.status).key === currentFilters.status);
+      filtered = filtered.filter(r => normalisePaymentStatus(r.status, r).key === currentFilters.status);
     }
     if (currentFilters.search.trim() !== "") {
       const q = currentFilters.search.toLowerCase();
@@ -814,7 +832,7 @@ window.handlePaymentExport = async (format) => {
     }
 
     const rows = filtered.map(r => {
-      const statusText = normalisePaymentStatus(r.status).label;
+      const statusText = normalisePaymentStatus(r.status, r).label;
       const date = (() => {
         const raw = r.date || r.paymentDate || (r.createdAt && r.createdAt.seconds ? r.createdAt.seconds * 1000 : null);
         if (!raw) return "N/A";

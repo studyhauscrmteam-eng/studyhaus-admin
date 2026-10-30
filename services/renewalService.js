@@ -37,6 +37,14 @@ export const listenToRenewalHistory = (studentId, onUpdate, onError) => {
 export const processRenewal = async (data) => {
   try {
     validateRenewal(data);
+
+    let receiptNo = "";
+    if (Number(data.amount) >= 0) {
+      try {
+        const { getNextReceiptNumber } = await import("./receiptService.js");
+        receiptNo = await getNextReceiptNumber();
+      } catch (_) {}
+    }
     
     await runTransaction(db, async (transaction) => {
       // 1. Get references
@@ -108,6 +116,10 @@ export const processRenewal = async (data) => {
           recordedBy: data.renewedBy || "Admin",
           createdAt: serverTimestamp()
         };
+        if (receiptNo) {
+          payRecord.receiptNo = receiptNo;
+          payRecord.invoiceNo = receiptNo;
+        }
         if (ssUrl) {
           payRecord.screenshot = ssUrl;
           payRecord.paymentScreenshotUrl = ssUrl;

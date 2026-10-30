@@ -51,7 +51,7 @@ export const listenToUnreadNotifications = (onUpdate) => {
       },
       () => onUpdate(0)
     );
-  } catch {
+  } catch (_) {
     onUpdate(0);
     return () => {};
   }
@@ -78,7 +78,7 @@ export const listenToAdminNotifications = (onUpdate, max = 50) => {
       },
       () => onUpdate([])
     );
-  } catch {
+  } catch (_) {
     onUpdate([]);
     return () => {};
   }

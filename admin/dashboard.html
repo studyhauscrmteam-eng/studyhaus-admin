@@ -15,6 +15,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="../style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Vadodara:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 
 <body>
@@ -1729,6 +1730,37 @@
               </div>
             </div>
 
+            <!-- Receipt & Authorised Signature Card -->
+            <div class="card settings-card">
+              <div class="settings-section-title">Receipt & Authorised Signature</div>
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.4;">
+                Upload the official signature image for fee receipts. This signature appears in the Authorised Sign box on printed and downloaded receipts across Admin and Student portals.
+              </p>
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem;">
+                <div style="width: 220px; height: 95px; border-radius: 10px; border: 1.5px dashed var(--border); overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--bg-hover); padding: 8px; box-sizing: border-box;">
+                  <img id="setting-signature-preview" src="" alt="Authorised Signature"
+                    style="max-width: 100%; max-height: 100%; object-fit: contain; display: none;" />
+                  <span id="setting-signature-empty"
+                    style="color: var(--text-muted); font-size: 12px; text-align: center;">No signature uploaded</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <label class="btn btn-secondary" style="cursor: pointer; font-size: 12px; padding: 6px 14px;">
+                    Upload Signature
+                    <input type="file" id="setting-signature-upload" accept="image/*" style="display: none;" />
+                  </label>
+                  <button type="button" id="setting-signature-remove" class="btn btn-outline" style="font-size: 12px; padding: 6px 14px; display: none;">
+                    Remove
+                  </button>
+                </div>
+                <div id="setting-signature-status" style="font-size: 12px; color: var(--accent-emerald); min-height: 18px;">
+                </div>
+              </div>
+              <div class="form-group" style="margin-top: 1rem;">
+                <label>Signatory Designation / Title</label>
+                <input type="text" id="settings-signatory-title" placeholder="e.g. Authorised Sign." value="Authorised Sign." />
+              </div>
+            </div>
+
             <!-- 24/7 Day & Night Shift Schedules (Requirement 7) -->
             <div class="card settings-card" style="grid-column: 1 / -1;">
               <div class="settings-section-title" style="margin-bottom:0.25rem;">24/7 Day & Night Access Schedules</div>
@@ -2033,9 +2065,9 @@
       }
     }
   </script>
-  <script src="../app.js"></script>
+  <script src="../app.js?v=3"></script>
 
-  <script type="module" src="../firebase-entry.js"></script>
+  <script type="module" src="../firebase-entry.js?v=3"></script>
 </body>
 
 </html>
