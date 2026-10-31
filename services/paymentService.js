@@ -111,10 +111,45 @@ export const listenToMyPayments = (studentId, onUpdate, onError) => {
 // ADMIN PAYMENT ACTIONS
 // ===============================================
 
+export const parseStandardDate = (input) => {
+  if (!input) return null;
+  if (input instanceof Date && !isNaN(input.getTime())) return input;
+  if (typeof input === "object" && typeof input.seconds === "number") {
+    return new Date(input.seconds * 1000);
+  }
+  let s = String(input).trim();
+  if (!s) return null;
+
+  // Strip 'at ' from timestamps like 'October 26, 2026 at 8:11 am'
+  s = s.replace(/\s+at\s+/i, " ");
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if (m) {
+    const d = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const y = parseInt(m[3], 10);
+    return new Date(y, mo, d);
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if (m) {
+    const y = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10) - 1;
+    const d = parseInt(m[3], 10);
+    return new Date(y, mo, d);
+  }
+
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
 export const listenToAllPayments = (onUpdate) => {
   let payments = [];
   let renewals = [];
-  const studentMap = new Map();
+  let rawStudents = [];
+  const studentLookup = new Map();
 
   const emit = () => {
     const unifiedMap = new Map();
@@ -122,56 +157,59 @@ export const listenToAllPayments = (onUpdate) => {
     const cleanPhone = (p) => String(p || "").replace(/\D/g, "").slice(-10);
 
     const getStudentObj = (sId, sUid, sName, rawPhone) => {
-      if (sId && studentMap.has(sId)) return studentMap.get(sId);
-      if (sUid && studentMap.has(sUid)) return studentMap.get(sUid);
+      if (sId && studentLookup.has(sId)) return studentLookup.get(sId);
+      if (sUid && studentLookup.has(sUid)) return studentLookup.get(sUid);
       const cp = cleanPhone(rawPhone);
-      if (cp && studentMap.has(cp)) return studentMap.get(cp);
-      if (rawPhone && studentMap.has(rawPhone)) return studentMap.get(rawPhone);
-      if (sName && studentMap.has(String(sName).toLowerCase().trim())) return studentMap.get(String(sName).toLowerCase().trim());
+      if (cp && studentLookup.has(cp)) return studentLookup.get(cp);
+      if (rawPhone && studentLookup.has(rawPhone)) return studentLookup.get(rawPhone);
+      if (sName && studentLookup.has(String(sName).toLowerCase().trim())) return studentLookup.get(String(sName).toLowerCase().trim());
       return null;
     };
 
     const isOldStudent = (sObj, rec) => {
       if (sObj) {
+        if (sObj.isLiveActive) return false;
         const st = String(sObj.status || "").toLowerCase().trim();
         if (st === "old" || st === "old student" || st === "inactive" || st === "expired" || sObj.portalAccessDisabled === true || sObj.studentDeleted === true) return true;
+        return false;
       }
       if (rec) {
         const rst = String(rec.studentStatus || rec.status || "").toLowerCase().trim();
         if (rst === "old" || rst === "old student" || rst === "archived") return true;
       }
-      return false;
+      return true;
     };
 
-    // 1. Ingest all records from 'payments' collection (EXCLUDING Old students)
+    // 1. Ingest all records from 'payments' collection
     payments.forEach(p => {
       const sObj = getStudentObj(p.studentId, p.uid, p.studentName, p.studentPhone || p.phone);
-      if (isOldStudent(sObj, p)) return; // Skip old student transactions
 
       const sName = p.studentName || sObj?.name || "Student";
       const sPhone = p.studentPhone || p.phone || sObj?.phone || "";
       const sId = p.studentId || sObj?.studentId || sObj?.id || "";
       const seatNo = p.seatNumber || sObj?.seatNumber || "";
       const seatFl = p.seatFloor || sObj?.seatFloor || "";
-      const dateStr = (() => {
-        if (p.date) return p.date;
-        if (p.paymentDate) return p.paymentDate;
-        if (p.createdAt?.seconds) return new Date(p.createdAt.seconds * 1000).toISOString();
-        return "";
-      })();
+      const parsedD = parseStandardDate(p.date || p.paymentDate || p.createdAt);
+      const dateStr = parsedD ? parsedD.toISOString() : (p.date || p.paymentDate || "");
       const txn = String(p.transactionId || "").trim().toUpperCase();
       const amt = Number(p.amount) || 0;
       const stDate = p.startDate || "";
       const enDate = p.endDate || "";
-      const key = (txn && txn !== "CASH" && txn !== "RC-N/A" && !/rc-imp/i.test(txn))
-        ? `txn_${txn}`
-        : `${sId || sName}_${stDate}_${enDate}_${amt}_${p.source || 'payment'}`;
+
+      // Deduplicate on real transaction ID if available; otherwise use document ID to prevent collisions
+      const cleanTxn = (txn && !/^(cash|pay\s*later|paylater|rc-n\/a|n\/a|none|undefined|null|—|-)$/i.test(txn) && !/rc-imp/i.test(txn)) ? txn : "";
+      const key = cleanTxn
+        ? `txn_${cleanTxn}`
+        : `pay_${p.id || (sId + '_' + stDate + '_' + enDate + '_' + amt)}`;
 
       const pmP = String(p.paymentMethod || p.paymentMode || p.mode || "").trim();
       const isPlP = pmP.toLowerCase().includes("pay later") || String(p.status || "").toLowerCase().includes("pay later") || String(p.status || "").toLowerCase() === "pay_later" || txn === "PAY LATER";
 
+      const isOldP = isOldStudent(sObj, p);
       unifiedMap.set(key, {
         ...p,
+        id: p.id || key,
+        studentLifecycle: isOldP ? "old" : "active",
         studentId: sId,
         studentName: sName,
         studentPhone: sPhone,
@@ -185,30 +223,27 @@ export const listenToAllPayments = (onUpdate) => {
       });
     });
 
-    // 2. Ingest all records from 'renewals' collection (EXCLUDING Old students)
+    // 2. Ingest all records from 'renewals' collection
     renewals.forEach(r => {
       const sObj = getStudentObj(r.studentId, r.uid, r.studentName, r.studentPhone || r.phone);
-      if (isOldStudent(sObj, r)) return; // Skip old student transactions
 
       const sName = r.studentName || sObj?.name || "Student";
       const sPhone = r.studentPhone || sObj?.phone || "";
       const sId = r.studentId || sObj?.studentId || sObj?.id || "";
       const seatNo = r.seatNumber || sObj?.seatNumber || "";
       const seatFl = r.seatFloor || sObj?.seatFloor || "";
-      const dateStr = (() => {
-        if (r.createdAt?.seconds) return new Date(r.createdAt.seconds * 1000).toISOString();
-        if (r.date) return r.date;
-        if (r.paymentDate) return r.paymentDate;
-        if (r.startDate) return r.startDate;
-        return "";
-      })();
+      const parsedD = parseStandardDate(r.createdAt || r.date || r.paymentDate || r.startDate);
+      const dateStr = parsedD ? parsedD.toISOString() : (r.date || r.paymentDate || r.startDate || "");
       const txn = String(r.transactionId || "").trim().toUpperCase();
       const amt = Number(r.amount) || 0;
       const stDate = r.startDate || "";
       const enDate = r.endDate || "";
-      const key = (txn && txn !== "CASH" && txn !== "RC-N/A" && !/rc-imp/i.test(txn))
-        ? `txn_${txn}`
-        : `${sId || sName}_${stDate}_${enDate}_${amt}_renewal`;
+
+      // Deduplicate on real transaction ID if available; otherwise use document ID to prevent collisions
+      const cleanTxn = (txn && !/^(cash|pay\s*later|paylater|rc-n\/a|n\/a|none|undefined|null|—|-)$/i.test(txn) && !/rc-imp/i.test(txn)) ? txn : "";
+      const key = cleanTxn
+        ? `txn_${cleanTxn}`
+        : `ren_${r.id || (sId + '_' + stDate + '_' + enDate + '_' + amt)}`;
 
       const pmR = String(r.paymentMethod || r.paymentMode || r.mode || "").trim();
       const isPlR = pmR.toLowerCase().includes("pay later") || String(r.status || "").toLowerCase().includes("pay later") || String(r.status || "").toLowerCase() === "pay_later" || txn === "PAY LATER";
@@ -220,10 +255,11 @@ export const listenToAllPayments = (onUpdate) => {
       });
       if (isPlR && hasRealPayment) return; // Skip old pay later renewal when real payment exists
 
+      const isOldR = isOldStudent(sObj, r);
       const existing = unifiedMap.get(key);
       if (!existing) {
         unifiedMap.set(key, {
-          id: r.id,
+          id: r.id || key,
           studentId: sId,
           studentName: sName,
           studentPhone: sPhone,
@@ -244,6 +280,7 @@ export const listenToAllPayments = (onUpdate) => {
           screenshot: r.screenshot || r.paymentScreenshotUrl || (Array.isArray(r.screenshots) ? r.screenshots[0] : ""),
           paymentScreenshotUrl: r.screenshot || r.paymentScreenshotUrl || (Array.isArray(r.screenshots) ? r.screenshots[0] : ""),
           screenshots: Array.isArray(r.screenshots) ? r.screenshots : (r.screenshot ? [r.screenshot] : []),
+          studentLifecycle: isOldR ? "old" : "active",
           createdAt: r.createdAt || null
         });
       } else {
@@ -257,37 +294,30 @@ export const listenToAllPayments = (onUpdate) => {
       }
     });
 
-    // 3. Ingest active/current students whose admission payment is on their student record
-    //    (e.g. Kishan chudasama and any new admitted student who does not yet have a separate payments doc)
-    studentMap.forEach(s => {
-      if (isOldStudent(s, null)) return; // Skip old students
-      if (s.isAlias) return; // Skip alias map entries
-
-      const hasPaymentData = s.startDate || s.paymentMethod || s.planName || s.status === "Active" || s.approvalStatus === "Approved";
-      if (!hasPaymentData) return;
-
+    // 3. Ingest EVERY LIVE ACTIVE student from rawStudents so their admission/payment log is GUARANTEED to be present
+    rawStudents.forEach(s => {
       const sId = s.id || s.studentId || "";
       const sName = s.name || "";
+      if (!sName || sName === "Student") return;
+
+      const isLive = s.isLiveActive;
+      if (!isLive) return; // Keep live active students only
+
+      // Check if this student already has any record in unifiedMap
       const alreadyHas = Array.from(unifiedMap.values()).some(u => {
         const sameStudent = (u.studentId && sId && (u.studentId === sId || u.studentId === s.docId)) ||
                             (u.studentName && sName && u.studentName.toLowerCase().trim() === sName.toLowerCase().trim());
-        if (!sameStudent) return false;
-        if (u.id === "admission_" + s.id || u.source === "admission" || u.source === "pay_later") return true;
-        if (s.startDate && u.startDate && s.startDate === u.startDate) return true;
-        return false;
+        return sameStudent;
       });
 
       if (!alreadyHas) {
         const sAmt = Number(s.amount || s.planPrice || s.fee || 1000);
-        const sDateStr = (() => {
-          if (s.startDate) return s.startDate;
-          if (s.createdAt?.seconds) return new Date(s.createdAt.seconds * 1000).toISOString();
-          if (s.submittedAt?.seconds) return new Date(s.submittedAt.seconds * 1000).toISOString();
-          return new Date().toISOString();
-        })();
+        const parsedJoinDate = parseStandardDate(s.startDate) || parseStandardDate(s.createdAt) || parseStandardDate(s.submittedAt) || new Date();
+        const sDateStr = parsedJoinDate.toISOString();
 
         const pm = String(s.paymentMethod || "").trim();
-        const isPl = pm.toLowerCase() === "pay later" || pm.toLowerCase() === "paylater";
+        const pStatus = String(s.paymentStatus || "").toLowerCase();
+        const isPl = pm.toLowerCase().includes("pay later") || pm.toLowerCase() === "paylater" || pStatus === "unpaid" || pStatus === "pay later" || pStatus === "pay_later";
 
         const key = `student_admission_${s.id}`;
         unifiedMap.set(key, {
@@ -299,12 +329,14 @@ export const listenToAllPayments = (onUpdate) => {
           planName: s.planName || "Regular Fixed Seat",
           amount: sAmt,
           paymentMethod: isPl ? "Pay Later" : (pm || "UPI"),
-          transactionId: s.transactionId || (isPl ? "PAY LATER" : "ADMISSION"),
+          transactionId: s.transactionId || (isPl ? "PAY LATER" : "—"),
           startDate: s.startDate || sDateStr.split("T")[0],
           endDate: s.endDate || s.paymentDueDate || "",
           seatNumber: s.seatNumber || s.seatAssigned || "",
           seatFloor: s.seatFloor || "",
-          source: "admission",
+          source: isPl ? "pay_later" : "admission",
+          isPayLater: isPl,
+          studentLifecycle: "active",
           status: isPl ? "pay_later" : ((s.approvalStatus === "Pending" || s.status === "Pending") ? "pending" : "approved"),
           date: sDateStr,
           paymentDate: s.startDate || sDateStr.split("T")[0],
@@ -318,11 +350,8 @@ export const listenToAllPayments = (onUpdate) => {
 
     const records = Array.from(unifiedMap.values());
     const getTs = (x) => {
-      if (x.createdAt?.seconds) return x.createdAt.seconds * 1000;
-      const raw = x.date || x.paymentDate || x.startDate;
-      if (!raw) return 0;
-      const t = new Date(raw).getTime();
-      return isNaN(t) ? 0 : t;
+      const parsed = parseStandardDate(x.date || x.paymentDate || x.startDate || x.createdAt);
+      return parsed ? parsed.getTime() : 0;
     };
     records.sort((a, b) => getTs(b) - getTs(a));
     onUpdate(records);
@@ -341,9 +370,15 @@ export const listenToAllPayments = (onUpdate) => {
   }, (err) => console.warn("[renewals] listen error:", err));
 
   const unsubStudents = onSnapshot(query(collection(db, "students")), (snap) => {
-    studentMap.clear();
+    rawStudents = [];
+    studentLookup.clear();
     snap.forEach(doc => {
       const d = doc.data() || {};
+      const st = String(d.status || "").trim();
+      const ap = String(d.approvalStatus || "").trim();
+      const isOld = st.toLowerCase() === "old" || st.toLowerCase() === "old student" || st.toLowerCase() === "inactive" || st.toLowerCase() === "expired" || d.portalAccessDisabled === true || d.studentDeleted === true;
+      const isLiveActive = !isOld && (st.toLowerCase() === "active" || ap.toLowerCase() === "approved");
+
       const studentObj = {
         id: doc.id,
         docId: doc.id,
@@ -354,6 +389,7 @@ export const listenToAllPayments = (onUpdate) => {
         phone: d.phone || "",
         status: d.status || "Active",
         approvalStatus: d.approvalStatus || "Approved",
+        isLiveActive,
         planName: d.planName || "",
         planPrice: d.planPrice || d.fee || d.amount || 0,
         amount: d.amount || d.planPrice || d.fee || 0,
@@ -370,16 +406,18 @@ export const listenToAllPayments = (onUpdate) => {
         submittedAt: d.submittedAt || null
       };
 
-      studentMap.set(doc.id, studentObj);
-      if (d.uid) studentMap.set(d.uid, { ...studentObj, isAlias: true });
-      if (d.studentId) studentMap.set(d.studentId, { ...studentObj, isAlias: true });
-      if (d.admissionNo && d.admissionNo !== d.studentId) studentMap.set(d.admissionNo, { ...studentObj, isAlias: true });
+      rawStudents.push(studentObj);
+
+      studentLookup.set(doc.id, studentObj);
+      if (d.uid && d.uid !== doc.id) studentLookup.set(d.uid, studentObj);
+      if (d.studentId) studentLookup.set(d.studentId, studentObj);
+      if (d.admissionNo && d.admissionNo !== d.studentId) studentLookup.set(d.admissionNo, studentObj);
       if (d.phone) {
-        studentMap.set(d.phone, { ...studentObj, isAlias: true });
+        studentLookup.set(d.phone, studentObj);
         const cp = String(d.phone).replace(/\D/g, "").slice(-10);
-        if (cp && cp !== d.phone) studentMap.set(cp, { ...studentObj, isAlias: true });
+        if (cp && cp !== d.phone) studentLookup.set(cp, studentObj);
       }
-      if (d.name) studentMap.set(d.name.toLowerCase().trim(), { ...studentObj, isAlias: true });
+      if (d.name) studentLookup.set(d.name.toLowerCase().trim(), studentObj);
     });
     emit();
   }, (err) => console.warn("[students] listen error:", err));
@@ -462,6 +500,10 @@ export const approvePayment = async (paymentId, approverName) => {
       newDueDateStr = currentDue.toISOString().split("T")[0];
     }
 
+    const isPayLater = paymentData.source === "pay_later" || paymentData.isPayLater === true;
+    const isAdmission = paymentData.source === "admission" || paymentData.source === "onboarding";
+    const isRenewal = !isPayLater && !isAdmission && (paymentData.source === "renewal" || paymentData.renewalMonths || paymentData.renewalDays);
+
     // 1. Update Student Record to Active with new due date and debt cleared
     const studentUpdates = {
       paymentDueDate: newDueDateStr,
@@ -470,6 +512,10 @@ export const approvePayment = async (paymentId, approverName) => {
       debt: 0,
       updatedAt: serverTimestamp()
     };
+    if (isPayLater) {
+      studentUpdates.paymentStatus = "Paid";
+      studentUpdates.pendingPayLaterPayment = false;
+    }
     if (paymentData.startDate) studentUpdates.startDate = paymentData.startDate;
     if (paymentData.endDate) studentUpdates.endDate = paymentData.endDate;
     if (paymentData.planId) studentUpdates.planId = paymentData.planId;
@@ -494,7 +540,12 @@ export const approvePayment = async (paymentId, approverName) => {
     }
     await updateDoc(paymentRef, payUpdates);
 
-    // 3. Record in renewals collection
+    if (isPayLater) {
+      payUpdates.isPayLater = false;
+    }
+
+    // 3. Record in renewals collection ONLY for real renewals (never Pay Later or Admission)
+    if (isRenewal) {
     try {
       const renDoc = {
         studentId: studentSnap.id,
@@ -521,15 +572,16 @@ export const approvePayment = async (paymentId, approverName) => {
       }
       await addDoc(collection(db, "renewals"), renDoc);
     } catch (_) {}
+    }
 
     // 4. Notify the student in notifications collection
     try {
       await addDoc(collection(db, "notifications"), {
         recipientId: studentData.uid || studentSnap.id,
         studentId: studentSnap.id,
-        type: "renewal_approved",
-        title: "Renewal Approved!",
-        message: `Your membership renewal for ${paymentData.planName || studentData.planName} has been approved. Your subscription is valid until ${newDueDateStr}. Full platform access is restored.`,
+        type: isRenewal ? "renewal_approved" : "payment_approved",
+        title: isPayLater ? "Admission Fee Approved!" : (isAdmission ? "Admission Payment Approved!" : "Renewal Approved!"),
+        message: isPayLater ? `Your admission fee payment for ${paymentData.planName || studentData.planName} has been verified and approved. Official Receipt #${receiptNo || ""} is available.` : `Your membership renewal for ${paymentData.planName || studentData.planName} has been approved. Your subscription is valid until ${newDueDateStr}. Full platform access is restored.`,
         date: new Date().toISOString(),
         read: false,
         createdAt: serverTimestamp()
@@ -679,6 +731,8 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
     let studentId = recordId;
     if (String(recordId).startsWith("admission_")) {
       studentId = recordId.replace("admission_", "");
+    } else if (String(recordId).startsWith("adm_")) {
+      studentId = recordId.replace("adm_", "");
     }
 
     let studentRef = doc(db, "students", studentId);
@@ -691,36 +745,6 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
         studentId = paySnap.data().studentId;
         studentRef = doc(db, "students", studentId);
         studentSnap = await getDoc(studentRef);
-      }
-    }
-
-    if (!studentSnap.exists()) {
-      const renRef = doc(db, "renewals", recordId);
-      const renSnap = await getDoc(renRef);
-      if (renSnap.exists()) {
-        const renData = renSnap.data();
-        studentId = renData.studentId || renData.uid;
-        if (studentId) {
-          studentRef = doc(db, "students", studentId);
-          studentSnap = await getDoc(studentRef);
-        }
-        if (!studentSnap.exists() && renData.studentName) {
-          const qName = query(collection(db, "students"), where("name", "==", renData.studentName));
-          const snapName = await getDocs(qName);
-          if (!snapName.empty) {
-            studentRef = snapName.docs[0].ref;
-            studentSnap = snapName.docs[0];
-          }
-        }
-        try {
-          await updateDoc(renRef, {
-            status: "Completed",
-            paymentMethod: isCash ? "Cash" : "UPI",
-            transactionId: cleanTxn,
-            renewedBy: approverName,
-            updatedAt: serverTimestamp()
-          });
-        } catch (_) {}
       }
     }
 
@@ -746,7 +770,11 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
     const { getNextReceiptNumber } = await import("./receiptService.js");
     const receiptNo = await getNextReceiptNumber();
 
-    // 1. Create approved payment in payments collection
+    const targetPaymentId = (recordId && !recordId.startsWith("admission_") && !recordId.startsWith("adm_"))
+      ? recordId
+      : ("adm_" + studentSnap.id);
+
+    // 1. Update/set single canonical payment in payments collection
     const paymentDoc = {
       studentId: studentSnap.id,
       studentUid: sData.uid || studentSnap.id,
@@ -764,6 +792,7 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
       invoiceNo: receiptNo,
       source: "pay_later",
       status: "approved",
+      isPayLater: false,
       startDate: sData.startDate || "",
       endDate: sData.endDate || sData.paymentDueDate || "",
       dueDateStr: sData.endDate || sData.paymentDueDate || "",
@@ -772,9 +801,9 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
       approvedBy: approverName || "Admin",
       approvalDate: serverTimestamp()
     };
-    await addDoc(collection(db, "payments"), paymentDoc);
+    await setDoc(doc(db, "payments", targetPaymentId), paymentDoc, { merge: true });
 
-    // 2. Update Student document
+    // 2. Update Student document: mark paid, remove pay later flag, clear debt
     await updateDoc(studentRef, {
       paymentMethod: isCash ? "Cash" : "UPI",
       transactionId: cleanTxn,
@@ -782,37 +811,19 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
       pendingPayLaterPayment: false,
       status: "Active",
       approvalStatus: "Approved",
-      paymentDueDate: sData.endDate || sData.paymentDueDate,
+      paymentDueDate: sData.endDate || sData.paymentDueDate || "",
       debt: 0,
+      lastPayLaterPaymentId: targetPaymentId,
       updatedAt: serverTimestamp()
     });
 
-    // 3. Mirror into renewals
-    try {
-      await addDoc(collection(db, "renewals"), {
-        studentId: studentSnap.id,
-        studentName: sData.name || "Student",
-        oldPlan: sData.planName || "",
-        newPlan: sData.planName || "",
-        startDate: sData.startDate || "",
-        endDate: sData.endDate || sData.paymentDueDate || "",
-        amount: finalAmount,
-        paymentMethod: isCash ? "Cash" : "UPI",
-        transactionId: cleanTxn,
-        renewedBy: approverName,
-        renewalNotes: "Collected Pay Later admission fee at desk",
-        status: "Completed",
-        createdAt: serverTimestamp()
-      });
-    } catch (_) {}
-
-    // 4. Notify student
+    // 3. Notify student (Pay later fee settled, NOT a renewal)
     try {
       await addDoc(collection(db, "notifications"), {
         recipientId: sData.uid || studentSnap.id,
         studentId: studentSnap.id,
         type: "payment_approved",
-        title: "Fee Payment Received",
+        title: "Admission Fee Paid",
         message: "Your admission fee of Rs. " + finalAmount + " has been collected via " + (isCash ? "Cash" : "UPI") + ". Official Receipt #" + receiptNo + " is available.",
         date: new Date().toISOString(),
         read: false,
@@ -820,7 +831,7 @@ export const collectPayLaterPayment = async (recordId, amount, paymentMethod = "
       });
     } catch (_) {}
 
-    return { success: true, receiptNo };
+    return { success: true, receiptNo, paymentId: targetPaymentId };
   } catch (error) {
     return { success: false, error: error.message };
   }

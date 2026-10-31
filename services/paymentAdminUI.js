@@ -1,4 +1,4 @@
-import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment, collectPayLaterPayment } from "./paymentService.js";
+import { listenToAllPayments, approvePayment, rejectPayment, receiveDirectPayment, collectPayLaterPayment, parseStandardDate } from "./paymentService.js?v=4";
 import { ROLES, hasPermission } from "../auth/roles.js";
 import { doc, getDoc, getDocs, collection, query, where } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
@@ -6,7 +6,7 @@ import { openProofViewer } from "./proofViewer.js";
 
 let allPayments = [];
 let unsubscribe = null;
-let currentFilters = { status: "All", search: "", view: "all" }; // view: 'all' | 'renewals'
+let currentFilters = { status: "All", search: "", view: "all", showOldStudents: false }; // view: 'all' | 'renewals' | 'pay_later'
 
 // Check if an image URL is a valid image source (data URL, HTTP, HTTPS, or blob)
 const isValidImg = (u) => typeof u === "string" && u.trim().length > 10 && (
@@ -35,12 +35,14 @@ const isDemoOrTestRecord = (p) => {
   return name === "demo" || name === "test" || name === "demo student" || name.startsWith("demo ") || id === "demo";
 };
 
-// Helper: check if a payment record is a renewal record
-const isRenewalRecord = (p) => {
+// Helper: check if a payment record is a renewal record (Pay Later & Admission are NEVER renewals)
+export const isRenewalRecord = (p) => {
   if (!p) return false;
-  if (p.source === "renewal") return true;
-  if (p.renewalMonths || p.durationDays || p.renewalDays || p.durationMode) return true;
-  if (p.startDate && p.endDate && p.source !== "onboarding" && p.source !== "admission") return true;
+  if (isPayLaterRecord(p)) return false;
+  const src = String(p.source || "").toLowerCase().trim();
+  if (src === "admission" || src === "onboarding" || src === "pay_later") return false;
+  if (src === "renewal") return true;
+  if (p.renewalMonths || p.renewalDays) return true;
   return false;
 };
 
@@ -80,18 +82,23 @@ export const isPayLaterRecord = (r) => {
  * Payment status normalisation.
  */
 const normalisePaymentStatus = (raw, record = null) => {
+  const s = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (s === "approved" || s === "completed" || s === "paid") {
+    return { key: "approved", label: "Paid", tone: "paid" };
+  }
+  if (s === "pending") {
+    return { key: "pending", label: "Pending Verification", tone: "pending" };
+  }
+  if (s === "rejected") {
+    return { key: "rejected", label: "Rejected", tone: "rejected" };
+  }
   if (record && isPayLaterRecord(record)) {
     return { key: "pay_later", label: "Pay Later", tone: "pay_later" };
   }
-  const s = String(raw == null ? "" : raw);
-  const key = s.trim().toLowerCase();
-  if (key === "pay_later" || key === "pay later" || key === "unpaid") {
+  if (s === "pay_later" || s === "pay later" || s === "unpaid") {
     return { key: "pay_later", label: "Pay Later", tone: "pay_later" };
   }
-  if (key === "pending") return { key: "pending", label: "Pending", tone: "pending" };
-  if (key === "approved" || key === "completed" || key === "paid") return { key: "approved", label: "Paid", tone: "paid" };
-  if (key === "rejected") return { key: "rejected", label: "Rejected", tone: "rejected" };
-  return { key: key || "unknown", label: s.trim() || "Unknown", tone: "unknown" };
+  return { key: s || "unknown", label: raw || "Unknown", tone: "unknown" };
 };
 
 const STATUS_STYLES = {
@@ -157,18 +164,25 @@ export const initPaymentAdminUI = () => {
     <div class="card card-theme" style="padding:1.5rem;">
       <!-- Tab & Filter Bar -->
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:1rem;">
-        <div style="display:flex; gap:6px; background:var(--bg-hover); padding:4px; border-radius:10px; border:1px solid var(--border);">
-          <button id="tab-btn-all" onclick="window.switchPaymentView('all')" style="padding:6px 14px; border-radius:7px; border:1px solid var(--border-bright); font-size:12.5px; font-weight:600; cursor:pointer; background:var(--bg-card); color:var(--text-primary); box-shadow:0 1px 3px rgba(0,0,0,0.2);">All Transactions <span id="count-tab-all" style="font-size:11px; opacity:0.75;">(0)</span></button>
+        <div style="display:flex; gap:6px; background:var(--bg-hover); padding:4px; border-radius:10px; border:1px solid var(--border); flex-wrap:wrap;">
+          <button id="tab-btn-all" onclick="window.switchPaymentView('all')" style="padding:6px 14px; border-radius:7px; border:1px solid var(--border-bright); font-size:12.5px; font-weight:600; cursor:pointer; background:var(--bg-card); color:var(--text-primary); box-shadow:0 1px 3px rgba(0,0,0,0.12);">All Transactions <span id="count-tab-all" style="font-size:11px; opacity:0.75;">(0)</span></button>
           <button id="tab-btn-renewals" onclick="window.switchPaymentView('renewals')" style="padding:6px 14px; border-radius:7px; border:1px solid transparent; font-size:12.5px; font-weight:600; cursor:pointer; background:transparent; color:var(--text-secondary);">Renewal Requests <span id="count-tab-renewals" style="background:rgba(245,158,11,0.18); color:var(--accent-amber, #f59e0b); border:1px solid rgba(245,158,11,0.3); padding:2px 7px; border-radius:999px; font-size:11px; margin-left:4px; font-weight:700;">0</span></button>
+          <button id="tab-btn-paylater" onclick="window.switchPaymentView('pay_later')" style="padding:6px 14px; border-radius:7px; border:1px solid transparent; font-size:12.5px; font-weight:600; cursor:pointer; background:transparent; color:var(--text-secondary);">Pay Later Dues <span id="count-tab-paylater" style="background:rgba(14,165,233,0.16); color:var(--primary, #0ea5e9); border:1px solid rgba(14,165,233,0.3); padding:2px 7px; border-radius:999px; font-size:11px; margin-left:4px; font-weight:700;">0</span></button>
         </div>
 
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-          <input type="text" id="payment-search" placeholder="Search student or UTR..." style="padding:7px 14px; border-radius:8px; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-primary); font-size:13px; min-width:210px; outline:none; transition:border-color 0.15s ease;" />
+          <input type="text" id="payment-search" placeholder="Search student, phone, seat, UTR..." style="padding:7px 14px; border-radius:8px; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-primary); font-size:13px; min-width:220px; outline:none; transition:border-color 0.15s ease;" />
+          <button type="button" id="btn-toggle-old-students" onclick="window.toggleOldStudentsView()" style="padding:6px 13px; border-radius:8px; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-secondary); font-size:12.5px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:8px; transition:all 0.15s ease;" title="Show or hide older student records">
+            <span id="old-toggle-track" style="width:28px; height:16px; background:var(--border); border-radius:10px; position:relative; display:inline-block; transition:background 0.2s;">
+              <span id="old-toggle-thumb" style="width:12px; height:12px; background:#fff; border-radius:50%; position:absolute; top:2px; left:2px; transition:transform 0.2s; box-shadow:0 1px 2px rgba(0,0,0,0.25);"></span>
+            </span>
+            <span id="old-toggle-label">Old Students</span>
+          </button>
           <select id="payment-filter-status" class="pay-filter-select" style="padding:7px 32px 7px 14px; border-radius:8px; border:1px solid var(--border-bright); background-color:var(--bg-card); color:var(--text-primary); font-size:13px; outline:none; cursor:pointer;">
             <option value="All">All Status</option>
+            <option value="approved">Paid</option>
+            <option value="pay_later">Payment Due (Pay Later)</option>
             <option value="pending">Pending Verification</option>
-            <option value="approved">Paid / Approved</option>
-            <option value="pay_later">Pay Later (Due)</option>
             <option value="rejected">Rejected</option>
           </select>
         </div>
@@ -202,6 +216,30 @@ export const initPaymentAdminUI = () => {
     renderPaymentAdminTable();
   });
 
+  window.toggleOldStudentsView = () => {
+    currentFilters.showOldStudents = !currentFilters.showOldStudents;
+    const track = document.getElementById("old-toggle-track");
+    const thumb = document.getElementById("old-toggle-thumb");
+    const btn = document.getElementById("btn-toggle-old-students");
+    const label = document.getElementById("old-toggle-label");
+    if (track && thumb && btn) {
+      if (currentFilters.showOldStudents) {
+        track.style.background = "var(--primary, #0ea5e9)";
+        thumb.style.transform = "translateX(12px)";
+        btn.style.borderColor = "var(--primary, #0ea5e9)";
+        btn.style.color = "var(--primary, #0ea5e9)";
+        if (label) label.textContent = "Old Students (ON)";
+      } else {
+        track.style.background = "var(--border)";
+        thumb.style.transform = "translateX(0)";
+        btn.style.borderColor = "var(--border-bright)";
+        btn.style.color = "var(--text-secondary)";
+        if (label) label.textContent = "Old Students";
+      }
+    }
+    renderPaymentAdminTable();
+  };
+
   document.getElementById("payment-filter-status")?.addEventListener("change", (e) => {
     currentFilters.status = e.target.value;
     renderPaymentAdminTable();
@@ -211,32 +249,35 @@ export const initPaymentAdminUI = () => {
     currentFilters.view = view;
     const btnAll = document.getElementById("tab-btn-all");
     const btnRen = document.getElementById("tab-btn-renewals");
+    const btnPl = document.getElementById("tab-btn-paylater");
+
+    const setActive = (btn) => {
+      if (!btn) return;
+      btn.style.background = "var(--bg-card)";
+      btn.style.color = "var(--text-primary)";
+      btn.style.boxShadow = "0 1px 3px rgba(0,0,0,0.12)";
+      btn.style.borderColor = "var(--border-bright)";
+    };
+    const setInactive = (btn) => {
+      if (!btn) return;
+      btn.style.background = "transparent";
+      btn.style.color = "var(--text-secondary)";
+      btn.style.boxShadow = "none";
+      btn.style.borderColor = "transparent";
+    };
+
     if (view === "renewals") {
-      if (btnAll) { 
-        btnAll.style.background = "transparent"; 
-        btnAll.style.color = "var(--text-secondary)"; 
-        btnAll.style.boxShadow = "none";
-        btnAll.style.borderColor = "transparent";
-      }
-      if (btnRen) { 
-        btnRen.style.background = "var(--bg-card)"; 
-        btnRen.style.color = "var(--text-primary)"; 
-        btnRen.style.boxShadow = "0 1px 3px rgba(0,0,0,0.1)"; 
-        btnRen.style.borderColor = "var(--border-bright)";
-      }
+      setInactive(btnAll);
+      setActive(btnRen);
+      setInactive(btnPl);
+    } else if (view === "pay_later") {
+      setInactive(btnAll);
+      setInactive(btnRen);
+      setActive(btnPl);
     } else {
-      if (btnAll) { 
-        btnAll.style.background = "var(--bg-card)"; 
-        btnAll.style.color = "var(--text-primary)"; 
-        btnAll.style.boxShadow = "0 1px 3px rgba(0,0,0,0.1)"; 
-        btnAll.style.borderColor = "var(--border-bright)";
-      }
-      if (btnRen) { 
-        btnRen.style.background = "transparent"; 
-        btnRen.style.color = "var(--text-secondary)"; 
-        btnRen.style.boxShadow = "none";
-        btnRen.style.borderColor = "transparent";
-      }
+      setActive(btnAll);
+      setInactive(btnRen);
+      setInactive(btnPl);
     }
     renderPaymentAdminTable();
   };
@@ -572,21 +613,36 @@ const renderPaymentAdminTable = () => {
   let monthTotal = 0;
   let pendingRenewalsCount = 0;
   let pendingRenewalsAmount = 0;
+  let payLaterDuesCount = 0;
+  let payLaterDuesAmount = 0;
   let receiptsIssued = 0;
   let totalRenewalsCount = 0;
+
+  const recordsInScope = allPayments.filter(r => {
+    if (!currentFilters.showOldStudents) {
+      return r.studentLifecycle !== "old";
+    }
+    return true;
+  });
 
   const now = new Date();
   const todayStr = now.toDateString();
   const month = now.getMonth();
   const year = now.getFullYear();
 
-  allPayments.forEach(p => {
+  recordsInScope.forEach(p => {
     const amt = parseFloat(p.amount) || 0;
-    const d = p.date ? new Date(p.date) : new Date();
+    const d = parseStandardDate(p.date || p.paymentDate || p.createdAt) || new Date();
     const st = normalisePaymentStatus(p.status, p);
     const isRen = isRenewalRecord(p);
+    const isPl = isPayLaterRecord(p);
     
     if (isRen) totalRenewalsCount++;
+
+    if (isPl && st.key !== "approved") {
+      payLaterDuesCount++;
+      payLaterDuesAmount += amt;
+    }
 
     if (st.key === "pending") {
       if (isRen) {
@@ -619,7 +675,7 @@ const renderPaymentAdminTable = () => {
   if (domPendingRen) domPendingRen.innerText = pendingRenewalsCount;
   if (domPendingRenAmt) domPendingRenAmt.innerText = `₹${pendingRenewalsAmount.toLocaleString()} awaiting verification`;
   if (domReceipts) domReceipts.innerText = receiptsIssued;
-  if (domCountTabAll) domCountTabAll.innerText = `(${allPayments.length})`;
+  if (domCountTabAll) domCountTabAll.innerText = `(${recordsInScope.length})`;
   if (domCountTabRen) {
     domCountTabRen.innerText = `${pendingRenewalsCount}`;
     if (pendingRenewalsCount > 0) {
@@ -630,6 +686,20 @@ const renderPaymentAdminTable = () => {
       domCountTabRen.style.background = "var(--bg-hover)";
       domCountTabRen.style.color = "var(--text-muted)";
       domCountTabRen.style.border = "1px solid var(--border)";
+    }
+  }
+
+  const domCountTabPl = document.getElementById("count-tab-paylater");
+  if (domCountTabPl) {
+    domCountTabPl.innerText = `${payLaterDuesCount}`;
+    if (payLaterDuesCount > 0) {
+      domCountTabPl.style.background = "rgba(14,165,233,0.18)";
+      domCountTabPl.style.color = "var(--primary, #0ea5e9)";
+      domCountTabPl.style.border = "1px solid rgba(14,165,233,0.35)";
+    } else {
+      domCountTabPl.style.background = "var(--bg-hover)";
+      domCountTabPl.style.color = "var(--text-muted)";
+      domCountTabPl.style.border = "1px solid var(--border)";
     }
   }
 
@@ -644,46 +714,66 @@ const renderPaymentAdminTable = () => {
   }
 
   // Filter Data
-  let filtered = allPayments;
+  let filtered = recordsInScope;
 
-  // View Filter: All Transactions vs Renewal Requests
-  if (currentFilters.view === "renewals") {
-    // The Renewal Requests tab directly displays incoming renewal requests awaiting verification!
-    // No need to manually select 'Pending' from the dropdown.
+  // View Filter: All Transactions vs Renewal Requests vs Pay Later Dues
+  if (currentFilters.view === "pay_later") {
+    if (currentFilters.status === "approved") {
+      filtered = filtered.filter(r => isPayLaterRecord(r) && normalisePaymentStatus(r.status, r).key === "approved");
+    } else {
+      filtered = filtered.filter(r => isPayLaterRecord(r) && normalisePaymentStatus(r.status, r).key !== "approved");
+    }
+  } else if (currentFilters.view === "renewals") {
     if (currentFilters.status === "approved" || currentFilters.status === "rejected") {
       filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status, r).key === currentFilters.status);
     } else {
-      // Default (including when dropdown is 'All' or 'pending'): strictly pending renewal requests!
       filtered = filtered.filter(r => isRenewalRecord(r) && normalisePaymentStatus(r.status, r).key === "pending");
     }
   } else {
-    // In All Transactions, apply Status Filter if specified
     if (currentFilters.status !== "All") {
       filtered = filtered.filter(r => normalisePaymentStatus(r.status, r).key === currentFilters.status);
     }
   }
 
-  // Search Filter
+  // Search Filter (Name, Phone, Seat, UTR, Plan)
   if (currentFilters.search.trim() !== "") {
     const q = currentFilters.search.toLowerCase();
     filtered = filtered.filter(r => {
-      const name = (r.studentName || "").toLowerCase();
-      const txn = (r.transactionId || "").toLowerCase();
-      const plan = (r.planName || "").toLowerCase();
-      return name.includes(q) || txn.includes(q) || plan.includes(q);
+      const name = String(r.studentName || "").toLowerCase();
+      const phone = String(r.studentPhone || "").toLowerCase();
+      const seat = String(r.seatNumber || "").toLowerCase();
+      const txn = String(r.transactionId || "").toLowerCase();
+      const plan = String(r.planName || "").toLowerCase();
+      return name.includes(q) || phone.includes(q) || seat.includes(q) || txn.includes(q) || plan.includes(q);
     });
   }
 
-  // Sort: Put pending renewals at the top so admin verifies them first
+  // Sort: Put pending renewals at the top so admin verifies them first, then by actual date
   filtered.sort((a, b) => {
     const aPending = normalisePaymentStatus(a.status, a).key === "pending" ? 1 : 0;
     const bPending = normalisePaymentStatus(b.status, b).key === "pending" ? 1 : 0;
     if (bPending !== aPending) return bPending - aPending;
-    return new Date(b.date || 0) - new Date(a.date || 0);
+    const dateA = parseStandardDate(a.date || a.paymentDate || a.startDate || a.createdAt);
+    const dateB = parseStandardDate(b.date || b.paymentDate || b.startDate || b.createdAt);
+    const timeA = dateA ? dateA.getTime() : 0;
+    const timeB = dateB ? dateB.getTime() : 0;
+    return timeB - timeA;
   });
 
   if (filtered.length === 0) {
-    if (currentFilters.view === "renewals") {
+    if (currentFilters.view === "pay_later") {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center; padding:3.5rem 1rem; color:var(--text-muted);">
+            <div style="width:48px; height:48px; border-radius:50%; background:rgba(14,165,233,0.12); color:var(--primary, #0ea5e9); border:1px solid rgba(14,165,233,0.25); display:inline-flex; align-items:center; justify-content:center; margin-bottom:12px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            </div>
+            <div style="font-weight:700; font-size:15px; color:var(--text-primary); margin-bottom:4px;">No Outstanding Pay Later Dues</div>
+            <div style="font-size:12.5px; color:var(--text-secondary); max-width:420px; margin:0 auto; line-height:1.45;">All Pay Later admissions have been settled. When a new student chooses Pay Later, their record will appear here until fee collection.</div>
+          </td>
+        </tr>
+      `;
+    } else if (currentFilters.view === "renewals") {
       tbody.innerHTML = `
         <tr>
           <td colspan="8" style="text-align:center; padding:3.5rem 1rem; color:var(--text-muted);">
@@ -721,31 +811,53 @@ const renderPaymentAdminTable = () => {
     html += `
       <tr style="border-bottom:1px solid var(--border); ${isPending && isRen ? 'background:rgba(245,158,11,0.03);' : ''}">
         <td style="padding:14px;">
-          ${isRen 
-            ? `<span class="badge" style="background:rgba(245,158,11,0.16); color:var(--accent-amber, #fbbf24); border:1px solid rgba(245,158,11,0.35); font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; display:inline-flex; align-items:center; gap:3px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/></svg> Renewal</span>` 
-            : `<span class="badge" style="background:var(--bg-hover); color:var(--text-secondary); border:1px solid var(--border); font-size:11px; padding:2px 7px; border-radius:6px;">Regular</span>`}
+          ${(() => {
+            if (isPayLater) {
+              return `<span class="badge" style="background:rgba(14,165,233,0.14); color:var(--primary, #0284c7); border:1px solid rgba(14,165,233,0.3); font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; display:inline-flex; align-items:center; gap:3px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Pay Later</span>`;
+            }
+            if (isRen) {
+              return `<span class="badge" style="background:rgba(245,158,11,0.16); color:var(--accent-amber, #d97706); border:1px solid rgba(245,158,11,0.35); font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; display:inline-flex; align-items:center; gap:3px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/></svg> Renewal</span>`;
+            }
+            return `<span class="badge" style="background:rgba(16,185,129,0.12); color:var(--success, #059669); border:1px solid rgba(16,185,129,0.28); font-size:11px; font-weight:600; padding:2px 7px; border-radius:6px;">Admission</span>`;
+          })()}
         </td>
         <td style="padding:14px; font-weight:600; color:var(--text-primary);">
-          <div style="font-size:13.5px; font-weight:700; color:var(--text-primary);">${r.studentName || "Unknown"}</div>
+          <div style="font-size:13.5px; font-weight:700; color:var(--text-primary); letter-spacing:0.1px;">${r.studentName || "Unknown"}</div>
+          <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            ${r.studentPhone ? `<span>${r.studentPhone}</span>` : ''}
+            ${r.seatNumber ? `<span style="background:var(--bg-hover); padding:1px 6px; border-radius:4px; border:1px solid var(--border); font-weight:600; font-size:10.5px; color:var(--text-primary);">Seat ${r.seatNumber}</span>` : ''}
+            ${r.studentLifecycle === "old" ? `<span style="background:rgba(239,68,68,0.1); color:#dc2626; border:1px solid rgba(239,68,68,0.25); padding:1px 5px; border-radius:4px; font-size:10px; font-weight:700;">Old Student</span>` : ''}
+          </div>
         </td>
         <td style="padding:14px;">
           <div style="font-weight:600; color:var(--text-primary); font-size:12.5px;">${r.planName || "Standard Plan"}</div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${periodDisplay}</div>
         </td>
         <td style="padding:14px;">
-          <div style="font-weight:600; font-size:12px;">${r.paymentMethod || "UPI"}</div>
+          <div style="font-weight:600; font-size:12px;">${isPayLater && st.key !== "approved" ? "Pay Later" : (r.paymentMethod || "UPI")}</div>
           <div style="font-family:monospace; font-size:11.5px; color:var(--text-secondary); margin-top:2px; display:flex; align-items:center; gap:4px;">
-            <span>${/rc-imp/i.test(r.transactionId || "") ? "—" : (r.transactionId || "—")}</span>
-            ${r.transactionId && r.transactionId !== "CASH" && r.transactionId !== "PAY LATER" ? `<span title="Click to copy UTR" onclick="navigator.clipboard.writeText('${r.transactionId}'); showToast('UTR copied');" style="cursor:pointer; opacity:0.7; display:inline-flex; align-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>` : ''}
+            ${(() => {
+              const rawT = String(r.transactionId || "").trim();
+              const isJunk = !rawT || /^(rc-imp|rc-n\/a|cash|pay later|undefined|null|none|admission)$/i.test(rawT) || rawT.toLowerCase().startsWith("rc-");
+              if (isJunk) return `<span>—</span>`;
+              return `
+                <span>${rawT}</span>
+                <span title="Click to copy UTR" onclick="navigator.clipboard.writeText('${rawT}'); if (window.showToast) window.showToast('UTR copied');" style="cursor:pointer; opacity:0.7; display:inline-flex; align-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+              `;
+            })()}
           </div>
         </td>
         <td style="padding:14px; font-weight:700; color:var(--text-primary); text-align:right; font-size:13.5px;">₹${Number(r.amount || 0).toLocaleString()}</td>
         <td style="padding:14px; font-size:12px; color:var(--text-muted);">${
           (() => {
-            const raw = r.date || r.paymentDate || (r.createdAt && r.createdAt.seconds ? r.createdAt.seconds * 1000 : null);
+            const raw = r.date || r.paymentDate || r.startDate || (r.createdAt && r.createdAt.seconds ? r.createdAt.seconds * 1000 : null);
             if (!raw) return "—";
-            const d = new Date(raw);
-            return isNaN(d.getTime()) ? "—" : d.toISOString().split('T')[0];
+            const parsed = parseStandardDate(raw);
+            if (!parsed) return String(raw).split("T")[0];
+            const y = parsed.getFullYear();
+            const m = String(parsed.getMonth() + 1).padStart(2, "0");
+            const d = String(parsed.getDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
           })()
         }</td>
         <td style="padding:14px; text-align:center;">
@@ -760,18 +872,16 @@ const renderPaymentAdminTable = () => {
               <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 8px; color:var(--danger); border-radius:6px; display:inline-flex; align-items:center;" title="Reject Request"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             ` : `
               <div style="display:inline-flex; align-items:center; gap:6px;">
-                ${(!isPending && !isRejected && !isPayLater) ? `
-                  <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="font-size:11.5px; padding:4px 8px; border-radius:6px; font-weight:600; display:inline-flex; align-items:center; gap:4px;" title="Download E-Invoice PDF">
+                ${(st.key === "approved") ? `
+                  <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="font-size:11.5px; padding:5px 11px; border-radius:6px; font-weight:600; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-primary); display:inline-flex; align-items:center; gap:5px; cursor:pointer;" title="Download E-Invoice PDF">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     <span>Invoice</span>
                   </button>
-                ` : (isPayLater ? `
-                  <div style="display:inline-flex; align-items:center; gap:6px;">
-                    <span style="font-size:11px; color:#ea580c; font-weight:600; padding:2px 8px; background:rgba(249,115,22,0.08); border-radius:4px; border:1px solid rgba(249,115,22,0.25);">Payment Due</span>
-                    <button class="btn btn-primary btn-sm" onclick="window.openCollectPayLaterModal('${r.id}')" style="font-size:11.5px; padding:4px 10px; background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:4px; cursor:pointer;" title="Collect and settle fee payment">
-                      Collect Fee
-                    </button>
-                  </div>
+                ` : (isPayLater && st.key !== "approved" ? `
+                  <button class="btn btn-primary btn-sm" onclick="window.openCollectPayLaterModal('${r.id}')" style="font-size:11.5px; padding:5px 12px; background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; box-shadow:0 1px 3px rgba(22,163,74,0.3);" title="Collect and settle fee payment">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                    <span>Collect Fee</span>
+                  </button>
                 ` : '')}
                 ${hasProof ? `
                   <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11.5px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
@@ -859,5 +969,129 @@ window.handlePaymentExport = async (format) => {
   } catch (err) {
     console.error("Export Error:", err);
     if (typeof showToast === 'function') showToast("Export failed: " + err.message, "error");
+  }
+};
+
+// Setup Desk Collect Pay Later Modal
+window.openCollectPayLaterModal = async (recordId) => {
+  const r = (typeof allPayments !== "undefined" && Array.isArray(allPayments))
+    ? allPayments.find(p => p.id === recordId) || { id: recordId }
+    : { id: recordId };
+
+  const studentName = r.studentName || "Student";
+  const planName = r.planName || "Regular Fixed Seat";
+  const rawAmt = Number(r.amount) || 1000;
+
+  const oldModal = document.getElementById("collect-paylater-modal");
+  if (oldModal) oldModal.remove();
+
+  const dialog = document.createElement("dialog");
+  dialog.id = "collect-paylater-modal";
+  dialog.className = "card";
+  dialog.style.cssText = "border:1px solid var(--border); border-radius:12px; padding:0; box-shadow:0 16px 40px rgba(0,0,0,0.45); background:var(--bg-card); color:var(--text-primary); width:min(440px, 95vw); margin:auto;";
+
+  dialog.innerHTML = `
+    <div style="padding:1.5rem; max-height:85vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; border-bottom:1px solid var(--border); padding-bottom:0.75rem;">
+        <div>
+          <h2 style="margin:0; font-size:1.15rem; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>Collect Pay Later Fee</span>
+            <span class="badge" style="background:rgba(22,163,74,0.12); color:#16a34a; border:1px solid rgba(22,163,74,0.3); font-size:11px; padding:2px 7px; border-radius:999px;">Direct Settlement</span>
+          </h2>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Settle outstanding admission fee at desk (in-place update, no duplicate entry).</div>
+        </div>
+        <button class="btn btn-ghost" id="cpl-close-btn" style="padding:0.25rem 0.5rem; font-size:1.1rem; line-height:1; cursor:pointer; display:inline-flex; align-items:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+
+      <form id="collect-paylater-form" onsubmit="event.preventDefault(); window.submitCollectPayLaterFee('${recordId}')">
+        <div style="margin-bottom:1rem;">
+          <label style="display:block; margin-bottom:0.35rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Student</label>
+          <div style="padding:0.6rem 0.75rem; background:var(--bg-hover); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; font-weight:700; font-size:13.5px;">
+            ${studentName}
+          </div>
+        </div>
+
+        <div style="margin-bottom:1rem;">
+          <label style="display:block; margin-bottom:0.35rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Plan</label>
+          <div style="padding:0.6rem 0.75rem; background:var(--bg-hover); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; font-size:13px;">
+            ${planName}
+          </div>
+        </div>
+
+        <div style="margin-bottom:1rem;">
+          <label style="display:block; margin-bottom:0.35rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Amount to Collect (₹)</label>
+          <input type="number" id="cpl-amount" required min="1" value="${rawAmt}" class="input-field" style="width:100%; box-sizing:border-box; padding:0.6rem 0.75rem; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-bright); border-radius:8px; font-weight:700;" />
+        </div>
+
+        <div style="margin-bottom:1rem;">
+          <label style="display:block; margin-bottom:0.35rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Payment Method</label>
+          <select id="cpl-method" required class="input-field" style="width:100%; box-sizing:border-box; padding:0.6rem 0.75rem; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-bright); border-radius:8px; cursor:pointer;">
+            <option value="Cash" selected>Cash (Front Desk)</option>
+            <option value="UPI">UPI (QR Code / Direct Credit)</option>
+          </select>
+        </div>
+
+        <div id="cpl-txn-group" style="margin-bottom:1.5rem; display:none;">
+          <label style="display:block; margin-bottom:0.35rem; font-size:0.875rem; font-weight:600; color:var(--text-secondary);">Transaction ID / UTR (Optional)</label>
+          <input type="text" id="cpl-txn" placeholder="e.g. 423589123456" class="input-field" style="width:100%; box-sizing:border-box; padding:0.6rem 0.75rem; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-bright); border-radius:8px;" />
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+          <button type="button" class="btn btn-ghost" id="cpl-cancel-btn" style="border:1px solid var(--border); color:var(--text-secondary);">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="cpl-submit-btn" style="background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; padding:8px 20px; border-radius:8px;">Confirm & Collect Fee</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  dialog.querySelector("#cpl-close-btn").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#cpl-cancel-btn").addEventListener("click", () => dialog.close());
+
+  const methodSelect = dialog.querySelector("#cpl-method");
+  const txnGroup = dialog.querySelector("#cpl-txn-group");
+  methodSelect.addEventListener("change", (e) => {
+    txnGroup.style.display = e.target.value === "UPI" ? "block" : "none";
+  });
+
+  dialog.showModal();
+};
+
+window.submitCollectPayLaterFee = async (recordId) => {
+  const dialog = document.getElementById("collect-paylater-modal");
+  const btn = document.getElementById("cpl-submit-btn");
+  const amtInput = document.getElementById("cpl-amount");
+  const methodInput = document.getElementById("cpl-method");
+  const txnInput = document.getElementById("cpl-txn");
+
+  const amount = Number(amtInput?.value) || 1000;
+  const method = methodInput?.value || "Cash";
+  const txn = txnInput?.value ? txnInput.value.trim() : (method === "Cash" ? "CASH" : "");
+
+  btn.disabled = true;
+  btn.innerText = "Collecting...";
+
+  try {
+    const approverName = localStorage.getItem("userName") || localStorage.getItem("userRole") || "Admin";
+    const res = await collectPayLaterPayment(recordId, amount, method, txn, approverName);
+    if (res.success) {
+      if (dialog) dialog.close();
+      if (window.showToast) window.showToast("Admission fee collected successfully! E-Invoice generated.", "success");
+      // Promptly open invoice
+      const targetPayId = res.paymentId || recordId;
+      setTimeout(() => {
+        if (window.downloadAdminPaymentInvoice) window.downloadAdminPaymentInvoice(targetPayId);
+      }, 350);
+    } else {
+      if (window.showToast) window.showToast("Collection failed: " + (res.error || "Unknown error"), "error");
+      btn.disabled = false;
+      btn.innerText = "Confirm & Collect Fee";
+    }
+  } catch (err) {
+    console.error("submitCollectPayLaterFee error:", err);
+    if (window.showToast) window.showToast("Error: " + err.message, "error");
+    btn.disabled = false;
+    btn.innerText = "Confirm & Collect Fee";
   }
 };

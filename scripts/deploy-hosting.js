@@ -34,7 +34,15 @@ const path = require("path");
 const crypto = require("crypto");
 const zlib = require("zlib");
 
-const ROOT = path.resolve(__dirname, "..");
+const args = process.argv.slice(2);
+const flag = (name) => {
+  const i = args.indexOf(name);
+  if (i === -1) return null;
+  const v = args[i + 1];
+  return v && !v.startsWith("--") ? v : true;
+};
+
+const ROOT = (flag("--root") && flag("--root") !== true) ? path.resolve(flag("--root")) : path.resolve(__dirname, "..");
 const HOST = "https://firebasehosting.googleapis.com/v1beta1";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -49,13 +57,6 @@ const IGNORE_TOP_FILES = new Set([
 const IGNORE_TOP_DIRS = new Set(["scripts", "backup", "dist"]);
 const IGNORE_EXTS = new Set([".md", ".log"]);
 
-const args = process.argv.slice(2);
-const flag = (name) => {
-  const i = args.indexOf(name);
-  if (i === -1) return null;
-  const v = args[i + 1];
-  return v && !v.startsWith("--") ? v : true;
-};
 const WANT_STATUS = args.includes("--status");
 const WANT_DRY_RUN = args.includes("--dry-run");
 const WANT_RULES = args.includes("--rules");

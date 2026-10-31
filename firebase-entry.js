@@ -7,7 +7,7 @@ import { initMembershipPlans } from "./services/membershipService.js";
 import { initAdmissionsUI } from "./services/admissionService.js";
 import { initStudentManagementUI } from "./services/studentProfile.js";
 import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js";
-import { initPaymentAdminUI } from "./services/paymentAdminUI.js";
+import { initPaymentAdminUI } from "./services/paymentAdminUI.js?v=4";
 import { initComplaintAdminUI } from "./services/complaintAdminUI.js";
 import { initSeatMapUI } from "./services/seatMapUI.js";
 import { initLiveSeatMapUI } from "./services/liveSeatMapUI.js";
