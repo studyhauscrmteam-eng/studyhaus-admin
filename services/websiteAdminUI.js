@@ -532,6 +532,9 @@ export const websiteAdminUI = {
     document.querySelectorAll(".website-tab-panel").forEach((panel) => {
       panel.style.display = panel.id === `website-panel-${tabName}` ? "block" : "none";
     });
+    if (tabName === "terms") {
+      this.renderTerms();
+    }
   },
 
   render() {
@@ -539,6 +542,9 @@ export const websiteAdminUI = {
     this.renderFeatures();
     this.renderPlans();
     this.renderContent();
+    if (this.activeTab === "terms" || document.getElementById("website-panel-terms")?.style.display === "block") {
+      this.renderTerms();
+    }
   },
 
   // ==================== TAB 4: HOMEPAGE CONTENT ====================
@@ -1432,6 +1438,145 @@ export const websiteAdminUI = {
   },
 
   // ==================== SAVE ALL WEBSITE SETTINGS ====================
+
+  // ==================== TAB 5: TERMS & CONDITIONS ====================
+  async renderTerms() {
+    const list = document.getElementById("website-terms-list");
+    if (!list) return;
+
+    try {
+      const { fetchTermsAndConditions } = await import("./termsService.js");
+      this.terms = await fetchTermsAndConditions();
+    } catch (e) {
+      console.error("Failed to load terms:", e);
+    }
+
+    if (!this.terms || this.terms.length === 0) {
+      list.innerHTML = `<div style="text-align:center; padding:3rem; color:var(--text-muted); background:var(--bg-card); border-radius:12px; border:1px dashed var(--border);">No terms found. Click "+ Add New Rule" to create one.</div>`;
+      return;
+    }
+
+    const esc = (v) => String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    list.innerHTML = this.terms.map((t, idx) => `
+      <div class="card" style="padding:1.25rem; margin-bottom:0.85rem; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); transition:transform 0.15s, box-shadow 0.15s;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.6rem; flex-wrap:wrap; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="badge" style="background:#EB6A30; color:#fff; font-weight:800; font-size:11px; padding:3px 8px; border-radius:6px;">RULE #${idx + 1}</span>
+            <strong style="color:var(--text-primary); font-size:14px;">${esc(t.titleEn)}</strong>
+            <span style="color:var(--text-muted); font-size:13px;">|</span>
+            <span style="color:var(--text-secondary); font-size:13px; font-weight:600;">${esc(t.titleGu)}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="websiteAdminUI.moveTerm('${t.id}', 'up')" ${idx === 0 ? 'disabled' : ''} title="Move Up" style="padding:4px 7px;">▲</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="websiteAdminUI.moveTerm('${t.id}', 'down')" ${idx === this.terms.length - 1 ? 'disabled' : ''} title="Move Down" style="padding:4px 7px;">▼</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="websiteAdminUI.openEditTermModal('${t.id}')" style="padding:4px 10px; font-size:12px; font-weight:600;">Edit</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="websiteAdminUI.deleteTerm('${t.id}')" style="padding:4px 10px; font-size:12px; color:var(--accent-red, #f43f5e); font-weight:600;">Delete</button>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+          <div style="background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px;">English Description</div>
+            <p style="margin:0; font-size:13px; line-height:1.5; color:var(--text-primary);">${esc(t.descEn)}</p>
+          </div>
+          <div style="background:rgba(0,0,0,0.02); padding:10px 12px; border-radius:8px; border:1px solid var(--border);">
+            <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px;">Gujarati Description (ગુજરાતી)</div>
+            <p style="margin:0; font-size:13px; line-height:1.5; color:var(--text-primary);">${esc(t.descGu)}</p>
+          </div>
+        </div>
+      </div>
+    `).join("");
+  },
+
+  openAddTermModal() {
+    const modal = document.getElementById("modal-term-form");
+    if (!modal) return;
+    document.getElementById("modal-term-title").innerText = "Add New Rule / Policy";
+    document.getElementById("term-id").value = "";
+    document.getElementById("term-title-en").value = "";
+    document.getElementById("term-title-gu").value = "";
+    document.getElementById("term-desc-en").value = "";
+    document.getElementById("term-desc-gu").value = "";
+    modal.showModal();
+  },
+
+  openEditTermModal(termId) {
+    const modal = document.getElementById("modal-term-form");
+    if (!modal || !this.terms) return;
+    const term = this.terms.find(t => t.id === termId);
+    if (!term) return;
+
+    document.getElementById("modal-term-title").innerText = "Edit Rule / Policy";
+    document.getElementById("term-id").value = term.id;
+    document.getElementById("term-title-en").value = term.titleEn || "";
+    document.getElementById("term-title-gu").value = term.titleGu || "";
+    document.getElementById("term-desc-en").value = term.descEn || "";
+    document.getElementById("term-desc-gu").value = term.descGu || "";
+    modal.showModal();
+  },
+
+  async handleTermSubmit(event) {
+    if (event) event.preventDefault();
+    const btn = document.getElementById("btn-save-term");
+    const origText = btn ? btn.innerText : "Save Rule";
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "Saving...";
+    }
+
+    const id = document.getElementById("term-id").value;
+    const titleEn = document.getElementById("term-title-en").value.trim();
+    const titleGu = document.getElementById("term-title-gu").value.trim();
+    const descEn = document.getElementById("term-desc-en").value.trim();
+    const descGu = document.getElementById("term-desc-gu").value.trim();
+
+    try {
+      const { addTerm, updateTerm } = await import("./termsService.js");
+      if (id) {
+        await updateTerm(id, { titleEn, titleGu, descEn, descGu });
+        if (typeof window.showToast === "function") window.showToast("Rule updated successfully!", "success");
+      } else {
+        await addTerm({ titleEn, titleGu, descEn, descGu });
+        if (typeof window.showToast === "function") window.showToast("New rule added successfully!", "success");
+      }
+      const modal = document.getElementById("modal-term-form");
+      if (modal) modal.close();
+      await this.renderTerms();
+    } catch (err) {
+      console.error(err);
+      if (typeof window.showToast === "function") window.showToast("Error saving rule: " + err.message, "error");
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerText = origText;
+      }
+    }
+  },
+
+  async deleteTerm(termId) {
+    if (!confirm("Are you sure you want to delete this rule from Terms & Conditions?")) return;
+    try {
+      const { deleteTerm } = await import("./termsService.js");
+      await deleteTerm(termId);
+      if (typeof window.showToast === "function") window.showToast("Rule deleted successfully!", "success");
+      await this.renderTerms();
+    } catch (err) {
+      console.error(err);
+      if (typeof window.showToast === "function") window.showToast("Error deleting rule: " + err.message, "error");
+    }
+  },
+
+  async moveTerm(termId, direction) {
+    try {
+      const { reorderTerm } = await import("./termsService.js");
+      this.terms = await reorderTerm(termId, direction);
+      this.renderTerms();
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
   async saveChanges() {
     const saveBtns = document.querySelectorAll('button[onclick*="websiteAdminUI.saveChanges"]');
     saveBtns.forEach((btn) => {

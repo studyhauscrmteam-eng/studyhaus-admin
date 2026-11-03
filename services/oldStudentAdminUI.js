@@ -38,8 +38,19 @@ export const initOldStudentAdminUI = () => {
             <option value="All">All Plans</option>
           </select>
         </div>
-        <div style="margin-left: auto;">
-          <button class="btn btn-secondary" onclick="window.exportOldStudentsPDF()">Export PDF</button>
+        <div style="margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" onclick="window.exportOldStudentsPDF()" style="display:inline-flex; align-items:center; gap:6px; font-weight:600;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Export PDF
+          </button>
+          <button class="btn btn-ghost" onclick="window.exportOldStudentsExcel()" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 14px; font-weight:600; font-size:13px; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Export Excel (.xlsx)
+          </button>
+          <button class="btn btn-ghost" onclick="window.exportOldStudentsCSV()" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:8px; padding:6px 14px; font-weight:600; font-size:13px; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
         </div>
       </div>
     </div>
@@ -73,6 +84,36 @@ export const initOldStudentAdminUI = () => {
   window.exportOldStudentsPDF = () => {
     const records = getFilteredOldStudents();
     generateOldStudentsPDF(records);
+  };
+
+  window.exportOldStudentsCSV = async () => {
+    const { exportToCSV } = await import("./exportService.js");
+    const records = getFilteredOldStudents();
+    const rows = records.map(r => ({
+      "Name": r.name || "Unknown",
+      "Phone": r.phone || "-",
+      "Last Plan": r.planName || r.lastPlan || "Regular Fixed Seat",
+      "Exit Date": r.exitDate || "-",
+      "Exit Reason": r.exitReason || "Other",
+      "Fee Status": r.pendingFee && r.pendingFee > 0 ? "Pending" : "Paid",
+      "Outstanding Amount": Number(r.pendingFee) || 0
+    }));
+    exportToCSV(`old_students_${new Date().toISOString().split('T')[0]}`, rows);
+  };
+
+  window.exportOldStudentsExcel = async () => {
+    const { exportToExcel } = await import("./exportService.js");
+    const records = getFilteredOldStudents();
+    const rows = records.map(r => ({
+      "Name": r.name || "Unknown",
+      "Phone": r.phone || "-",
+      "Last Plan": r.planName || r.lastPlan || "Regular Fixed Seat",
+      "Exit Date": r.exitDate || "-",
+      "Exit Reason": r.exitReason || "Other",
+      "Fee Status": r.pendingFee && r.pendingFee > 0 ? "Pending" : "Paid",
+      "Outstanding Amount": Number(r.pendingFee) || 0
+    }));
+    await exportToExcel(`old_students_${new Date().toISOString().split('T')[0]}`, rows);
   };
 
   listenToOldStudents((records) => {
@@ -199,6 +240,7 @@ const renderOldStudents = (canRestore, canErase) => {
         <td>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="window.openStudentProfileById('${s.id}')">View</button>
+            <button type="button" class="btn" style="padding:0.25rem 0.5rem; font-size:0.75rem; background:#25D366; color:white; border:none; display:inline-flex; align-items:center; gap:3px;" onclick="window.triggerWhatsAppModal('${s.id}')">WhatsApp</button>
             <button class="btn btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onclick="window.handleRestoreStudent('${s.id}', '${s.name}')">Restore</button>
             ${canErase ? `<button class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--danger);" onclick="window.handlePermanentDeleteOld('${s.id}', '${(s.name || '').replace(/'/g, "\\'")}')">Delete</button>` : ''}
           </div>

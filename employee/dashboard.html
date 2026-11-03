@@ -1624,6 +1624,10 @@
             <input type="text" id="settings-upi-id" placeholder="e.g. shreeji@upi" />
           </div>
           <div class="form-group" style="margin-top: 0.75rem;">
+            <label>Library UPI Mobile No. (for WhatsApp payment messages)</label>
+            <input type="tel" id="settings-upi-mobile" placeholder="e.g. 6353321530" />
+          </div>
+          <div class="form-group" style="margin-top: 0.75rem;">
             <label>Admin notification email</label>
             <input type="email" id="setting-admin-email" placeholder="you@gmail.com" />
           </div>
@@ -1761,6 +1765,13 @@
             <button type="button" class="btn btn-ghost tag-chip" data-token="{Course}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{Course}</button>
             <button type="button" class="btn btn-ghost tag-chip" data-token="{ParentPhone}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{ParentPhone}</button>
             <button type="button" class="btn btn-ghost tag-chip" data-token="{LibraryName}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{LibraryName}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{StartDate}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{StartDate}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{EndDate}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{EndDate}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{DaysRemaining}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{DaysRemaining}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{UpiId}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{UpiId}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{TransactionId}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{TransactionId}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{UpiMobile}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{UpiMobile}</button>
+            <button type="button" class="btn btn-ghost tag-chip" data-token="{ContactPhone}" style="font-size:11px; padding:2px 6px; border:1px solid var(--border); border-radius:12px;">{ContactPhone}</button>
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
@@ -1783,7 +1794,7 @@
     }
   </script>
   <script src="../app.js"></script>
-  <script type="module" src="../firebase-entry.js"></script>
+  <script type="module" src="../firebase-entry.js?v=60"></script>
 </body>
 
 </html>

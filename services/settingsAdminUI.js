@@ -16,6 +16,7 @@ export const initSettingsAdminUI = async () => {
   const openingInput = document.getElementById('settings-opening');
   const closingInput = document.getElementById('settings-closing');
   const upiIdInput = document.getElementById('settings-upi-id');
+  const upiMobileInput = document.getElementById('settings-upi-mobile');
   const adminEmailInput = document.getElementById('setting-admin-email');
   const langSelect = document.getElementById('setting-language');
   const whatsappEnabledInput = document.getElementById('settings-whatsapp-enabled');
@@ -85,6 +86,7 @@ export const initSettingsAdminUI = async () => {
     if (openingInput) openingInput.value = currentSettings.openingTime || "06:00";
     if (closingInput) closingInput.value = currentSettings.closingTime || "23:00";
     if (upiIdInput) upiIdInput.value = currentSettings.upiId || "";
+    if (upiMobileInput) upiMobileInput.value = currentSettings.upiMobile || "";
     if (adminEmailInput) adminEmailInput.value = currentSettings.adminEmail || "";
 
     if (whatsappEnabledInput) {
@@ -204,6 +206,7 @@ export const initSettingsAdminUI = async () => {
         if (openingInput) payload.openingTime = openingInput.value;
         if (closingInput) payload.closingTime = closingInput.value;
         if (upiIdInput) payload.upiId = upiIdInput.value.trim();
+        if (upiMobileInput) payload.upiMobile = upiMobileInput.value.trim();
         if (adminEmailInput) payload.adminEmail = adminEmailInput.value.trim().toLowerCase();
         if (whatsappEnabledInput) payload.whatsappEnabled = whatsappEnabledInput.checked;
 

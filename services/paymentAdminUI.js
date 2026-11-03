@@ -123,6 +123,7 @@ export const initPaymentAdminUI = () => {
         <p class="page-subtitle" id="payments-subtitle">Collections, student renewal verification, and outstanding dues.</p>
       </div>
       <div style="display: flex; gap: 0.75rem;">
+        <button class="btn btn-ghost" id="btn-export-payments-excel" onclick="window.handlePaymentExport('excel')" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> Export Excel</button>
         <button class="btn btn-ghost" id="btn-export-payments" onclick="window.handlePaymentExport('csv')" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export CSV</button>
         <button class="btn btn-primary" id="btn-receive-payment" onclick="document.getElementById('receive-payment-modal').showModal()" style="background:var(--primary); color:#fff; border:none; border-radius:999px; padding:8px 16px; font-weight:500; font-size:13px; display:inline-flex; align-items:center; gap:6px;">+ Receive payment</button>
       </div>
@@ -199,7 +200,7 @@ export const initPaymentAdminUI = () => {
               <th style="padding:12px 14px; font-weight:700; text-align:right;">Amount</th>
               <th style="padding:12px 14px; font-weight:700;">Date</th>
               <th style="padding:12px 14px; font-weight:700; text-align:center;">Status</th>
-              <th style="padding:12px 14px; font-weight:700; text-align:right;">Action</th>
+              <th style="padding:12px 14px; font-weight:700; text-align:right; min-width:180px;">Action</th>
             </tr>
           </thead>
           <tbody id="payment-table-body">
@@ -439,7 +440,7 @@ export const initPaymentAdminUI = () => {
                 ${isCash ? "Cash renewal — collect cash at reception counter before approving." : "No screenshot proof was attached to this payment."}
               </div>
             `}
-          </div>
+            </div>
         </div>
 
         <!-- Bank Account Verification Checklist Box -->
@@ -462,6 +463,10 @@ export const initPaymentAdminUI = () => {
         <!-- Actions -->
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
           <button type="button" class="btn btn-ghost" id="btn-rvm-reject" style="color:var(--danger, #f43f5e); border:1px solid rgba(239,68,68,0.35); padding:8px 16px; font-size:13px; border-radius:8px;">Reject Request</button>
+          <button type="button" class="btn btn-sm" onclick="window.sendPaymentWhatsAppMessage('${payment.id}')" style="background:#25D366; color:#fff; border:none; padding:8px 14px; font-size:12.5px; font-weight:700; border-radius:8px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; box-shadow:0 1px 3px rgba(37,211,102,0.3);" title="Send WhatsApp message for this payment">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <span>WhatsApp</span>
+          </button>
           <div style="display:flex; gap:8px;">
             <button type="button" class="btn btn-ghost" id="btn-rvm-cancel" style="padding:8px 16px; font-size:13px; border:1px solid var(--border); border-radius:8px;">Cancel</button>
             <button type="button" class="btn btn-primary" id="btn-rvm-approve" disabled style="background:var(--accent-emerald, #10b981); border:none; padding:8px 20px; font-size:13px; font-weight:700; opacity:0.5; cursor:not-allowed; border-radius:8px; color:#fff;">Approve & Restore Access</button>
@@ -573,7 +578,7 @@ export const initPaymentAdminUI = () => {
       planName,
       amount: Number(amount),
       paymentMethod,
-      transactionId: transactionId || "RC-N/A",
+      transactionId: transactionId || "",
       status: "approved",
       date: new Date().toISOString(),
       approvedBy: localStorage.getItem("userName") || "Admin"
@@ -837,9 +842,11 @@ const renderPaymentAdminTable = () => {
           <div style="font-weight:600; font-size:12px;">${isPayLater && st.key !== "approved" ? "Pay Later" : (r.paymentMethod || "UPI")}</div>
           <div style="font-family:monospace; font-size:11.5px; color:var(--text-secondary); margin-top:2px; display:flex; align-items:center; gap:4px;">
             ${(() => {
+              const methodLower = String(r.paymentMethod || "").trim().toLowerCase();
+              const isCash = methodLower === "cash";
               const rawT = String(r.transactionId || "").trim();
               const isJunk = !rawT || /^(rc-imp|rc-n\/a|cash|pay later|undefined|null|none|admission)$/i.test(rawT) || rawT.toLowerCase().startsWith("rc-");
-              if (isJunk) return `<span>—</span>`;
+              if (isCash || isJunk) return `<span>—</span>`;
               return `
                 <span>${rawT}</span>
                 <span title="Click to copy UTR" onclick="navigator.clipboard.writeText('${rawT}'); if (window.showToast) window.showToast('UTR copied');" style="cursor:pointer; opacity:0.7; display:inline-flex; align-items:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
@@ -863,34 +870,45 @@ const renderPaymentAdminTable = () => {
         <td style="padding:14px; text-align:center;">
           <span style="${statusStyle} padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; display:inline-block;">${statusText}</span>
         </td>
-        <td style="padding:14px; text-align:right;">
-          <div style="display:inline-flex; align-items:center; gap:6px; justify-content:flex-end;">
+        <td style="padding:10px 14px; text-align:right; vertical-align:middle; white-space:nowrap;">
+          <div style="display:inline-flex; flex-direction:column; gap:6px; align-items:stretch; justify-content:center; width:125px; margin-left:auto;">
             ${(isPending && canApprove && !isPayLater) ? `
-              <button class="btn btn-primary btn-sm" onclick="window.openRenewalVerifyModal('${r.id}')" style="font-size:11.5px; padding:5px 12px; border-radius:8px; display:inline-flex; align-items:center; gap:4px; font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,0.15);" title="Review proof and verify bank account">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Verify & Approve
+              <div style="display:inline-flex; gap:4px; align-items:center; width:100%;">
+                <button class="btn btn-primary btn-sm" onclick="window.openRenewalVerifyModal('${r.id}')" style="flex:1; font-size:11px; padding:5px 8px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; gap:4px; font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,0.15);" title="Review proof and verify bank account">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Verify &amp; Approve
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 6px; color:var(--danger); border-radius:6px; display:inline-flex; align-items:center; justify-content:center;" title="Reject Request"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+              </div>
+            ` : (isPayLater && st.key !== "approved") ? `
+              <button class="btn btn-primary btn-sm" onclick="window.openCollectPayLaterModal('${r.id}')" style="width:100%; font-size:11px; padding:5px 12px; background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer; box-shadow:0 1px 3px rgba(22,163,74,0.3);" title="Collect and settle fee payment">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                <span>Collect Fee</span>
               </button>
-              <button class="btn btn-ghost btn-sm" onclick="window.handleRejectPayment('${r.id}')" style="font-size:11px; padding:5px 8px; color:var(--danger); border-radius:6px; display:inline-flex; align-items:center;" title="Reject Request"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            ` : `
-              <div style="display:inline-flex; align-items:center; gap:6px;">
-                ${(st.key === "approved") ? `
-                  <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="font-size:11.5px; padding:5px 11px; border-radius:6px; font-weight:600; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-primary); display:inline-flex; align-items:center; gap:5px; cursor:pointer;" title="Download E-Invoice PDF">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>Invoice</span>
-                  </button>
-                ` : (isPayLater && st.key !== "approved" ? `
-                  <button class="btn btn-primary btn-sm" onclick="window.openCollectPayLaterModal('${r.id}')" style="font-size:11.5px; padding:5px 12px; background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; border-radius:6px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; box-shadow:0 1px 3px rgba(22,163,74,0.3);" title="Collect and settle fee payment">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-                    <span>Collect Fee</span>
-                  </button>
-                ` : '')}
+            ` : (st.key === "approved") ? `
+              <div style="display:inline-flex; gap:4px; align-items:center; width:100%;">
+                <button class="btn btn-secondary btn-sm" onclick="window.downloadAdminPaymentInvoice('${r.id}')" style="flex:1; font-size:11px; padding:5px 8px; border-radius:6px; font-weight:600; border:1px solid var(--border-bright); background:var(--bg-card); color:var(--text-primary); display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer;" title="Download E-Invoice PDF">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span>Invoice</span>
+                </button>
                 ${hasProof ? `
-                  <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11.5px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="font-size:11px; padding:4px 6px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                     <span>Proof</span>
                   </button>
                 ` : ''}
               </div>
-            `}
+            ` : hasProof ? `
+              <button class="btn btn-ghost btn-sm" onclick="window.viewPaymentScreenshots('${r.id}')" style="width:100%; font-size:11px; padding:5px 8px; border:1px solid var(--border); border-radius:6px; color:var(--primary); font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:4px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <span>Proof</span>
+              </button>
+            ` : ''}
+
+            <!-- Bottom Button: WhatsApp -->
+            <button type="button" class="btn btn-sm" onclick="window.sendPaymentWhatsAppMessage('${r.id}')" style="width:100%; font-size:11px; padding:5px 10px; border-radius:6px; font-weight:700; background:#25D366; color:#fff; border:none; display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer; box-shadow:0 1px 3px rgba(37,211,102,0.3); transition:all 0.15s ease;" title="Send WhatsApp Message for this payment">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+              <span>WhatsApp</span>
+            </button>
           </div>
         </td>
       </tr>
@@ -950,13 +968,31 @@ window.handlePaymentExport = async (format) => {
         return isNaN(d.getTime()) ? "N/A" : d.toISOString().split('T')[0];
       })();
 
+      const methodLower = String(r.paymentMethod || "").trim().toLowerCase();
+      const isCash = methodLower === "cash";
+      const rawTxn = String(r.transactionId || "").trim();
+      const isJunk = !rawTxn || /^(rc-imp|rc-n\/a|cash|pay later|paylater|undefined|null|none|admission)$/i.test(rawTxn) || rawTxn.toLowerCase().startsWith("rc-");
+      let cleanTxn = "—";
+      if (r.isPayLater || rawTxn.toUpperCase() === "PAY LATER" || methodLower === "pay later") {
+        cleanTxn = "Pay Later";
+      } else if (!isCash && !isJunk) {
+        cleanTxn = rawTxn;
+      } else {
+        cleanTxn = "—";
+      }
+      const seatInfo = r.seatNumber
+        ? (String(r.seatNumber).toLowerCase().startsWith("seat") ? r.seatNumber : `Seat ${r.seatNumber}`)
+        : (r.seatAssigned || "-");
+
       return {
         "Type": isRenewalRecord(r) ? "Renewal" : "Payment",
-        "Transaction ID": r.transactionId || "RC-N/A",
-        "Student": r.studentName || "Unknown",
-        "Plan": r.planName || "Unknown Plan",
-        "Method": r.paymentMethod || "Cash",
-        "Amount": r.amount,
+        "Transaction ID": cleanTxn,
+        "Student Name": r.studentName || "Unknown",
+        "Phone": r.studentPhone || r.phone || "-",
+        "Seat": seatInfo,
+        "Membership Plan": r.planName || "Unknown Plan",
+        "Payment Method": r.paymentMethod || "Cash",
+        "Amount": Number(r.amount) || r.amount || 0,
         "Date": date,
         "Status": statusText
       };
@@ -1036,8 +1072,13 @@ window.openCollectPayLaterModal = async (recordId) => {
           <input type="text" id="cpl-txn" placeholder="e.g. 423589123456" class="input-field" style="width:100%; box-sizing:border-box; padding:0.6rem 0.75rem; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-bright); border-radius:8px;" />
         </div>
 
-        <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
-          <button type="button" class="btn btn-ghost" id="cpl-cancel-btn" style="border:1px solid var(--border); color:var(--text-secondary);">Cancel</button>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm" onclick="window.sendPaymentWhatsAppMessage('${recordId}')" style="background:#25D366; color:#fff; border:none; padding:7px 14px; border-radius:8px; font-weight:700; font-size:12.5px; display:inline-flex; align-items:center; gap:5px; cursor:pointer;" title="Send WhatsApp fee reminder">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <span>WhatsApp Reminder</span>
+          </button>
+          <div style="display:flex; gap:0.75rem;">
+            <button type="button" class="btn btn-ghost" id="cpl-cancel-btn" style="border:1px solid var(--border); color:var(--text-secondary);">Cancel</button>
           <button type="submit" class="btn btn-primary" id="cpl-submit-btn" style="background:#16a34a; border-color:#16a34a; color:#fff; font-weight:700; padding:8px 20px; border-radius:8px;">Confirm & Collect Fee</button>
         </div>
       </form>
@@ -1067,7 +1108,7 @@ window.submitCollectPayLaterFee = async (recordId) => {
 
   const amount = Number(amtInput?.value) || 1000;
   const method = methodInput?.value || "Cash";
-  const txn = txnInput?.value ? txnInput.value.trim() : (method === "Cash" ? "CASH" : "");
+  const txn = txnInput?.value ? txnInput.value.trim() : "";
 
   btn.disabled = true;
   btn.innerText = "Collecting...";
@@ -1093,5 +1134,119 @@ window.submitCollectPayLaterFee = async (recordId) => {
     if (window.showToast) window.showToast("Error: " + err.message, "error");
     btn.disabled = false;
     btn.innerText = "Confirm & Collect Fee";
+  }
+};
+
+window.sendPaymentWhatsAppMessage = async (paymentId) => {
+  let pay = (typeof allPayments !== "undefined" && Array.isArray(allPayments))
+    ? allPayments.find(p => p.id === paymentId)
+    : null;
+
+  if (!pay) {
+    try {
+      const { doc, getDoc } = await import("firebase/firestore");
+      const { db } = await import("../firebase/firebase.js");
+      const snap = await getDoc(doc(db, "payments", paymentId));
+      if (snap.exists()) pay = { id: snap.id, ...snap.data() };
+    } catch (_) {}
+  }
+
+  if (!pay) {
+    if (window.showToast) window.showToast("Payment record not found.", "error");
+    return;
+  }
+
+  // Find student record to get phone number, seat, dates
+  let student = null;
+  const targetStudentId = pay.studentId;
+  const targetStudentName = pay.studentName;
+
+  try {
+    const { doc, getDoc, collection, query, where, getDocs, limit } = await import("firebase/firestore");
+    const { db } = await import("../firebase/firebase.js");
+
+    if (targetStudentId) {
+      const sSnap = await getDoc(doc(db, "students", targetStudentId));
+      if (sSnap.exists()) {
+        student = { id: sSnap.id, ...sSnap.data() };
+      }
+    }
+    if (!student && targetStudentName) {
+      const q = query(collection(db, "students"), where("name", "==", targetStudentName), limit(1));
+      const sSnap = await getDocs(q);
+      if (!sSnap.empty) {
+        student = { id: sSnap.docs[0].id, ...sSnap.docs[0].data() };
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch student for payment WhatsApp:", err);
+  }
+
+  const pmLower = String(pay.paymentMethod || pay.paymentMode || pay.mode || "").trim().toLowerCase();
+  const isCash = pmLower === "cash";
+  const isPayLater = isPayLaterRecord(pay);
+  const rawTxn = String(pay.transactionId || pay.txnId || "").trim();
+  const isJunk = !rawTxn || /^(pay later|paylater|rc-.*|cash|n\/a|na|none|null|undefined|—|-)$/i.test(rawTxn);
+  const cleanTxn = (isCash || isPayLater || isJunk) ? "" : rawTxn;
+
+  const rawSeat = (student && (student.seatNumber || student.seatAssigned)) || pay.seatNumber || "";
+  const seatFormatted = rawSeat ? (String(rawSeat).trim().toLowerCase().startsWith("seat") ? String(rawSeat).trim() : `Seat ${String(rawSeat).trim()}`) : "";
+
+  // Derive or get invoice number
+  let invoiceNo = pay.invoiceNo || pay.receiptNo || (student && (student.admissionReceiptNo || student.receiptNo || student.invoiceNo)) || "";
+  if (!invoiceNo && !isPayLater && pay.id) {
+    try {
+      const { getOrAssignReceiptNumber } = await import("./receiptService.js");
+      invoiceNo = await getOrAssignReceiptNumber(pay.id, pay);
+    } catch (_) {}
+  }
+  if (!invoiceNo) {
+    invoiceNo = pay.id ? `SRL/${String(pay.id).slice(-4)}` : "SRL/2026-27";
+  }
+
+  const studentData = {
+    ...(student || {}),
+    id: (student && student.id) || pay.studentId || "",
+    paymentId: pay.id,
+    paymentRecordId: pay.id,
+    name: (student && student.name) || pay.studentName || "Student",
+    fullName: (student && student.name) || pay.studentName || "Student",
+    phone: (student && student.phone) || pay.phone || pay.studentPhone || "",
+    transactionId: cleanTxn,
+    txnId: cleanTxn,
+    invoiceNo: invoiceNo,
+    receiptNo: invoiceNo,
+    paymentMethod: isCash ? "Cash" : (isPayLater ? "Pay Later" : "UPI"),
+    planName: pay.planName || (student && student.planName) || "Membership Plan",
+    membershipPlan: pay.planName || (student && student.planName) || "Membership Plan",
+    pendingAmount: pay.amount != null ? String(pay.amount) : "0",
+    amount: pay.amount != null ? String(pay.amount) : "0",
+    seatNumber: seatFormatted,
+    startDate: (student && student.startDate) || pay.startDate || pay.date || "",
+    endDate: (student && student.endDate) || pay.endDate || "",
+    renewalDate: (student && student.paymentDueDate) || pay.date || "",
+    suggestedTemplate: isPayLater ? "Payment Reminder" : "Payment Confirmation",
+    isPayLater: isPayLater,
+    isCash: isCash,
+    status: isPayLater ? "pay later" : (pay.status || "approved")
+  };
+
+  if (typeof window.openPaymentWhatsAppModal === "function") {
+    window.openPaymentWhatsAppModal(studentData);
+  } else if (typeof window.openWhatsAppModal === "function") {
+    window.openWhatsAppModal(studentData);
+  } else {
+    try {
+      const { openPaymentWhatsAppModal, openWhatsAppModal } = await import("./whatsappModalUI.js?v=60");
+      if (typeof openPaymentWhatsAppModal === "function") {
+        openPaymentWhatsAppModal(studentData);
+      } else {
+        openWhatsAppModal(studentData);
+      }
+    } catch (e) {
+      if (typeof window.triggerWhatsAppModal === "function") {
+        window.triggerWhatsAppModal(studentData);
+      }
+    }
   }
 };

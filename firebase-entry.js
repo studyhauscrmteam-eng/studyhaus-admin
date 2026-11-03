@@ -7,7 +7,7 @@ import { initMembershipPlans } from "./services/membershipService.js";
 import { initAdmissionsUI } from "./services/admissionService.js";
 import { initStudentManagementUI } from "./services/studentProfile.js";
 import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js";
-import { initPaymentAdminUI } from "./services/paymentAdminUI.js?v=4";
+import { initPaymentAdminUI } from "./services/paymentAdminUI.js?v=60";
 import { initComplaintAdminUI } from "./services/complaintAdminUI.js";
 import { initSeatMapUI } from "./services/seatMapUI.js";
 import { initLiveSeatMapUI } from "./services/liveSeatMapUI.js";
@@ -24,12 +24,12 @@ import { initAnnouncementAdminUI } from "./services/announcementAdminUI.js";
 import { initAdminNotificationUI } from "./services/adminNotificationUI.js";
 import { initStaffAdminUI } from "./services/staffAdminUI.js";
 import { initTasksAdminUI } from "./services/tasksAdminUI.js";
-import { initSettingsAdminUI } from "./services/settingsAdminUI.js";
-import { openReceiptModal, downloadReceiptPDF } from "./services/receiptService.js?v=3";
+import { initSettingsAdminUI } from "./services/settingsAdminUI.js?v=60";
+import { openReceiptModal, downloadReceiptPDF } from "./services/receiptService.js?v=60";
 window.openReceiptModal = openReceiptModal;
 window.downloadReceiptPDF = downloadReceiptPDF;
 import "./services/translationService.js";
-import "./services/whatsappModalUI.js"; // Auto-injects modal styles and functions
+import "./services/whatsappModalUI.js?v=60"; // Auto-injects modal styles and functions
 
 // Expose the test function to the global window object
 window.runFirebaseTest = testFirebaseConnection;

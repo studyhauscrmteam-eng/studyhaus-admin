@@ -99,7 +99,7 @@ const renderCurrentReminders = (reminders) => {
         </div>
         
         <div style="display:flex; gap:0.25rem;">
-          <button class="icon-btn-sm" title="WhatsApp" onclick="window.triggerWhatsAppModal('${r.studentId}')" style="color:#25D366; background:transparent;">
+          <button class="icon-btn-sm" title="WhatsApp" onclick="window.triggerWhatsAppModal('${r.studentId}', { daysRemaining: ${r.daysRemaining}, suggestedTemplate: '${r.type === 'Payment' ? 'Payment Reminder' : 'Renewal Reminder'}' })" style="color:#25D366; background:transparent;">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
           ${canUpdate ? `
@@ -144,7 +144,7 @@ const renderOldReminders = (reminders) => {
         </div>
         
         <div style="display:flex; gap:0.25rem;">
-          <button class="icon-btn-sm" title="WhatsApp" onclick="window.triggerWhatsAppModal('${r.studentId}')" style="color:#25D366; background:transparent;">
+          <button class="icon-btn-sm" title="WhatsApp" onclick="window.triggerWhatsAppModal('${r.studentId}', { daysRemaining: ${r.daysRemaining}, suggestedTemplate: '${r.type === 'Payment' ? 'Payment Reminder' : 'Renewal Reminder'}' })" style="color:#25D366; background:transparent;">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
           ${canUpdate ? `

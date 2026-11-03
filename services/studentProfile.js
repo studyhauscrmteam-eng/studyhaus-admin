@@ -1228,18 +1228,52 @@ window.triggerStudentEmail = async (id) => {
   }
 };
 
-window.triggerWhatsAppModal = (id) => {
-  const s = allStudents.find(x => x.id === id);
-  if (!s) return;
+window.triggerWhatsAppModal = async (id, extra = {}) => {
+  let s = allStudents.find(x => x.id === id);
+  if (!s && typeof id === "object" && id !== null) {
+    s = id;
+  }
+  if (!s && typeof id === "string") {
+    try {
+      const { doc, getDoc } = await import("firebase/firestore");
+      const { db } = await import("../firebase/firebase.js");
+      const snap = await getDoc(doc(db, "students", id));
+      if (snap.exists()) {
+        s = { id: snap.id, ...snap.data() };
+      }
+    } catch (e) {
+      console.warn("Could not fetch student for WhatsApp:", e);
+    }
+  }
+  if (!s) {
+    if (window.showToast) window.showToast("Could not find student data.", "error");
+    return;
+  }
   
-  // Normalize data for the whatsapp modal
+  // Normalize data for the whatsapp modal with all available student fields
+  const seatNum = s.seatNumber || s.seatAssigned || "";
+  const seatFormatted = seatNum ? (String(seatNum).toLowerCase().startsWith("seat") ? seatNum : `Seat ${seatNum}`) : "";
+
   const studentData = {
     id: s.id,
     fullName: s.name,
+    name: s.name,
     phone: s.phone,
-    seatNumber: (s.seatNumber || s.seatAssigned) ? `${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})` : '',
-    planName: s.planName,
-    endDate: s.paymentDueDate
+    transactionId: s.transactionId || s.txnId || s.utr || '',
+    txnId: s.transactionId || s.txnId || s.utr || '',
+    seatNumber: seatFormatted,
+    seatFloor: s.seatFloor || s.floor || 'Ground Floor',
+    planName: s.planName || s.membershipPlan || '',
+    startDate: s.startDate || s.createdAt || s.admissionDate || '',
+    endDate: s.endDate || s.paymentDueDate || '',
+    renewalDate: s.renewalDate || s.paymentDueDate || s.endDate || '',
+    pendingAmount: s.pendingAmount != null ? s.pendingAmount : (s.amount != null ? s.amount : '0'),
+    email: s.email || '',
+    college: s.college || '',
+    course: s.course || '',
+    parentPhone: s.parentPhone || '',
+    address: s.address || '',
+    ...extra
   };
 
   if (window.openWhatsAppModal) {

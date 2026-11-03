@@ -440,7 +440,7 @@ export const receiveDirectPayment = async (data) => {
       planName: data.planName,
       amount: Number(data.amount),
       paymentMethod: data.paymentMethod,
-      transactionId: data.transactionId || "RC-N/A",
+      transactionId: data.transactionId || "",
       status: data.status || "approved",
       date: data.date || new Date().toISOString(),
       createdAt: serverTimestamp(),

@@ -1326,8 +1326,27 @@ const triggerAssignSeat = async (seat, studentEmailOrId) => {
     if (studentData.seatNumber) return window.showToast(`Student already has a seat assigned: Seat ${studentData.seatNumber} (${studentData.seatFloor || 'Ground Floor'})`, "warning");
 
     const res = await assignSeat(seat.id, studentData);
-    if (!res.success) window.showToast("Failed to assign seat: " + res.error, "error");
-    else window.showToast(`Successfully assigned ${studentData.name} to Seat ${seat.seatNumber} (${seat.floor || currentFilters.floor || 'Ground Floor'})`, "success");
+    if (!res.success) {
+      window.showToast("Failed to assign seat: " + res.error, "error");
+    } else {
+      window.showToast(`Successfully assigned ${studentData.name} to Seat ${seat.seatNumber} (${seat.floor || currentFilters.floor || 'Ground Floor'})`, "success");
+      if (typeof window.openWhatsAppModal === "function" && studentData.phone) {
+        window.openWhatsAppModal({
+          id: studentData.id,
+          fullName: studentData.name,
+          name: studentData.name,
+          phone: studentData.phone,
+          seatNumber: `Seat ${seat.seatNumber}`,
+          seatFloor: seat.floor || currentFilters.floor || 'Ground Floor',
+          planName: studentData.planName || studentData.membershipPlan || '',
+          startDate: studentData.startDate || studentData.createdAt || '',
+          endDate: studentData.endDate || studentData.paymentDueDate || '',
+          renewalDate: studentData.paymentDueDate || studentData.endDate || '',
+          pendingAmount: studentData.pendingAmount != null ? studentData.pendingAmount : (studentData.amount != null ? studentData.amount : '0'),
+          suggestedTemplate: "Seat Finalized"
+        });
+      }
+    }
 
   } catch (err) {
     window.showToast("Error finding student: " + err.message, "error");

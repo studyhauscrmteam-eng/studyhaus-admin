@@ -1,6 +1,6 @@
 /**
  * Exports data to a CSV file.
- * We use this for both CSV and Excel compatibility.
+ * Uses UTF-8 BOM so Microsoft Excel renders Gujarati text natively without mojibake.
  */
 export const exportToCSV = (data, filename = "expenses_export.csv") => {
   if (!data || data.length === 0) {
@@ -28,17 +28,18 @@ export const exportToCSV = (data, filename = "expenses_export.csv") => {
     csvRows.push(values.join(","));
   }
 
-  // Create Blob and Trigger Download
-  const csvString = csvRows.join("\n");
-  const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+  // Create Blob with UTF-8 BOM (\uFEFF) and Trigger Download
+  const csvString = csvRows.join("\r\n");
+  const blob = new Blob(["\uFEFF", csvString], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   
   const link = document.createElement("a");
   link.href = url;
-  link.setAttribute("download", filename);
+  link.setAttribute("download", filename.endsWith(".csv") ? filename : `${filename}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 /**
