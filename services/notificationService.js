@@ -1,24 +1,31 @@
-import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, onSnapshot, updateDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, setDoc, serverTimestamp, query, where, orderBy, limit, onSnapshot, updateDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase/firebase.js";
 
 /**
  * In-app admin notifications (bell/badge + pending queue).
  * Collection: notifications/{autoId}
- * { type, title, body, admissionId, studentId, createdAt, read, forRoles }
+ * { type, title, body, admissionId, studentId, leadId, createdAt, read, forRoles }
  */
 
-export const notifyAdmins = async ({ type, title, body, admissionId = "", studentId = "" }) => {
+export const notifyAdmins = async ({ type, title, body, admissionId = "", studentId = "", leadId = "", notifId = "" }) => {
   try {
-    await addDoc(collection(db, "notifications"), {
+    const id = notifId || (leadId ? `lead_${leadId}` : (admissionId ? `admission_${admissionId}` : ""));
+    const payload = {
       type: type || "info",
       title: title || "Notification",
       body: body || "",
       admissionId,
       studentId,
+      leadId,
       read: false,
       forRoles: ["Owner/Admin", "Manager"],
       createdAt: serverTimestamp(),
-    });
+    };
+    if (id) {
+      await setDoc(doc(db, "notifications", id), payload, { merge: true });
+    } else {
+      await addDoc(collection(db, "notifications"), payload);
+    }
   } catch (e) {
     console.warn("[notifications] queue failed:", e?.message || e);
   }
@@ -26,6 +33,7 @@ export const notifyAdmins = async ({ type, title, body, admissionId = "", studen
 
 export const notifyNewAdmission = (admission) =>
   notifyAdmins({
+    notifId: `admission_${admission.id || admission.uid || ""}`,
     type: "new-admission",
     title: "New admission request",
     body: `${admission.name || "A student"} (${admission.phone || "no phone"}) requested "${admission.planName || "a plan"}". Open Admissions → Pending approval.`,

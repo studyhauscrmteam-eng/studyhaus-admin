@@ -1,6 +1,6 @@
 import { deleteField } from "firebase/firestore";
 import { listenToAllStudents, updateStudentProfile, createPortalLoginForStudent, clearPortalCredentials, resetPortalPassword, permanentlyDeleteStudent } from "./studentService.js";
-import { searchStudents, filterStudents, sortStudents, paginateStudents } from "./studentDataProcessing.js";
+import { searchStudents, filterStudents, sortStudents, paginateStudents, isStudentPremium } from "./studentDataProcessing.js";
 import { fetchPlansForDropdown } from "./admissionService.js";
 import { convertToOldStudent } from "./oldStudentService.js";
 import { loadStudentDocuments, renderStudentDocuments } from "./documentUploadService.js";
@@ -432,16 +432,28 @@ const renderTable = () => {
       }
       if (/^Monthly\s*-\s*₹?\d+/i.test(displayPlanName)) {
         // If still showing Monthly - ₹1,200, find matching plan by price or category
-        const isPrem = s.libraryType === "Shreeji Premium Reading Library" || s.seatFloor === "First Floor";
+        const isPrem = isStudentPremium(s, displayPlanName);
         const candidate = availablePlans.find(p => isPrem ? (p.libraryType && p.libraryType.includes("Premium")) : (!p.libraryType || !p.libraryType.includes("Premium")));
         if (candidate && candidate.planName) displayPlanName = candidate.planName;
         else displayPlanName = isPrem ? "Regular Fixed Premium" : "Regular Fixed Seat";
       }
     }
 
+    const isPremStudent = isStudentPremium(s, displayPlanName);
+
+    const planBadge = isPremStudent
+      ? `<span style="display:inline-flex; align-items:center; gap:3.5px; font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:linear-gradient(135deg, #be185d, #9d174d); color:#ffffff; letter-spacing:0.4px; text-transform:uppercase; box-shadow:0 1px 3px rgba(157,23,77,0.28); white-space:nowrap;">★ Premium</span>`
+      : `<span style="display:inline-flex; align-items:center; gap:3.5px; font-size:10px; font-weight:700; padding:1.5px 8px; border-radius:999px; background:rgba(235,106,48,0.12); color:#c2410c; border:1px solid rgba(235,106,48,0.3); letter-spacing:0.3px; text-transform:uppercase; white-space:nowrap;">Regular</span>`;
+
     const planHtml = displayPlanName
-      ? `<span style="white-space: nowrap;">${esc(displayPlanName)}</span>`
-      : `<span style="color:var(--text-muted);">None</span>`;
+      ? `<div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+           ${planBadge}
+           <span style="font-size:13px; font-weight:${isPremStudent ? '700' : '600'}; color:${isPremStudent ? '#831843' : 'var(--text-primary)'}; white-space:nowrap;">${esc(displayPlanName)}</span>
+         </div>`
+      : `<div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+           ${planBadge}
+           <span style="color:var(--text-muted); font-size:12px;">None</span>
+         </div>`;
 
     let nameHtml = s.name ? `<div class="name" style="line-height: 1.3;">${s.name}</div>` : `<div class="name">Unknown</div>`;
 
@@ -497,21 +509,29 @@ const renderTable = () => {
       } catch (_) { joinedFormatted = String(joinedVal); }
     }
 
+    const seatNumberText = s.seatNumber || s.seatAssigned;
+    const seatBadgeHtml = seatNumberText
+      ? (isPremStudent
+          ? ` · <span style="font-weight:700; color:#9d174d; background:#fdf2f8; padding:2px 7px; border-radius:5px; border:1px solid #fbcfe8; font-size:11px; display:inline-flex; align-items:center; gap:3px;">Seat ${esc(String(seatNumberText))} · 1st Fl (Premium)</span>`
+          : ` · <span style="font-weight:600; color:#c2410c; background:rgba(235,106,48,0.08); padding:2px 7px; border-radius:5px; border:1px solid rgba(235,106,48,0.22); font-size:11px; display:inline-flex; align-items:center; gap:3px;">Seat ${esc(String(seatNumberText))} · Gr Fl (Regular)</span>`
+        )
+      : "";
+
     html += `
-      <tr style="cursor:pointer;" onclick="window.openStudentProfile('${s.id}')">
-        <td style="vertical-align: top; padding-top: 1rem; max-width: 220px; white-space: normal; word-wrap: break-word;">
+      <tr style="cursor:pointer; ${isPremStudent ? 'background:rgba(253, 242, 248, 0.42);' : ''}" onclick="window.openStudentProfile('${s.id}')">
+        <td style="vertical-align: top; padding-top: 1rem; max-width: 220px; white-space: normal; word-wrap: break-word; ${isPremStudent ? 'border-left: 3.5px solid #be185d;' : 'border-left: 3.5px solid transparent;'}">
           <div class="student-cell" style="align-items: flex-start;">
             ${(() => { const _ph = getStudentPhotoUrl(s); return _ph
-              ? `<div class="avatar-sm" style="margin-top: 2px; overflow:hidden; padding:0; background:var(--bg-hover);"><img src="${_ph}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" /></div>`
-              : `<div class="avatar-sm avatar-tint" style="background:${avBg}; color:${avFg}; margin-top: 2px;">${initials}</div>`; })()}
+              ? `<div class="avatar-sm" style="margin-top: 2px; overflow:hidden; padding:0; background:var(--bg-hover); ${isPremStudent ? 'box-shadow: 0 0 0 2px #be185d;' : ''}"><img src="${_ph}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" /></div>`
+              : `<div class="avatar-sm avatar-tint" style="background:${isPremStudent ? 'linear-gradient(135deg, #be185d, #831843)' : avBg}; color:${isPremStudent ? '#ffffff' : avFg}; margin-top: 2px; ${isPremStudent ? 'box-shadow: 0 0 0 2px #fbcfe8;' : ''}">${initials}</div>`; })()}
             <div>
               ${nameHtml}
-              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}${(s.seatNumber || s.seatAssigned) ? ` · <span style="font-weight:600; color:var(--primary);">Seat ${s.seatNumber || s.seatAssigned}</span>` : ""}</div>
+              <div class="sub-text" style="margin-top: 2px;">${s.phone || "No Phone"}${seatBadgeHtml}</div>
               ${flagsHtml}
             </div>
           </div>
         </td>
-        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 140px; white-space: nowrap;">${planHtml}</td>
+        <td style="vertical-align: top; padding-top: 1.1rem; max-width: 170px; white-space: nowrap;">${planHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${joinedFormatted}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${subsEndHtml}</td>
         <td style="vertical-align: top; padding-top: 1.1rem; white-space: nowrap;">${dueHtml}</td>
@@ -539,7 +559,16 @@ const updateCounters = (dataset) => {
   if (!subtitle) return;
   const active = dataset.filter(s => s.status === "Active").length;
   const inactive = dataset.filter(s => s.status === "Inactive" || s.status === "Expired").length;
-  subtitle.innerHTML = `${active} active · ${inactive} inactive`;
+  const prem = dataset.filter(s => isStudentPremium(s)).length;
+  const reg = dataset.length - prem;
+  subtitle.innerHTML = `
+    <span><b>${active}</b> active</span>
+    <span style="margin: 0 6px; opacity: 0.35;">•</span>
+    <span style="display:inline-flex; align-items:center; gap:4px; background:#fdf2f8; color:#9d174d; border:1px solid #fbcfe8; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700;">★ ${prem} Premium</span>
+    <span style="margin: 0 6px; opacity: 0.35;">•</span>
+    <span style="display:inline-flex; align-items:center; gap:4px; background:rgba(235,106,48,0.1); color:#c2410c; border:1px solid rgba(235,106,48,0.25); padding:1px 8px; border-radius:999px; font-size:11px; font-weight:700;">${reg} Regular</span>
+    ${inactive > 0 ? `<span style="margin: 0 6px; opacity: 0.35;">•</span> <span style="color:var(--text-muted); font-size:11px;">${inactive} inactive</span>` : ""}
+  `;
 };
 
 const updatePaginationUI = (total) => {
@@ -673,7 +702,16 @@ const renderProfileModal = (s, role) => {
         </div>`; })()}
         <div>
           <h3 style="margin: 0; font-size: 1.25rem;">${s.name}</h3>
-          <div style="color: var(--text-muted);">${s.studentId || s.admissionNo || "No ID"} · ${s.status || "Active"}${s.approvalStatus ? ` · ${s.approvalStatus}` : ""}${(s.seatNumber || s.seatAssigned) ? ` · <b style="color:var(--text-primary);">Seat ${s.seatNumber || s.seatAssigned} (${s.seatFloor || s.floor || 'Ground Floor'})</b>` : ""}</div>
+          <div style="color: var(--text-muted); font-size:0.875rem; margin-top:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span>${s.studentId || s.admissionNo || "No ID"}</span>
+            <span>·</span>
+            <span>${s.status || "Active"}${s.approvalStatus ? ` (${s.approvalStatus})` : ""}</span>
+            ${(s.seatNumber || s.seatAssigned) ? `<span>·</span> <b style="color:var(--text-primary);">Seat ${s.seatNumber || s.seatAssigned}</b>` : ""}
+            ${isStudentPremium(s)
+              ? `<span style="display:inline-flex; align-items:center; gap:3px; background:linear-gradient(135deg, #be185d, #9d174d); color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; letter-spacing:0.4px; text-transform:uppercase;">★ Shreeji Premium Library (First Floor)</span>`
+              : `<span style="display:inline-flex; align-items:center; gap:3px; background:rgba(235,106,48,0.12); color:#c2410c; border:1px solid rgba(235,106,48,0.3); font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; letter-spacing:0.3px; text-transform:uppercase;">Shreeji Regular Library (Ground Floor)</span>`
+            }
+          </div>
           <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
             ${buildFlagBadges(s)}
             ${s.mergedInto ? `<button type="button" class="btn btn-ghost" style="padding:2px 8px; font-size:11px;" onclick="window.openStudentProfileById('${escAttr(mergedTargetId(s))}')">Open merged record</button>` : ""}

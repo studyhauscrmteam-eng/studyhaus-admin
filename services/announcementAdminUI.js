@@ -41,9 +41,21 @@ const openPendingApplicant = (id) => {
 /** System notifications loaded from Firestore collection `notifications` */
 const systemNotifs = () => {
   const sys = Array.isArray(window.__systemNotifs) ? window.__systemNotifs : [];
-  return [...sys]
-    .filter((n) => n && n.read !== true && n.discarded !== true)
-    .sort((x, y) => (tsMs(y.createdAt) || 0) - (tsMs(x.createdAt) || 0));
+  const seen = new Set();
+  const deduped = [];
+  for (const n of sys) {
+    if (!n || n.read === true || n.discarded === true) continue;
+    // Deduplicate by explicit key or by semantic content within the same 5-minute bucket
+    const ms = tsMs(n.createdAt) || 0;
+    const windowBlock = Math.floor(ms / 300000);
+    const dedupKey = (n.leadId || n.admissionId || n.studentId)
+      ? `${n.type}_${n.leadId || n.admissionId || n.studentId}`
+      : `${n.type}_${n.title || ''}_${n.body || ''}_${windowBlock}`;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+    deduped.push(n);
+  }
+  return deduped.sort((x, y) => (tsMs(y.createdAt) || 0) - (tsMs(x.createdAt) || 0));
 };
 
 const routeNotification = (key, item) => {

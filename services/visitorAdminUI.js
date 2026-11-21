@@ -451,8 +451,10 @@ const renderVisitors = (canEdit, canDelete) => {
         : `<span style="color:var(--text-muted)">—</span>`}</span>`,
     ].filter(Boolean).join(`<span class="vis-sep">·</span>`);
 
+    const libTier = v.libraryTypeName || v.libraryType || (v.planName && v.planName.toLowerCase().includes("premium") ? "Premium Library" : "");
     const meta = [
       `<span><b>When</b> ${esc(fmtWhen(v))}</span>`,
+      libTier ? `<span><b>Type</b> ${esc(libTier)}</span>` : "",
       v.planName ? `<span><b>Plan</b> ${esc(v.planName)}</span>` : "",
       `<span><b>Handled by</b> ${v.employeeName ? esc(v.employeeName) : "—"}</span>`,
     ].join("");

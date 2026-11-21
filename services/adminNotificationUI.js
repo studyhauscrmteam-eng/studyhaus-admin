@@ -183,11 +183,14 @@ const complaintAlertsHtml = () => {
     ${items}`;
 };
 
+let _adminNotifsInitialized = false;
 export const initAdminNotificationUI = () => {
+  if (_adminNotifsInitialized) return;
   const list = document.querySelector("#page-notifications .notif-list");
   if (!list) return; // not on a dashboard with notifications
   const role = localStorage.getItem("userRole");
   if (role === "Student") return;
+  _adminNotifsInitialized = true;
 
   // Never dump database collections into notification feeds
   window.__renderAdmissionAlerts = () => "";
@@ -306,6 +309,7 @@ export const initAdminNotificationUI = () => {
   // Historical enquiries stay on the Visitors page and are not dumped as unread notifications.
   try {
     let knownLeads = null;
+    const handledLeadIds = new Set();
     onSnapshot(
       query(collection(db, "visitors"), where("source", "==", "Website")),
       (snap) => {
@@ -315,7 +319,10 @@ export const initAdminNotificationUI = () => {
           const v = d.data() || {};
           if ((v.leadStatus || "New") !== "New") return;
           live.add(d.id);
-          if (knownLeads && !knownLeads.has(d.id)) fresh.push({ id: d.id, ...v });
+          if (knownLeads && !knownLeads.has(d.id) && !handledLeadIds.has(d.id)) {
+            handledLeadIds.add(d.id);
+            fresh.push({ id: d.id, ...v });
+          }
         });
         const first = knownLeads === null;
         knownLeads = live;
@@ -335,10 +342,12 @@ export const initAdminNotificationUI = () => {
           );
         }
 
-        // Post a genuine notification to Firestore collection so it can be cleared/discarded permanently
+        // Post an idempotent notification to Firestore collection so duplicates can never exist
         import("./notificationService.js").then(({ notifyAdmins }) => {
           fresh.forEach((lead) => {
             notifyAdmins({
+              notifId: `lead_${lead.id}`,
+              leadId: lead.id,
               type: "new-lead",
               title: "New website enquiry",
               body: `${lead.visitorName || "Someone"}${lead.phone ? " · " + lead.phone : ""}${lead.planName ? " · " + lead.planName : ""}`,

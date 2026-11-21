@@ -1,5 +1,22 @@
 /**
- * Search across Name, Phone, ID, Seat
+ * Helper to identify whether a student belongs to Premium Library or Regular Library
+ */
+export const isStudentPremium = (s, planName = "") => {
+  if (!s) return false;
+  const plan = String(planName || s.planName || "").toLowerCase();
+  const lib = String(s.libraryType || s.libraryTypeName || "").toLowerCase();
+  const floor = String(s.seatFloor || s.floor || "").toLowerCase();
+  const seat = String(s.seatNumber || s.seatAssigned || "").trim().toUpperCase();
+
+  if (plan.includes("premium")) return true;
+  if (lib.includes("premium")) return true;
+  if (floor.includes("first") || floor.includes("1st")) return true;
+  if (/^B\d/.test(seat) || /\dB$/.test(seat) || /^P-/.test(seat) || /^PR-/.test(seat) || /^PN-/.test(seat)) return true;
+  return false;
+};
+
+/**
+ * Search across Name, Phone, ID, Seat, Plan, Library Tier
  */
 export const searchStudents = (students, query) => {
   if (!query) return students;
@@ -7,29 +24,39 @@ export const searchStudents = (students, query) => {
   return students.filter(s => {
     const seatStr = (s.seatNumber || "").toLowerCase();
     const floorStr = (s.seatFloor || "").toLowerCase();
+    const planStr = (s.planName || "").toLowerCase();
+    const libStr = (s.libraryType || "").toLowerCase();
+    const isPrem = isStudentPremium(s);
     return (s.name || "").toLowerCase().includes(q) ||
            (s.phone || "").toLowerCase().includes(q) ||
            (s.studentId || "").toLowerCase().includes(q) ||
+           planStr.includes(q) ||
+           libStr.includes(q) ||
            seatStr.includes(q) ||
            floorStr.includes(q) ||
            `${seatStr} ${floorStr}`.includes(q) ||
-           `${floorStr} ${seatStr}`.includes(q);
+           `${floorStr} ${seatStr}`.includes(q) ||
+           (q === "premium" && isPrem) ||
+           (q === "regular" && !isPrem);
   });
 };
 
 /**
- * Filter by multiple criteria (Status, Plan, Renewal)
+ * Filter by multiple criteria (Status, Plan, Renewal, Library Tier)
  */
 export const filterStudents = (students, filters) => {
   return students.filter(s => {
-    // Basic Active/Pending/Inactive status matching based on the filter tab.
-    // ONE effective status decides the tab (lifecycle `status` first, admission
-    // decision as fallback) — the old `status OR approvalStatus` match let a
-    // single row appear under two tabs whenever the two fields disagreed.
     if (filters.status && filters.status !== "All") {
-      const effective = String(s.status || s.approvalStatus || "").trim().toLowerCase();
-      if (effective !== String(filters.status).trim().toLowerCase()) {
-        return false;
+      const target = String(filters.status).trim().toLowerCase();
+      if (target === "premium") {
+        if (!isStudentPremium(s)) return false;
+      } else if (target === "regular") {
+        if (isStudentPremium(s)) return false;
+      } else {
+        const effective = String(s.status || s.approvalStatus || "").trim().toLowerCase();
+        if (effective !== target) {
+          return false;
+        }
       }
     }
     // Specific Plan filter
