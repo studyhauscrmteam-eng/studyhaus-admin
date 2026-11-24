@@ -7,7 +7,7 @@ import { initMembershipPlans } from "./services/membershipService.js";
 import { initAdmissionsUI } from "./services/admissionService.js";
 import { initStudentManagementUI } from "./services/studentProfile.js";
 import { initAttendanceAdminUI } from "./services/attendanceAdminUI.js";
-import { initPaymentAdminUI } from "./services/paymentAdminUI.js?v=60";
+import { initPaymentAdminUI } from "./services/paymentAdminUI.js?v=61";
 import { initComplaintAdminUI } from "./services/complaintAdminUI.js";
 import { initSeatMapUI } from "./services/seatMapUI.js";
 import { initLiveSeatMapUI } from "./services/liveSeatMapUI.js";
@@ -16,7 +16,7 @@ import { initVisitorAdminUI } from "./services/visitorAdminUI.js";
 import { initMessageLogAdminUI } from "./services/messageLogAdminUI.js";
 import { initOldStudentAdminUI } from "./services/oldStudentAdminUI.js";
 import { initDashboardReminders } from "./services/dashboardReminderUI.js";
-import { initRenewalAdminUI, renderRenewalForm, renderRenewalHistory } from "./services/renewalAdminUI.js";
+import { initRenewalAdminUI, renderRenewalForm, renderRenewalHistory } from "./services/renewalAdminUI.js?v=61";
 import { websiteAdminUI } from "./services/websiteAdminUI.js";
 import { openReportViewer, closeReportViewer } from "./services/reportAdminUI.js";
 import { initAnalyticsUI } from "./services/analyticsService.js";
@@ -24,12 +24,12 @@ import { initAnnouncementAdminUI } from "./services/announcementAdminUI.js";
 import { initAdminNotificationUI } from "./services/adminNotificationUI.js";
 import { initStaffAdminUI } from "./services/staffAdminUI.js";
 import { initTasksAdminUI } from "./services/tasksAdminUI.js";
-import { initSettingsAdminUI } from "./services/settingsAdminUI.js?v=60";
-import { openReceiptModal, downloadReceiptPDF } from "./services/receiptService.js?v=60";
+import { initSettingsAdminUI } from "./services/settingsAdminUI.js?v=61";
+import { openReceiptModal, downloadReceiptPDF } from "./services/receiptService.js?v=61";
 window.openReceiptModal = openReceiptModal;
 window.downloadReceiptPDF = downloadReceiptPDF;
 import "./services/translationService.js";
-import "./services/whatsappModalUI.js?v=60"; // Auto-injects modal styles and functions
+import "./services/whatsappModalUI.js?v=61"; // Auto-injects modal styles and functions
 
 // Expose the test function to the global window object
 window.runFirebaseTest = testFirebaseConnection;

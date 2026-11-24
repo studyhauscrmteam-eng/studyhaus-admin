@@ -165,9 +165,27 @@ export const renderRenewalForm = async (student, containerId, userRole) => {
       }
       .rn-select, .rn-input {
         width: 100%; padding: 10px 12px; border-radius: 9px;
-        border: 1px solid var(--border); background: var(--bg-card);
+        border: 1px solid var(--border); background-color: var(--bg-card);
         color: var(--text-primary); font-size: 14px; font-weight: 500;
-        outline: none; transition: border-color 0.15s;
+        outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+        box-sizing: border-box;
+      }
+      .rn-select {
+        appearance: none !important;
+        -webkit-appearance: none !important;
+        cursor: pointer;
+        padding-right: 2.2rem !important;
+        background-color: var(--bg-card) !important;
+        background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.75rem center !important;
+        background-size: 14px 14px !important;
+      }
+      body.light-mode .rn-select {
+        background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.75rem center !important;
+        background-size: 14px 14px !important;
       }
       .rn-select:focus, .rn-input:focus { border-color: var(--primary); }
       
